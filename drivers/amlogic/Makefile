@@ -63,14 +63,9 @@ endif
 obj-$(CONFIG_CARDREADER) += cardreader/
 obj-$(CONFIG_MMC_AML) +=mmc/
 
-ifneq ($(wildcard $(srctree)/$(src)/ump/Kbuild),)
-    # use sources existing within kernel source tree at drivers/amlogic/{ump,mali}
-    obj-$(CONFIG_UMP) += ump/
-    obj-$(CONFIG_MALI400) += mali/
-else
-    obj-$(CONFIG_UMP) += ../../../../../hardware/arm/gpu/ump/
-    obj-$(CONFIG_MALI400) += ../../../../../hardware/arm/gpu/mali/
-endif
+obj-$(CONFIG_UMP) += ump/
+obj-$(CONFIG_MALI400) += mali/
+
 
 obj-y += vfm/
 

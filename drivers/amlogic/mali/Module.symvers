@@ -1,0 +1,6 @@
+0x00000000	mali_PP1_int_cnt	/android/matricom/hardware/arm/gpu/mali/mali	EXPORT_SYMBOL
+0x00000000	mali_PP0_int_cnt	/android/matricom/hardware/arm/gpu/mali/mali	EXPORT_SYMBOL
+0x00000000	mali_set_user_setting	/android/matricom/hardware/arm/gpu/mali/mali	EXPORT_SYMBOL
+0x00000000	mali_pmu_powerdown	/android/matricom/hardware/arm/gpu/mali/mali	EXPORT_SYMBOL
+0x00000000	mali_get_user_setting	/android/matricom/hardware/arm/gpu/mali/mali	EXPORT_SYMBOL
+0x00000000	mali_pmu_powerup	/android/matricom/hardware/arm/gpu/mali/mali	EXPORT_SYMBOL
