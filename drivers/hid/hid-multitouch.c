@@ -96,6 +96,7 @@ struct mt_class {
 #define MT_CLS_3M				0x0101
 #define MT_CLS_CYPRESS				0x0102
 #define MT_CLS_EGALAX				0x0103
+#define MT_CLS_ACER				0x0104
 
 #define MT_DEFAULT_MAXCONTACT	10
 
@@ -606,6 +607,14 @@ static const struct hid_device_id mt_devices[] = {
 	{ .driver_data = MT_CLS_3M,
 		HID_USB_DEVICE(USB_VENDOR_ID_3M,
 			USB_DEVICE_ID_3M3266) },
+
+	/* Acer T232HL */
+	{ .driver_data = MT_CLS_ACER,
+		HID_USB_DEVICE(USB_VENDOR_ID_ACER_T232HL_ONE,
+			USB_DEVICE_ID_ACER_T232HL_ONE) },
+	{ .driver_data = MT_CLS_ACER,
+		HID_USB_DEVICE(USB_VENDOR_ID_ACER_T232HL_TWO,
+			USB_DEVICE_ID_ACER_T232HL_TWO) },
 
 	/* ActionStar panels */
 	{ .driver_data = MT_CLS_DEFAULT,
