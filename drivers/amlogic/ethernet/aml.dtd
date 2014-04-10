@@ -1,0 +1,12 @@
+#ifdef CONFIG_AM_ETHERNET
+//$$ DEVICE="meson-eth"
+//$$ L2 PROP_STR = "status"
+    meson-eth{
+		compatible = "amlogic,meson-eth";
+		dev_name = "meson-eth";
+		status = "okay";
+		ethbaseaddr = <0xfe0c0000>;
+		interruptnum = <40>;
+		savepowermode = <0>;
+	};
+#endif
