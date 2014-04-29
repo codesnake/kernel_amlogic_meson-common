@@ -11,7 +11,7 @@ CONFIG_CGROUP_SCHED=y
 # CONFIG_FAIR_GROUP_SCHED is not set
 CONFIG_RT_GROUP_SCHED=y
 CONFIG_BLK_DEV_INITRD=y
-CONFIG_INITRAMFS_SOURCE="../out/target/product/g35/recovery/root"
+#CONFIG_INITRAMFS_SOURCE="../out/target/product/g35/recovery/root"
 CONFIG_ASHMEM=y
 # CONFIG_AIO is not set
 CONFIG_EMBEDDED=y

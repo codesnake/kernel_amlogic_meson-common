@@ -1836,14 +1836,14 @@ static unsigned sys_pll_settings[][6] = {
 	{0x00235, M6_SYS_PLL_CNTL_2, M6_SYS_PLL_CNTL_3, M6_SYS_PLL_CNTL_4, 0},  // 1272
 	{0x00236, M6_SYS_PLL_CNTL_2, M6_SYS_PLL_CNTL_3, M6_SYS_PLL_CNTL_4, 0},  // 1296
 	{0x00237, M6_SYS_PLL_CNTL_2, M6_SYS_PLL_CNTL_3, M6_SYS_PLL_CNTL_4, 0},  // 1320
-	{0x00238, M6_SYS_PLL_CNTL_2, M6_SYS_PLL_CNTL_3, M6_SYS_PLL_CNTL_4, 0},  // 1344
-	{0x00239, M6_SYS_PLL_CNTL_2, M6_SYS_PLL_CNTL_3, M6_SYS_PLL_CNTL_4, 0},  // 1368
-	{0x0023a, M6_SYS_PLL_CNTL_2, M6_SYS_PLL_CNTL_3, M6_SYS_PLL_CNTL_4, 0},  // 1392
-	{0x0023b, M6_SYS_PLL_CNTL_2, M6_SYS_PLL_CNTL_3, M6_SYS_PLL_CNTL_4, 0},  // 1416
-	{0x0023c, M6_SYS_PLL_CNTL_2, M6_SYS_PLL_CNTL_3, M6_SYS_PLL_CNTL_4, 0},  // 1440
-	{0x0023d, M6_SYS_PLL_CNTL_2, M6_SYS_PLL_CNTL_3, M6_SYS_PLL_CNTL_4, 0},  // 1464
-	{0x0023e, M6_SYS_PLL_CNTL_2, M6_SYS_PLL_CNTL_3, M6_SYS_PLL_CNTL_4, 0},  // 1488
-	{0x0023f, M6_SYS_PLL_CNTL_2, M6_SYS_PLL_CNTL_3, M6_SYS_PLL_CNTL_4, 0},  // 1512
+	{0x00237, M6_SYS_PLL_CNTL_2, M6_SYS_PLL_CNTL_3, M6_SYS_PLL_CNTL_4, 0},  // 1344
+	{0x00237, M6_SYS_PLL_CNTL_2, M6_SYS_PLL_CNTL_3, M6_SYS_PLL_CNTL_4, 0},  // 1368
+	{0x00237, M6_SYS_PLL_CNTL_2, M6_SYS_PLL_CNTL_3, M6_SYS_PLL_CNTL_4, 0},  // 1392
+	{0x00237, M6_SYS_PLL_CNTL_2, M6_SYS_PLL_CNTL_3, M6_SYS_PLL_CNTL_4, 0},  // 1416
+	{0x00237, M6_SYS_PLL_CNTL_2, M6_SYS_PLL_CNTL_3, M6_SYS_PLL_CNTL_4, 0},  // 1440
+	{0x00237, M6_SYS_PLL_CNTL_2, M6_SYS_PLL_CNTL_3, M6_SYS_PLL_CNTL_4, 0},  // 1464
+	{0x00237, M6_SYS_PLL_CNTL_2, M6_SYS_PLL_CNTL_3, M6_SYS_PLL_CNTL_4, 0},  // 1488
+	{0x00237, M6_SYS_PLL_CNTL_2, M6_SYS_PLL_CNTL_3, M6_SYS_PLL_CNTL_4, 0},  // 1512
 };
 static unsigned setup_a9_clk_max=1368000000;
 static unsigned setup_a9_clk_min=48000000;
@@ -2817,14 +2817,14 @@ static int __init meson_clock_init(void)
     // Add clk usb0
     CLK_DEFINE(usb0,xtal,4,NULL,clk_msr_get,clk_enable_usb,clk_disable_usb,"usb0");
     meson_clk_register(&clk_usb0,&clk_xtal);
-    clk_usb0.clk_gate_reg_adr = P_USB_ADDR0;
-    clk_usb0.clk_gate_reg_mask = (1<<0);
+    //clk_usb0.clk_gate_reg_adr = P_USB_ADDR0;
+    //clk_usb0.clk_gate_reg_mask = (1<<0);
     
     // Add clk usb1
     CLK_DEFINE(usb1,xtal,5,NULL,clk_msr_get,clk_enable_usb,clk_disable_usb,"usb1");
     meson_clk_register(&clk_usb1,&clk_xtal);
-    clk_usb1.clk_gate_reg_adr = P_USB_ADDR8;
-    clk_usb1.clk_gate_reg_mask = (1<<0);
+    //clk_usb1.clk_gate_reg_adr = P_USB_ADDR8;
+    //clk_usb1.clk_gate_reg_mask = (1<<0);
 		
 	{
 		// Dump clocks

@@ -14,6 +14,7 @@ struct aml_audio_private_data {
 	bool mute_inv;
 	struct pinctrl *pin_ctl;
     int hp_last_state;
+    bool hp_det_status;
     unsigned int hp_val_h;
     unsigned int hp_val_l;
     unsigned int mic_val;

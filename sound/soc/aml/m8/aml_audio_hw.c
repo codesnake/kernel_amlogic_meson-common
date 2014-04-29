@@ -304,6 +304,30 @@ static void i2sin_fifo0_set_buf(u32 addr, u32 size,u32 i2s_mode,u32 i2s_sync)
 				  );
 
 }
+
+static void spdifin_reg_set(void)
+{
+	struct clk* clk_src = clk_get_sys("clk81", NULL);  // get clk81 clk_rate
+	u32 clk_rate = clk_get_rate(clk_src);
+	u32 spdif_clk_time = 54;   // 54us
+	u32 spdif_mode_14bit = ((clk_rate /500000 +1 )>>1)* spdif_clk_time; // the reg spdif_mode(0x2800)last 14 bit
+	
+	printk(KERN_INFO"spdifin_reg_set: clk_rate=%d\n", clk_rate);
+	u32 period_data = (clk_rate/64000 + 1 ) >> 1 ;   // sysclk/32(bit)/2(ch)/2(bmc)
+	
+	u32 period_32k = (period_data + (1<<4)) >> 5;     // 32k min period
+	u32 period_44k = (period_data / 22 + 1) >> 1;   // 44k min period
+	u32 period_48k = (period_data / 24 + 1) >> 1;   // 48k min period
+	u32 period_96k = (period_data / 48 + 1) >> 1;   // 96k min period
+	u32 period_192k = (period_data / 96 + 1) >> 1;  // 192k min period
+	
+		
+	WRITE_MPEG_REG(AUDIN_SPDIF_MODE, READ_MPEG_REG(AUDIN_SPDIF_MODE)&0x7fffc000|(spdif_mode_14bit<<0));
+	WRITE_MPEG_REG(AUDIN_SPDIF_FS_CLK_RLTN, (period_32k<<0)|(period_44k<<6)|(period_48k<<12) 
+											|(period_96k<<18)|(period_192k<<24));  //Spdif_fs_clk_rltn
+	
+}
+
 static void spdifin_fifo1_set_buf(u32 addr, u32 size)
 {
 	WRITE_MPEG_REG(AUDIN_SPDIF_MODE, READ_MPEG_REG(AUDIN_SPDIF_MODE)&0x7fffffff);
@@ -324,6 +348,10 @@ static void spdifin_fifo1_set_buf(u32 addr, u32 size)
 			                                	//|(1<<19)	//hold 0 enable
 								|(0<<AUDIN_FIFO1_UG)	// hold0 to aififo
 				  );
+
+	// according clk81 to set reg spdif_mode(0x2800) the last 14 bit and reg Spdif_fs_clk_rltn(0x2801)
+	spdifin_reg_set();
+
 	WRITE_MPEG_REG(AUDIN_FIFO1_CTRL1,0xc);
 }
 void audio_in_i2s_set_buf(u32 addr, u32 size,u32 i2s_mode, u32 i2s_sync)
@@ -1280,4 +1308,7 @@ unsigned audio_aiu_pg_enable(unsigned char enable)
         AUDIO_CLK_GATE_OFF(AIU_ICE958_AMCLK);   
         AUDIO_CLK_GATE_OFF(AIU_TOP_LEVEL);
 	}
+    return 0;
 }
+
+

@@ -125,6 +125,7 @@ static long efuse_unlocked_ioctl(struct file *file, unsigned int cmd, unsigned l
 {
 	switch (cmd)
 	{
+#ifndef CONFIG_MESON_TRUSTZONE			
 		case EFUSE_ENCRYPT_ENABLE:
 			aml_set_reg32_bits( P_EFUSE_CNTL4, CNTL4_ENCRYPT_ENABLE_ON,
 			CNTL4_ENCRYPT_ENABLE_BIT, CNTL4_ENCRYPT_ENABLE_SIZE);
@@ -139,7 +140,7 @@ static long efuse_unlocked_ioctl(struct file *file, unsigned int cmd, unsigned l
 			aml_set_reg32_bits( P_EFUSE_CNTL4, CNTL4_ENCRYPT_RESET_ON,
 			CNTL4_ENCRYPT_RESET_BIT, CNTL4_ENCRYPT_RESET_SIZE);
 			break;
-
+#endif
 		case EFUSE_INFO_GET:
 			{
 				efuseinfo_item_t *info = (efuseinfo_item_t*)arg;
@@ -532,6 +533,7 @@ int usid_min,usid_max;
 	 else
 	 	devp->platform_data = NULL;
 #endif
+#ifndef CONFIG_MESON_TRUSTZONE	 	
 	 /* disable efuse encryption */
 	 aml_set_reg32_bits( P_EFUSE_CNTL4, CNTL1_AUTO_WR_ENABLE_OFF,
 		 CNTL4_ENCRYPT_ENABLE_BIT, CNTL4_ENCRYPT_ENABLE_SIZE );
@@ -545,6 +547,7 @@ int usid_min,usid_max;
 	// clear power down bit
 	aml_set_reg32_bits(P_EFUSE_CNTL1, CNTL1_PD_ENABLE_OFF,
 			CNTL1_PD_ENABLE_BIT, CNTL1_PD_ENABLE_SIZE);
+#endif		
 #endif
 	 return 0;
 

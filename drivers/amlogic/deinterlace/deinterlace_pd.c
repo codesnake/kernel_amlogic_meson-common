@@ -38,19 +38,12 @@
 #include <linux/list.h>
 #include <asm/uaccess.h>
 #include <mach/am_regs.h>
-#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8
+
 #include <linux/amlogic/osd/osd_dev.h>
 #include <linux/amlogic/amports/vframe.h>
 #include <linux/amlogic/amports/vframe_provider.h>
 #include <linux/amlogic/amports/vframe_receiver.h>
 #include <linux/amlogic/amports/canvas.h>
-#else
-#include <linux/osd/osd_dev.h>
-#include <linux/amports/vframe.h>
-#include <linux/amports/vframe_provider.h>
-#include <linux/amports/vframe_receiver.h>
-#include <linux/amports/canvas.h>
-#endif
 #include "deinterlace.h"
 #include "deinterlace_module.h"
 /*for hisense patch*/
@@ -394,7 +387,7 @@ static int cur_pd32_status = 0;
 static unsigned int last_small_frame_diff_num =0;
 static unsigned int pattern_match_count = 0;
 static unsigned int pd32_diff_num_0_count = 0;
-static unsigned int pd22_num = 0 ;
+//static unsigned int pd22_num = 0 ;
 void reset_pd32_status(void)
 {
     cur_pd22_status = 0;
@@ -412,8 +405,8 @@ int detect_pd32(void)
     int i, ii;
     int  pd_pd1field = 0;
     pd_his_t* phis;
-    pd_his_t* phis_22;
-    unsigned pd22_pattern_len = pd22_match_num*4;
+    //pd_his_t* phis_22;
+    //unsigned pd22_pattern_len = pd22_match_num*4;
     unsigned pd32_pattern_len = pd32_match_num*5;
     static int cur_pd1field_status;
 /*

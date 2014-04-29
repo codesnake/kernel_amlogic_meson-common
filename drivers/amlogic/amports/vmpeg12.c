@@ -79,6 +79,7 @@ MODULE_AMLOG(LOG_LEVEL_ERROR, 0, LOG_LEVEL_DESC, LOG_DEFAULT_MASK_DESC);
 #define PICINFO_PROG        0x8000
 #define PICINFO_RPT_FIRST   0x4000
 #define PICINFO_TOP_FIRST   0x2000
+#define PICINFO_FRAME       0x1000
 
 #define SEQINFO_EXT_AVAILABLE   0x80000000
 #define SEQINFO_PROG            0x00010000
@@ -101,12 +102,20 @@ MODULE_AMLOG(LOG_LEVEL_ERROR, 0, LOG_LEVEL_DESC, LOG_DEFAULT_MASK_DESC);
 #define DEC_CONTROL_FLAG_FORCE_2500_544_576_INTERLACE  0x0010
 #define DEC_CONTROL_FLAG_FORCE_2500_480_576_INTERLACE  0x0020
 #define DEC_CONTROL_INTERNAL_MASK                      0x0fff
-#define DEC_CONTROL_FLAG_FORCE_3_TO_2_PULLDOWN_FORCE_PROG	0x1000
+#define DEC_CONTROL_FLAG_FORCE_SEQ_INTERLACE           0x1000
+
+#define INTERLACE_SEQ_ALWAYS
 
 #if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6  
 #define NV21
 #endif
 #define CCBUF_SIZE		5*1024
+
+enum {
+    FRAME_REPEAT_TOP,
+    FRAME_REPEAT_BOT,
+    FRAME_REPEAT_NONE
+};
 
 static vframe_t *vmpeg_vf_peek(void*);
 static vframe_t *vmpeg_vf_get(void*);
@@ -116,7 +125,7 @@ static int vmpeg_event_cb(int type, void *data, void *private_data);
 
 static void vmpeg12_prot_init(void);
 static void vmpeg12_local_init(void);
-
+static u32 frame_counter = 0;
 static const char vmpeg12_dec_id[] = "vmpeg12-dev";
 #define PROVIDER_NAME   "decoder.mpeg12"
 static const struct vframe_operations_s vmpeg_vf_provider =
@@ -151,6 +160,8 @@ static struct timer_list recycle_timer;
 static u32 stat;
 static u32 buf_start, buf_size, ccbuf_phyAddress;
 static DEFINE_SPINLOCK(lock);
+
+static u32 frame_rpt_state;
 
 /* for error handling */
 static s32 frame_force_skip_flag = 0;
@@ -290,8 +301,8 @@ static irqreturn_t vmpeg12_isr(int irq, void *dev_id)
             (frame_dur == 3840)) {
             frame_prog = 0;
         }
-        else if (dec_control & DEC_CONTROL_FLAG_FORCE_3_TO_2_PULLDOWN_FORCE_PROG) {
-            frame_prog |= PICINFO_PROG;
+        else if (dec_control & DEC_CONTROL_FLAG_FORCE_SEQ_INTERLACE) {
+            frame_prog = 0;
         }
 
         if (frame_prog & PICINFO_PROG) {
@@ -320,13 +331,6 @@ static irqreturn_t vmpeg12_isr(int irq, void *dev_id)
                 vf->duration_pulldown = 0; // no pull down
 
             } else {
-                if ((seqinfo & SEQINFO_EXT_AVAILABLE) && 
-                    ((seqinfo & SEQINFO_PROG) == 0) &&
-                    (info & PICINFO_RPT_FIRST)) {
-                    // avoid interlace/progressive mixing and post all progressive frames in this case
-                    dec_control |= DEC_CONTROL_FLAG_FORCE_3_TO_2_PULLDOWN_FORCE_PROG;
-                }
-
                 vf->duration_pulldown = (info & PICINFO_RPT_FIRST) ?
                                         vf->duration >> 1 : 0;
             }
@@ -349,13 +353,33 @@ static irqreturn_t vmpeg12_isr(int irq, void *dev_id)
 
         } else {
             u32 index = ((reg & 7) - 1) & 3;
+            int first_field_type = (info & PICINFO_TOP_FIRST) ?
+                    VIDTYPE_INTERLACE_TOP : VIDTYPE_INTERLACE_BOTTOM;
+
+#ifdef INTERLACE_SEQ_ALWAYS
+            // once an interlaced sequence exist, always force interlaced type
+            // to make DI easy.
+            dec_control |= DEC_CONTROL_FLAG_FORCE_SEQ_INTERLACE;
+#endif
+
+            if (info & PICINFO_FRAME) {
+                frame_rpt_state = (info & PICINFO_TOP_FIRST) ? FRAME_REPEAT_TOP : FRAME_REPEAT_BOT;
+            } else {
+                if (frame_rpt_state == FRAME_REPEAT_TOP) {
+                    first_field_type = VIDTYPE_INTERLACE_TOP;
+                } else if (frame_rpt_state == FRAME_REPEAT_BOT) {
+                    first_field_type = VIDTYPE_INTERLACE_BOTTOM;
+                }
+                frame_rpt_state = FRAME_REPEAT_NONE;
+            }
+
             vf = vfq_pop(&newframe_q);
 
             vfbuf_use[index] = 2;
-
             set_frame_info(vf);
+
             vf->index = index;
-            vf->type = (info & PICINFO_TOP_FIRST) ?
+            vf->type = (first_field_type == VIDTYPE_INTERLACE_TOP) ?
                        VIDTYPE_INTERLACE_TOP : VIDTYPE_INTERLACE_BOTTOM;
 #ifdef NV21
             vf->type |= VIDTYPE_VIU_NV21;
@@ -368,9 +392,11 @@ static irqreturn_t vmpeg12_isr(int irq, void *dev_id)
             vf->canvas0Addr = vf->canvas1Addr = index2canvas(index);
             vf->pts = (pts_valid) ? pts : 0;
 
-            if (error_skip(info, vf)) {
+            if (error_skip(info, vf)|| !frame_counter && !((info & PICINFO_TYPE_MASK) == PICINFO_TYPE_I)) {
                 vfq_push(&recycle_q, vf);
+
             } else {
+              //  frame_counter = 1;
                 vfq_push(&display_q, vf);
                 vf_notify_receiver(PROVIDER_NAME,VFRAME_EVENT_PROVIDER_VFRAME_READY,NULL);
             }
@@ -381,7 +407,7 @@ static irqreturn_t vmpeg12_isr(int irq, void *dev_id)
 
             vf->index = index;
 
-            vf->type = (info & PICINFO_TOP_FIRST) ?
+            vf->type = (first_field_type == VIDTYPE_INTERLACE_TOP) ?
                        VIDTYPE_INTERLACE_BOTTOM : VIDTYPE_INTERLACE_TOP;
 #ifdef NV21
             vf->type |= VIDTYPE_VIU_NV21;
@@ -393,8 +419,8 @@ static irqreturn_t vmpeg12_isr(int irq, void *dev_id)
             vf->orientation = 0 ;
             vf->canvas0Addr = vf->canvas1Addr = index2canvas(index);
             vf->pts = 0;
-
-            if (error_skip(info, vf)) {
+            if (error_skip(info, vf)|| !frame_counter&& !((info & PICINFO_TYPE_MASK) == PICINFO_TYPE_I)) {
+                frame_counter = 1;
                 vfq_push(&recycle_q, vf);
             } else {
                 vfq_push(&display_q, vf);
@@ -473,6 +499,7 @@ static void vmpeg12_ppmgr_reset(void)
 static void vmpeg_put_timer_func(unsigned long arg)
 {
     struct timer_list *timer = (struct timer_list *)arg;
+    int fatal_reset = 0;
 
     receviver_start_e state = RECEIVER_INACTIVE ;
     if (vf_get_receiver(PROVIDER_NAME)){
@@ -485,27 +512,36 @@ static void vmpeg_put_timer_func(unsigned long arg)
          state  = RECEIVER_INACTIVE ;
     }
 
-    if (((READ_VREG(MREG_WAIT_BUFFER) != 0) &&
+    if (READ_VREG(MREG_FATAL_ERROR) == 1) {
+        fatal_reset = 1;
+    }
+
+    if ((READ_VREG(MREG_WAIT_BUFFER) != 0) &&
          (vfq_empty(&recycle_q)) &&
          (vfq_empty(&display_q)) &&
-         (state == RECEIVER_INACTIVE)) ||
-        (READ_VREG(MREG_FATAL_ERROR) == 1)) {
-        printk("$$$$$$decoder is waiting for buffer or fatal reset.\n");
+         (state == RECEIVER_INACTIVE)) {
         if (++wait_buffer_counter > 4) {
-            amvdec_stop();
-
-#ifdef CONFIG_POST_PROCESS_MANAGER
-            vmpeg12_ppmgr_reset();
-#else
-            vf_light_unreg_provider(&vmpeg_vf_prov);
-            vmpeg12_local_init();
-            vf_reg_provider(&vmpeg_vf_prov);
-#endif
-            vmpeg12_prot_init();
-            amvdec_start();
+            fatal_reset = 1;
         }
+
     } else {
         wait_buffer_counter = 0;
+    }
+
+    if (fatal_reset && vfq_empty(&display_q)) {
+        printk("$$$$$$decoder is waiting for buffer or fatal reset.\n");
+
+        amvdec_stop();
+
+#ifdef CONFIG_POST_PROCESS_MANAGER
+        vmpeg12_ppmgr_reset();
+#else
+        vf_light_unreg_provider(&vmpeg_vf_prov);
+        vmpeg12_local_init();
+        vf_reg_provider(&vmpeg_vf_prov);
+#endif
+        vmpeg12_prot_init();
+        amvdec_start();
     }
 
     while (!vfq_empty(&recycle_q) && (READ_VREG(MREG_BUFFERIN) == 0)) {
@@ -628,20 +664,19 @@ static void vmpeg12_canvas_init(void)
 
 static void vmpeg12_prot_init(void)
 {
-#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8
+#if (MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6)
     int save_reg = READ_VREG(POWER_CTL_VLD);
 
     WRITE_VREG(DOS_SW_RESET0, (1<<7) | (1<<6) | (1<<4));
     WRITE_VREG(DOS_SW_RESET0, 0);
 
+#if (MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6TVD)
     WRITE_VREG(MDEC_SW_RESET, (1<<7));
     WRITE_VREG(MDEC_SW_RESET, 0);
+#endif
 
     WRITE_VREG(POWER_CTL_VLD, save_reg);
 
-#elif MESON_CPU_TYPE == MESON_CPU_TYPE_MESON6
-    WRITE_VREG(DOS_SW_RESET0, (1<<7) | (1<<6));
-    WRITE_VREG(DOS_SW_RESET0, 0);
 #else
     WRITE_MPEG_REG(RESET0_REGISTER, RESET_IQIDCT | RESET_MC);
 #endif
@@ -709,7 +744,7 @@ static void vmpeg12_local_init(void)
 
     frame_force_skip_flag = 0;
     wait_buffer_counter = 0;
-
+    frame_counter = 0;
     dec_control &= DEC_CONTROL_INTERNAL_MASK;
 }
 

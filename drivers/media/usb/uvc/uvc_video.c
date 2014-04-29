@@ -1871,7 +1871,7 @@ int uvc_video_enable(struct uvc_streaming *stream, int enable)
 		goto error_video;
 
 	if(stream->dev->udev->descriptor.idVendor == 0x046D && \
-			stream->dev->udev->descriptor.idProduct == 0x081B){
+			(stream->dev->udev->descriptor.idProduct == 0x081B||stream->dev->udev->descriptor.idProduct == 0x0825)){
 		if(first_probe){
 			first_probe = 0;
 			stream->frozen = 1;

@@ -389,8 +389,8 @@ static struct battery_parameter g17_battery = {
     .pmu_twi_id = 2,		//AXP20_I2CBUS
     .pmu_irq_id = INT_WATCHDOG,
     .pmu_twi_addr = AXP20_ADDR,
-    .pmu_battery_rdc = 99,////150,
-    .pmu_battery_cap = 3800,////8000,
+    .pmu_battery_rdc = 92,////150,
+    .pmu_battery_cap = 3900,////8000,
     .pmu_battery_technology = POWER_SUPPLY_TECHNOLOGY_LiFe,
     .pmu_battery_name = "PTI PL336078",
     .pmu_init_chgvol = 4200000,			//set initial charing target voltage
@@ -426,24 +426,24 @@ static struct battery_parameter g17_battery = {
     .pmu_pwrnoe_time = 2000,
     .pmu_intotp_en = 1,
     .pmu_pekon_time = 128,		//powerkey hold time for power on
-    .pmu_charge_efficiency = 91,
+    .pmu_charge_efficiency = 86,
     .pmu_bat_curve = {
         // ocv, charge, discharge
         {3132,      0,      0},
         {3273,      0,      0},
         {3414,      0,      0},
-        {3555,      2,      3},
+        {3555,      0,      0},
         {3625,      4,      4},
-        {3660,      5,      6},
-        {3696,      7,     10},
-        {3731,     11,     16},
-        {3766,     15,     31},
-        {3801,     23,     49},
-        {3836,     45,     57},
-        {3872,     54,     63},
-        {3942,     71,     74},
-        {4012,     81,     84},
-        {4083,     91,     93},
+        {3660,      7,      9},
+        {3696,     10,     14},
+        {3731,     14,     28},
+        {3766,     21,     44},
+        {3801,     46,     54},
+        {3836,     53,     60},
+        {3872,     62,     67},
+        {3942,     74,     77},
+        {4012,     84,     86},
+        {4083,     92,     94},
         {4153,    100,    100}
     },
 };
@@ -1947,7 +1947,7 @@ static aml_plat_cam_data_t video_ov5640_data = {
     .device_init= ov5640_v4l2_init,
     .device_uninit=ov5640_v4l2_uninit,
     .custom_init_script = NULL,
-    .flash_support = 1,
+    .flash_support = 0,
     .flash_ctrl = &ov5640_flashlight_data,
     //.device_probe = ov5640_v4l2_probe,
 };
@@ -2684,7 +2684,7 @@ static struct mtd_partition normal_partition_info[] = {
         .offset = 1152*SZ_1M+40*SZ_1M,
         .size = 512*SZ_1M,
     },
-#if 1 /*SKYWORTH sanford added on 20130710 for MTP*/
+#if 0 /*SKYWORTH sanford added on 20130710 for MTP*/
     {
         .name = "userdata",
         .offset = MTDPART_OFS_APPEND,
@@ -3420,7 +3420,6 @@ static  int __init setup_usb_devices(void)
 /* built-in usb wifi power ctrl, usb dongle must register NULL to power_ctrl! 1:power on  0:power off */
 #ifdef CONFIG_AM_WIFI
 #ifdef CONFIG_AM_WIFI_USB
-extern struct i2c_client *axp;
 static void usb_wifi_power(int is_power)
 {
 //    printk(KERN_INFO "usb_wifi_power %s\n", is_power ? "On" : "Off");
@@ -3439,8 +3438,9 @@ static struct wifi_power_platform_data wifi_plat_data = {
     .usb_set_power = usb_wifi_power,
 };
 #elif defined(CONFIG_AM_WIFI_SD_MMC)&&defined(CONFIG_CARDREADER)
-    wifi_plat_data = {
-
+static struct wifi_power_platform_data wifi_plat_data = {
+    .usb_set_power = NULL,
+   
 };
 #endif
 
@@ -4245,7 +4245,7 @@ static __init void mmc_lp_suspend_init(void)
 static __init void meson_init_machine(void)
 {
     //meson_cache_init();
-    mmc_lp_suspend_init();
+    //mmc_lp_suspend_init();
     setup_usb_devices();
     setup_devices_resource();
 #ifdef CONFIG_AM_WIFI

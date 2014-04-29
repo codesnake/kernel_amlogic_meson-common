@@ -13,7 +13,6 @@ choice
     default RN5T618 
 config RN5T618 
     bool "RN5T618 driver"
-    select AML_PMU_ALGORITHM_SUPPORT
     ---help---
         drivers for RN5T618 
 

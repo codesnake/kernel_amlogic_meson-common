@@ -258,7 +258,7 @@ typedef struct{
 	configure_t *configure;
 }camera_priv_data_t;
 
-int parse_config(char *path,configure_t *cf);
+int parse_config(const char *path,configure_t *cf);
 int generate_para(cam_parameter_t *para,para_index_t pindex,configure_t *cf);
 void free_para(cam_parameter_t *para);
 int update_fmt_para(int width,int height,cam_parameter_t *para,para_index_t *pindex,configure_t *cf);

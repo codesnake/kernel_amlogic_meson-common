@@ -10,6 +10,8 @@
 
 #include <linux/mmc/emmc_partitions.h>
 #include "emmc_key.h"
+#include "mmc_storage.h"
+
 
 #include <mach/am_regs.h>
 #include <mach/sd.h>
@@ -609,7 +611,7 @@ int aml_emmc_partition_ops (struct mmc_card *card, struct gendisk *disk)
     if (ret == 0) { // ok
         ret = add_emmc_partition(disk, pt_fmt);
     }
-
+	
     mmc_release_host(card->host);
 
 #ifdef CONFIG_SECURITYKEY
@@ -619,6 +621,12 @@ int aml_emmc_partition_ops (struct mmc_card *card, struct gendisk *disk)
         // emmc_key_read();
     }
 #endif
+#ifdef CONFIG_EMMC_SECURE_STORAGE
+	if (ret == 0) { // ok
+		ret = mmc_storage_probe(card);
+	}
+#endif
+
 
     // if(pt_fmt){ // should not free, because the card_read_proc() will access it
         // kfree(pt_fmt);

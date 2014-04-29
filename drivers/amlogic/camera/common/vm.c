@@ -39,6 +39,7 @@
 #include <linux/ctype.h>
 #include <linux/videodev2.h>
 #include <media/videobuf-core.h>
+#include <media/videobuf2-core.h>
 #include <media/videobuf-dma-contig.h>
 #include <media/videobuf-vmalloc.h>
 #include <media/videobuf-dma-sg.h>
@@ -52,7 +53,7 @@
 #include <linux/sizes.h>
 #include <linux/dma-mapping.h>
 #include <linux/of_fdt.h>
-
+#include <linux/dma-contiguous.h>
 
 /*class property info.*/
 #include "vmcls.h"
@@ -68,11 +69,6 @@ static unsigned amlvm_time_log_enable = 0;
 module_param(amlvm_time_log_enable, uint, 0644);
 MODULE_PARM_DESC(amlvm_time_log_enable, "enable vm time log when get frames");
 #endif
-
-#define MAGIC_SG_MEM 0x17890714
-#define MAGIC_DC_MEM 0x0733ac61
-#define MAGIC_VMAL_MEM 0x18221223
-#define MAGIC_RE_MEM 0x123039dc
 
 #define MAX_VF_POOL_SIZE 8
 
@@ -822,6 +818,7 @@ int get_canvas_index_res(int ext_canvas, int v4l2_format, int *depth, int width,
 	return canvas;
 }
 
+#if 0
 static void vm_dump_mem(char *path, void *phy_addr, vm_output_para_t* para)
 {
         struct file *filp = NULL;
@@ -846,6 +843,42 @@ static void vm_dump_mem(char *path, void *phy_addr, vm_output_para_t* para)
         filp_close(filp,NULL);
         set_fs(old_fs);
 }
+
+static void vm_x_mem(char *path, vm_output_para_t* para)
+{
+        struct file *filp = NULL;
+        loff_t pos = 0;
+        void * buf = NULL;
+        unsigned int size = para->bytesperline * para->height;
+        unsigned int canvas_index = para->index;
+        canvas_t cv;
+
+        mm_segment_t old_fs = get_fs();
+        set_fs(KERNEL_DS);
+        filp = filp_open(path, O_CREAT|O_RDWR|O_APPEND,0666);
+
+        if(IS_ERR(filp)){
+                printk(KERN_ERR"failed to create %s, error %p.\n", path, filp);
+                return;
+        }
+
+        for (; canvas_index !=0; canvas_index >>= 8)
+        {
+                canvas_read (canvas_index&0xff, &cv);
+                //printk("index=%lx,canvas.addr=%lx, w=%d, h=%d\n",
+                //        canvas_index, cv.addr, cv.width, cv.height);
+
+                buf = phys_to_virt(cv.addr);
+
+                size = cv.width * cv.height;
+
+                vfs_write(filp, buf, size, &pos);
+                vfs_fsync(filp, 0);
+        }
+        filp_close(filp,NULL);
+        set_fs(old_fs);
+}
+#endif
 
 int vm_fill_buffer(struct videobuf_buffer* vb , vm_output_para_t* para)
 {
@@ -919,6 +952,71 @@ int vm_fill_buffer(struct videobuf_buffer* vb , vm_output_para_t* para)
 	if(magic == MAGIC_RE_MEM)
 		vm_cache_flush((unsigned)para->vaddr, output_para.bytesperline*((para->height==0)?output_para.height:para->height));
 	return ret;
+}
+
+int vm_fill_buffer2(struct vb2_buffer *vb, vm_output_para_t *para)
+{
+        int depth=0;
+        int ret = -1;
+        int canvas_index = -1 ;
+        int v4l2_format = V4L2_PIX_FMT_YUV444;
+        int magic = 0;
+        if(!para)
+                return -1;
+
+        if(!task_running){
+                return ret;
+        }
+
+        v4l2_format = para->v4l2_format;
+        magic = para->v4l2_memory;
+        switch(magic){
+                case   MAGIC_DC_MEM:
+                        printk("not support\n");
+                        break;
+                case  MAGIC_RE_MEM:
+                        if(para->ext_canvas!=0)
+                                canvas_index = get_canvas_index_res(para->ext_canvas,
+                                                v4l2_format,
+                                                &depth,
+                                                para->width,
+                                                para->height,
+                                                (unsigned)para->vaddr);
+                        else
+                                canvas_index =  get_canvas_index_res(
+                                                (VM_RES_CANVAS_INDEX|(VM_RES_CANVAS_INDEX_U<<8)|(VM_RES_CANVAS_INDEX_V<<16)),
+                                                v4l2_format,&depth,
+                                                para->width,
+                                                para->height,
+                                                (unsigned)para->vaddr);
+                        break;
+                case  MAGIC_SG_MEM:
+                        printk("not support\n");
+                        break;
+                case  MAGIC_VMAL_MEM:
+                        printk("not support\n");
+                        break;
+                default:
+                        canvas_index = VM_DEPTH_16_CANVAS ;
+                        break;
+        }
+        output_para.width = para->width;
+        output_para.height = para->height;
+        output_para.bytesperline  = (output_para.width *depth)>>3;
+        output_para.index = canvas_index ;
+        output_para.v4l2_format  = para->v4l2_format ;
+        output_para.v4l2_memory  = para->v4l2_memory;
+        output_para.mirror = para->mirror;
+        output_para.zoom= para->zoom;
+        output_para.angle= para->angle;
+        output_para.vaddr = para->vaddr;
+        output_para.ext_canvas = (magic == MAGIC_RE_MEM)?para->ext_canvas:0;
+        up(&vb_start_sema);
+        ret = down_interruptible(&vb_done_sema);
+        if(magic == MAGIC_RE_MEM)
+                vm_cache_flush((unsigned)para->vaddr,
+                                output_para.bytesperline*((para->height==0)?output_para.height:para->height));
+        return ret;
 }
 
 /*for decoder input processing
@@ -1365,8 +1463,7 @@ static int vm_task(void *data) {
 	int ret = 0;
 	vframe_t *vf;
 	int src_canvas;
-	int timer_count = 0 ;
-	vm_device_t *devp = (vm_device_t*) data;
+	//vm_device_t *devp = (vm_device_t*) data;
 	struct sched_param param = {.sched_priority = MAX_RT_PRIO - 1 };
 	ge2d_context_t *context=create_ge2d_work_queue();
 	config_para_ex_t ge2d_config;
@@ -1409,10 +1506,12 @@ static int vm_task(void *data) {
 			/* step1 convert 422 format to other format.*/
 			if (is_need_ge2d_pre_process())
 				src_canvas = vm_ge2d_pre_process(vf,context,&ge2d_config);
+#if 0
 			if (devp->dump == 2) {
 				vm_dump_mem(devp->dump_path, (void *)output_para.vaddr, &output_para);
 				devp->dump = 0;
 			}
+#endif
 			local_vf_put(vf);
 #ifdef CONFIG_AMLCAP_LOG_TIME_USEFORFRAMES
 			do_gettimeofday(&end);
@@ -1843,6 +1942,64 @@ int uninit_vm_device(void)
 }
 
 
+#ifdef CONFIG_CMA
+void set_vm_buf_info(resource_size_t start,unsigned int size);
+void unset_vm_buf_info(void);
+
+static size_t vm_buf_size;
+static struct page *vm_pages;
+
+int vm_init_buf(size_t size)
+{
+
+    if(size ==0)
+        return -1;
+
+    if(vm_pages && vm_buf_size != 0)
+    {
+        pr_warn("%s cma space already in use, phys %p size %dk\n", __func__, page_to_phys(vm_pages), size/1024);
+        dma_release_from_contiguous(&vm_device.pdev->dev, vm_pages, vm_buf_size/PAGE_SIZE); 
+    }
+
+    vm_pages = dma_alloc_from_contiguous(&vm_device.pdev->dev, size/PAGE_SIZE, 0);
+    if(vm_pages)
+    {
+        dma_addr_t phys;
+        phys = page_to_phys(vm_pages);
+        pr_info("%s: allocating phys %p, size %dk\n", __func__, phys, size/1024);
+        set_vm_buf_info(phys, size);
+        vm_buf_size = size;
+        return 0;
+    }
+    else
+    {
+        pr_err("CMA failed to allocate dma buffer\n");
+        return -ENOMEM;
+    }
+}
+
+EXPORT_SYMBOL(vm_init_buf);
+
+void vm_deinit_buf()
+{
+    if(0 == vm_buf_size)
+    {
+        pr_warn("vm buf size equals 0\n");
+        return;
+    }
+    unset_vm_buf_info();
+    if(vm_pages)
+    {
+        dma_release_from_contiguous(&vm_device.pdev->dev, vm_pages, vm_buf_size/PAGE_SIZE); 
+        vm_buf_size = 0;
+    }
+}
+
+EXPORT_SYMBOL(vm_deinit_buf);
+#endif
+
+
+
 /*******************************************************************
  *
  * interface for Linux driver
@@ -1854,6 +2011,7 @@ MODULE_AMLOG(AMLOG_DEFAULT_LEVEL, 0xff, LOG_LEVEL_DESC, LOG_MASK_DESC);
 /* for driver. */
 static int vm_driver_probe(struct platform_device *pdev)
 {
+#ifndef CONFIG_CMA
 	char* buf_start;
 	unsigned int buf_size;
 	struct resource *mem;
@@ -1881,12 +2039,12 @@ static int vm_driver_probe(struct platform_device *pdev)
          buf_size = (unsigned int)get_reserve_block_size(idx);
      }
 #endif 
-    vm_device.pdev = pdev;
-
 	set_vm_buf_info(buf_start,buf_size);
+#endif
 
+
+	vm_device.pdev = pdev;
 	init_vm_device();
-
 	return 0;
 }
 
@@ -1907,7 +2065,6 @@ static const struct of_device_id amlogic_vm_dt_match[]={
 #define amlogic_vm_dt_match NULL
 #endif
 
-
 /* general interface for a linux driver .*/
 static struct platform_driver vm_drv = {
 	.probe  = vm_driver_probe,
@@ -1924,9 +2081,11 @@ vm_init_module(void)
 {
 	int err;
 
+
 	amlog_level(LOG_LEVEL_HIGH,"vm_init\n");
 	if ((err = platform_driver_register(&vm_drv))) {
 		printk(KERN_ERR "Failed to register vm driver (error=%d\n", err);
+		return err;
 	}
 
 	return err;

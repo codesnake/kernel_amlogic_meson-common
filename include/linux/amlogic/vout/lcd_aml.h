@@ -20,7 +20,7 @@
 #define _MACH_AML_LCD_H
 
 #include <plat/platform_data.h>
-#include <linux/amlogic/vout/lcdoutc.h>
+//#include <linux/amlogic/vout/lcdoutc.h>
 
 struct aml_lcd_platform {
 	plat_data_public_t public;

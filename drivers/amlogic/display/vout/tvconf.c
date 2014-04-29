@@ -39,7 +39,7 @@
 #include <linux/ctype.h>
 #include <linux/amlogic/vout/vinfo.h>
 #include <mach/am_regs.h>
-#include <mach/cpu.h>
+
 #if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8
 #include <mach/vpu.h>
 #endif
@@ -54,6 +54,7 @@
 #define PIN_MUX_REG_0	  0x202c
 #define P_PIN_MUX_REG_0  CBUS_REG_ADDR(PIN_MUX_REG_0)
 static    disp_module_info_t    *info;
+static void  parse_vdac_setting(char *para);
 
 SET_TV_CLASS_ATTR(vdac_setting,parse_vdac_setting)
 

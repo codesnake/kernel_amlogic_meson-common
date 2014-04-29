@@ -276,10 +276,10 @@ static int cpufreq_apply_cooling(struct cpufreq_cooling_device *cpufreq_device,
 	struct cpumask *mask = &cpufreq_device->allowed_cpus;
 	unsigned int cpu = cpumask_any(mask);
 
-	printk("cpufreq_device->cpufreq_state=%d,cooling_state=%d\n",cpufreq_device->cpufreq_state,cooling_state);
+	printk(KERN_DEBUG "cpufreq_device->cpufreq_state=%d,cooling_state=%ld\n",cpufreq_device->cpufreq_state,cooling_state);
 	/* Check if the old cooling action is same as new cooling action */
-	if (cpufreq_device->cpufreq_state == cooling_state)
-		return 0;
+	//if (cpufreq_device->cpufreq_state == cooling_state)
+		//return 0;
 
 	clip_freq = get_cpu_frequency(cpu, cooling_state);
 	if (!clip_freq)
@@ -321,13 +321,13 @@ static int cpufreq_thermal_notifier(struct notifier_block *nb,
 		max_freq = notify_device->cpufreq_val;
 	else
 		return 0;
-	printk("policy->max=%d,max_freq=%d\n",policy->max,max_freq);
+	printk(KERN_DEBUG "policy->max=%d,max_freq=%ld\n",policy->max,max_freq);
 	/* Never exceed user_policy.max */
 	if (max_freq > policy->user_policy.max)
 		max_freq = policy->user_policy.max;
 	if (policy->max != max_freq)
 		cpufreq_verify_within_limits(policy, 0, max_freq);
-	printk("policy->max=%d\n",policy->max);
+	printk(KERN_DEBUG "policy->max=%d\n",policy->max);
 	return 0;
 }
 
@@ -375,10 +375,8 @@ static int cpufreq_get_max_state(struct thermal_cooling_device *cdev,
 static int cpufreq_get_cur_state(struct thermal_cooling_device *cdev,
 				 unsigned long *state)
 {
-	struct cpufreq_cooling_device *cpufreq_device = cdev->devdata;
-
-	*state = cpufreq_device->cpufreq_state;
-
+	*state=cpufreq_cooling_get_level(0,cpufreq_quick_get_max(0));
+	printk(KERN_DEBUG "*state=%ld\n",*state);
 	return 0;
 }
 

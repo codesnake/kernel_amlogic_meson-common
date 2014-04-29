@@ -849,7 +849,7 @@
 #define RT5616_CH2_R_SEL_SL5			(0x5 << 8)
 #define RT5616_CH2_R_SEL_SL6			(0x6 << 8)
 #define RT5616_CH2_R_SEL_SL7			(0x7 << 8)
-#define RT5616_CH2_L_SEL_MASK			(0x7 << 4)
+//#define RT5616_CH2_L_SEL_MASK			(0x7 << 4)
 #define RT5616_CH4_L_SEL_SFT			4
 #define RT5616_CH4_L_SEL_SL0			(0x0 << 4)
 #define RT5616_CH4_L_SEL_SL1			(0x1 << 4)

@@ -30,7 +30,10 @@
 #include <mach/clock.h>
 #include <plat/regops.h>
 #include <plat/io.h>
-
+#include <plat/wakeup.h>
+#ifdef CONFIG_MESON_TRUSTZONE
+#include <mach/meson-secure.h>
+#endif
 
 #ifdef CONFIG_SUSPEND_WATCHDOG
 #include <mach/watchdog.h>
@@ -264,10 +267,14 @@ static void meson_pm_suspend(void)
 	if(det_pwr_key())//get pwr key and wakeup im
 	{
 		clr_pwr_key();
-		WRITE_AOBUS_REG(AO_RTI_STATUS_REG2, 0x1234abcd);
+		WRITE_AOBUS_REG(AO_RTI_STATUS_REG2, FLAG_WAKEUP_PWRKEY);
 	}else{
 #ifdef CONFIG_MESON_SUSPEND
+#ifdef CONFIG_MESON_TRUSTZONE
+		meson_suspend_firmware();
+#else
 		meson_power_suspend();
+#endif
 #else
 #if 0
 		//k101 power key
@@ -277,16 +284,14 @@ static void meson_pm_suspend(void)
 			udelay(1000);
 		}while((aml_read_reg32(P_AO_GPIO_I)&(1<<3)));
 #endif
-		WRITE_AOBUS_REG(AO_RTI_STATUS_REG2, 0x1234abcd);
 #endif
 	}
 	aml_set_reg32_mask(P_HHI_SYS_PLL_CNTL, (1 << 30)); //enable sys pll
 	printk(KERN_INFO "... wake up\n");
-	WRITE_AOBUS_REG(AO_RTI_STATUS_REG2, 0x1234abcd);
 #if 1
 	if (aml_read_reg32(P_AO_RTC_ADDR1) & (1<<12)) {
 	// Woke from alarm, not power button. Set flag to inform key_input driver.
-		WRITE_AOBUS_REG(AO_RTI_STATUS_REG2, 0x12345678);
+		WRITE_AOBUS_REG(AO_RTI_STATUS_REG2, FLAG_WAKEUP_ALARM);
 	}
 	// clear RTC interrupt
 	aml_write_reg32((P_AO_RTC_ADDR1),aml_read_reg32(P_AO_RTC_ADDR1)|(0xf000));

@@ -19,6 +19,7 @@
 #include <linux/spinlock.h>
 #include <mach/am_regs.h>
 #include <mach/power_gate.h>
+#include <mach/mod_gate.h>
 #include <plat/io.h>
 #include <linux/ctype.h>
 #include <linux/amlogic/amports/ptsserv.h>
@@ -34,6 +35,7 @@
 #include <linux/poll.h>
 #include <linux/of.h>
 #include <linux/of_fdt.h>
+#include <linux/dma-contiguous.h>
 
 #define ENC_CANVAS_OFFSET  AMVENC_CANVAS_INDEX
 
@@ -275,6 +277,10 @@ static void avc_canvas_init(void);
 
 void amvenc_reset(void);
 
+#ifdef CONFIG_AM_JPEG_ENCODER
+extern bool jpegenc_on(void);
+#endif
+
 /*
 static DEFINE_SPINLOCK(lock);
 
@@ -498,7 +504,6 @@ static void mfdin_basic (unsigned input, unsigned char iformat, unsigned char of
 
     WRITE_HREG(HCODEC_MFDIN_REG8_DMBL,(picsize_x << 12) |(picsize_y << 0));
     WRITE_HREG(HCODEC_MFDIN_REG9_ENDN,(7<<0)| (6<<3)|( 5<<6)|(4<<9) |(3<<12) |(2<<15) |( 1<<18) |(0<<21));
-    //WRITE_HREG(HCODEC_MFDIN_REG6_DCFG, 0x1ff);
 }
 
 static int  set_input_format (amvenc_mem_type type, amvenc_frame_fmt fmt, unsigned input, unsigned offset, unsigned size, unsigned char need_flush)
@@ -527,8 +532,10 @@ static int  set_input_format (amvenc_mem_type type, amvenc_frame_fmt fmt, unsign
 
         if(fmt == FMT_YUV422_SINGLE){
             iformat = 10;
-        }else if(fmt == FMT_YUV444_SINGLE){
+        }else if((fmt == FMT_YUV444_SINGLE)||(fmt== FMT_RGB888)){
             iformat = 1;
+            if(fmt == FMT_RGB888)
+                r2y_en = 1;
             canvas_w =  picsize_x*3;
             canvas_w =  ((canvas_w+31)>>5)<<5;
             canvas_config(ENC_CANVAS_OFFSET+6,
@@ -564,7 +571,9 @@ static int  set_input_format (amvenc_mem_type type, amvenc_frame_fmt fmt, unsign
                 canvas_w/2 , picsize_y/2,
                 CANVAS_ADDR_NOWRAP, CANVAS_BLKMODE_LINEAR);
             input = ((ENC_CANVAS_OFFSET+8)<<16)|((ENC_CANVAS_OFFSET+7)<<8)|(ENC_CANVAS_OFFSET+6);
-        }else if(fmt == FMT_YUV444_PLANE){
+        }else if((fmt == FMT_YUV444_PLANE)||(fmt == FMT_RGB888_PLANE)){
+            if(fmt == FMT_RGB888_PLANE)
+                r2y_en = 1;
             iformat = 5;
             canvas_w =  ((encoder_width+31)>>5)<<5;
             canvas_config(ENC_CANVAS_OFFSET+6,
@@ -580,10 +589,6 @@ static int  set_input_format (amvenc_mem_type type, amvenc_frame_fmt fmt, unsign
                 canvas_w, picsize_y,
                 CANVAS_ADDR_NOWRAP, CANVAS_BLKMODE_LINEAR);
             input = ((ENC_CANVAS_OFFSET+8)<<16)|((ENC_CANVAS_OFFSET+7)<<8)|(ENC_CANVAS_OFFSET+6);
-        }else if(fmt == FMT_RGB888){
-            iformat = 8;
-        }else if(fmt == FMT_RGB565){
-            iformat = 9;
         }else if(fmt == FMT_RGBA8888){
             iformat = 12;
         }
@@ -601,10 +606,12 @@ static int  set_input_format (amvenc_mem_type type, amvenc_frame_fmt fmt, unsign
             input = input&0xffff;
         }else if(fmt == FMT_YUV420){
             iformat = 4;
-            input = input&0xfffff;
-        }else if(fmt == FMT_YUV444_PLANE){
+            input = input&0xffffff;
+        }else if((fmt == FMT_YUV444_PLANE)||(fmt == FMT_RGB888_PLANE)){
+            if(fmt == FMT_RGB888_PLANE)
+                r2y_en = 1;
             iformat = 5;
-            input = input&0xfffff;
+            input = input&0xffffff;
         }else{
             ret = -1;
         }
@@ -1047,7 +1054,7 @@ s32 amvenc_loadmc(const u32 *p)
     return ret;
 }
 
-#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8
+#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6TVD
 const u32 fix_mc[] __attribute__ ((aligned (8))) = {
     0x0809c05a, 0x06696000, 0x0c780000, 0x00000000
 };
@@ -1094,6 +1101,21 @@ void amvenc_dos_top_reg_fix(void)
 
     spin_unlock_irqrestore(&lock, flags);
 }
+
+bool amvenc_avc_on(void)
+{
+    bool hcodec_on;
+    unsigned long flags;
+
+    spin_lock_irqsave(&lock, flags);
+
+    hcodec_on = vdec_on(VDEC_HCODEC);
+    hcodec_on |=(encode_opened>0);
+
+    spin_unlock_irqrestore(&lock, flags);
+    return hcodec_on;
+}
+
 #endif
 
 #if MESON_CPU_TYPE == MESON_CPU_TYPE_MESON6TV
@@ -1116,11 +1138,13 @@ static s32 avc_poweron(void)
 	data32 = 0;
 	enable_hcoder_ddr_access();
 
-#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8
-	CLK_GATE_ON(DOS);
+#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6TVD
+	//CLK_GATE_ON(DOS);
+	switch_mod_gate_by_name("vdec", 1);
 
 	spin_lock_irqsave(&lock, flags);
 
+#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8
 	data32 = READ_AOREG(AO_RTI_PWR_CNTL_REG0);
 	data32 = data32 & (~(0x18));
 	WRITE_AOREG(AO_RTI_PWR_CNTL_REG0, data32);
@@ -1131,12 +1155,14 @@ static s32 avc_poweron(void)
 	WRITE_AOREG(AO_RTI_GEN_PWR_SLEEP0, data32);
 	udelay(10);
 #endif
+#endif
 
 	WRITE_VREG(DOS_SW_RESET1, 0xffffffff);
 	WRITE_VREG(DOS_SW_RESET1, 0);
 
 	// Enable Dos internal clock gating
 	hvdec_clock_enable();
+#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6TVD
 #if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8
 	//Powerup HCODEC memories
 	WRITE_VREG(DOS_MEM_PD_HCODEC, 0x0);
@@ -1146,7 +1172,7 @@ static s32 avc_poweron(void)
 	data32 = data32 & (~(0x30));
 	WRITE_AOREG(AO_RTI_GEN_PWR_ISO0, data32);
 	udelay(10);
-
+#endif
 	// Disable auto-clock gate
 	data32 = READ_VREG(DOS_GEN_CTRL0);
 	data32 = data32 | 0x1;
@@ -1165,24 +1191,29 @@ static s32 avc_poweron(void)
 
 static s32 avc_poweroff(void)
 {
-#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8
+#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6TVD
 	unsigned long flags;
 
 	spin_lock_irqsave(&lock, flags);
 
+#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8
 	// enable HCODEC isolation
 	WRITE_AOREG(AO_RTI_GEN_PWR_ISO0, READ_AOREG(AO_RTI_GEN_PWR_ISO0) | 0x30);
 	// power off HCODEC memories
 	WRITE_VREG(DOS_MEM_PD_HCODEC, 0xffffffffUL);
+#endif
 	// disable HCODEC clock
 	hvdec_clock_disable();
+
+#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8
 	// HCODEC power off
 	WRITE_AOREG(AO_RTI_GEN_PWR_SLEEP0, READ_AOREG(AO_RTI_GEN_PWR_SLEEP0) | 0x3);
-
+#endif
 	spin_unlock_irqrestore(&lock, flags);
 
 	// release DOS clk81 clock gating
-	CLK_GATE_OFF(DOS);
+	//CLK_GATE_OFF(DOS);
+	switch_mod_gate_by_name("vdec", 0);
 #else
 	hvdec_clock_disable();
 #endif
@@ -1289,14 +1320,60 @@ void amvenc_avc_stop(void)
 	avc_poweroff();
 	debug_level(1,"amvenc_avc_stop\n");
 }
+
+#ifdef CONFIG_CMA
+static struct platform_device *this_pdev;
+static struct page *venc_pages;
+#endif
+
 static int amvenc_avc_open(struct inode *inode, struct file *file)
 {
     int r = 0;
     debug_level(1,"avc open\n");
+#ifdef CONFIG_AM_JPEG_ENCODER
+    if(jpegenc_on() == true){
+        debug_level(1,"hcodec in use for JPEG Encode now.\n");
+        return -EBUSY;
+    }
+#endif
     if(encode_opened>0){
         amlog_level(LOG_LEVEL_ERROR, "amvenc_avc open busy.\n");
         return -EBUSY;
     }
+
+#ifdef CONFIG_CMA
+    venc_pages = dma_alloc_from_contiguous(&this_pdev->dev, (15 * SZ_1M) >> PAGE_SHIFT, 0);
+    if(venc_pages)
+    {
+        gAmvencbuff.buf_start = page_to_phys(venc_pages);
+        gAmvencbuff.buf_size = 15 * SZ_1M;
+        pr_info("%s: allocating phys %p, size %dk\n", __func__, gAmvencbuff.buf_start, gAmvencbuff.buf_size >> 10);
+    }
+    else
+    {
+        pr_err("CMA failed to allocate dma buffer for %s\n", this_pdev->name);
+        return -ENOMEM;
+    }
+
+    if(gAmvencbuff.buf_size>=amvenc_buffspec[AMVENC_BUFFER_LEVEL_1080P].min_buffsize){
+        gAmvencbuff.cur_buf_lev = AMVENC_BUFFER_LEVEL_1080P;
+        gAmvencbuff.bufspec = (BuffInfo_t*)&amvenc_buffspec[AMVENC_BUFFER_LEVEL_1080P];
+    }else if(gAmvencbuff.buf_size>=amvenc_buffspec[AMVENC_BUFFER_LEVEL_720P].min_buffsize){
+        gAmvencbuff.cur_buf_lev = AMVENC_BUFFER_LEVEL_720P;
+        gAmvencbuff.bufspec= (BuffInfo_t*)&amvenc_buffspec[AMVENC_BUFFER_LEVEL_720P];
+    }else if(gAmvencbuff.buf_size>=amvenc_buffspec[AMVENC_BUFFER_LEVEL_480P].min_buffsize){
+        gAmvencbuff.cur_buf_lev = AMVENC_BUFFER_LEVEL_480P;
+        gAmvencbuff.bufspec= (BuffInfo_t*)&amvenc_buffspec[AMVENC_BUFFER_LEVEL_480P];
+    }else{
+        gAmvencbuff.buf_start = 0;
+        gAmvencbuff.buf_size = 0;
+        amlog_level(LOG_LEVEL_ERROR, "amvenc_avc memory resource too small, size is %d.\n",gAmvencbuff.buf_size);
+        return -EFAULT;
+    }
+    debug_level(1,"amvenc_avc  memory config sucess, buff size is 0x%x, level is %s\n",gAmvencbuff.buf_size,(gAmvencbuff.cur_buf_lev == 0)?"480P":(gAmvencbuff.cur_buf_lev == 1)?"720P":"1080P");
+
+#endif
+
     init_waitqueue_head(&avc_wait);
     atomic_set(&avc_ready, 0);
     tasklet_init(&encode_tasklet, encode_isr_tasklet, 0);
@@ -1314,6 +1391,15 @@ static int amvenc_avc_release(struct inode *inode, struct file *file)
     }
     if(encode_opened>0)
         encode_opened--;
+
+#ifdef CONFIG_CMA
+    if(venc_pages)
+    {
+        dma_release_from_contiguous(&this_pdev->dev, venc_pages, (15 * SZ_1M)>>PAGE_SHIFT); 
+        venc_pages = 0;
+    }
+#endif
+
     debug_level(1,"avc release\n");
     return 0;
 }
@@ -1552,21 +1638,17 @@ static int amvenc_avc_probe(struct platform_device *pdev)
 
     amlog_level(LOG_LEVEL_INFO, "amvenc_avc probe start.\n");
 
-#if 0
-    if (!(mem = platform_get_resource(pdev, IORESOURCE_MEM, 0))) {
-        amlog_level(LOG_LEVEL_ERROR, "amvenc_avc memory resource undefined.\n");
-        return -EFAULT;
-    }
+#ifdef CONFIG_CMA
+    this_pdev = pdev;
 #else
     mem = &memobj;
     idx = find_reserve_block(pdev->dev.of_node->name,0);
     if(idx < 0){
-	 amlog_level(LOG_LEVEL_ERROR, "amvenc_avc memory resource undefined.\n");
+		amlog_level(LOG_LEVEL_ERROR, "amvenc_avc memory resource undefined.\n");
         return -EFAULT;
     }
     mem->start = (phys_addr_t)get_reserve_block_addr(idx);
     mem->end = mem->start+ (phys_addr_t)get_reserve_block_size(idx)-1;
-#endif
     gAmvencbuff.buf_start = mem->start;
     gAmvencbuff.buf_size = mem->end - mem->start + 1;
 
@@ -1586,6 +1668,9 @@ static int amvenc_avc_probe(struct platform_device *pdev)
         return -EFAULT;
     }
     debug_level(1,"amvenc_avc  memory config sucess, buff size is 0x%x, level is %s\n",gAmvencbuff.buf_size,(gAmvencbuff.cur_buf_lev == 0)?"480P":(gAmvencbuff.cur_buf_lev == 1)?"720P":"1080P");
+
+#endif
+
     init_avc_device();
     amlog_level(LOG_LEVEL_INFO, "amvenc_avc probe end.\n");
     return 0;

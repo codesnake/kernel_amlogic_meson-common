@@ -1,29 +1,35 @@
 #ifndef _DI_H
 #define _DI_H
-
-#ifndef MESON_CPU_TYPE_MESON8
-#define MESON_CPU_TYPE_MESON8 (MESON_CPU_TYPE_MESON6TV+1)
+/*
+#if MESON_CPU_TYPE == MESON_CPU_TYPE_MESON6
+#define DI_VERSION_OLD        0
+#if MESON_CPU_TYPE == MESON_CPU_TYPE_MESON6TV
+#define DI_VERSION_NEW1       1
+#elif (MESON_CPU_TYPE > MESON_CPU_TYPE_MESON6TV) && (MESON_CPU_TYPE < MESON_CPU_TYPE_MESON6TVD) 
+#define DI_VERSION_NEW2       2
+#elif (MESON_CPU_TYPE == MESON_CPU_TYPE_MESON6TVD) || (MESON_CPU_TYPE == MESON_CPU_TYPE_MESON8)
+#define DI_VERSION_NEW3       3
 #endif
-
+*/
 #undef USE_LIST
 #if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6
 #define NEW_KEEP_LAST_FRAME
 #endif
 
-#if MESON_CPU_TYPE == MESON_CPU_TYPE_MESON6TV
+#if (MESON_CPU_TYPE==MESON_CPU_TYPE_MESON6TV)||(MESON_CPU_TYPE==MESON_CPU_TYPE_MESON6TVD)
 #ifndef CONFIG_POST_PROCESS_MANAGER_3D_PROCESS
 #define CONFIG_POST_PROCESS_MANAGER_3D_PROCESS
 #endif
 #define D2D3_SUPPORT
-#define NEW_DI
-#ifdef CONFIG_POST_PROCESS_MANAGER_3D_PROCESS
 #define DET3D
 #endif
-#endif
 
-#if MESON_CPU_TYPE > MESON_CPU_TYPE_MESON6TV
-#define NEW_DI
-#define CONFIG_MESON_M6C_ENHANCEMENT
+#if (MESON_CPU_TYPE==MESON_CPU_TYPE_MESON6TV)
+#define NEW_DI_V1 //from m6tvc
+#define NEW_DI_TV
+#elif (MESON_CPU_TYPE==MESON_CPU_TYPE_MESON6TVD)||(MESON_CPU_TYPE==MESON_CPU_TYPE_MESON8)
+#define NEW_DI_V1 //from m6tvc
+#define NEW_DI_V2 //from m6tvd(noise meter bug fix,improvement for 2:2 pull down)
 #endif
 
 #ifndef CONFIG_VSYNC_RDMA
@@ -149,7 +155,7 @@ typedef struct di_buf_s{
     int nr_canvas_idx;
     unsigned int mtn_adr;
     int mtn_canvas_idx;
-#ifdef NEW_DI    
+#ifdef NEW_DI_V1
     unsigned int cnt_adr;
     int cnt_canvas_idx;
 #endif    
@@ -174,7 +180,7 @@ extern uint di_mtn_1_ctrl1;
 extern uint ei_ctrl0;
 extern uint ei_ctrl1;
 extern uint ei_ctrl2;
-#ifdef NEW_DI
+#ifdef NEW_DI_V1
 extern uint ei_ctrl3;
 #endif
 #ifdef DET3D
@@ -303,7 +309,7 @@ void enable_di_pre_aml (
    		DI_MIF_t        *di_chan2_mif,
    		DI_SIM_MIF_t    *di_nrwr_mif,
    		DI_SIM_MIF_t    *di_mtnwr_mif,
-#ifdef NEW_DI
+#ifdef NEW_DI_V1
    DI_SIM_MIF_t    *di_contp2rd_mif,
    DI_SIM_MIF_t    *di_contprd_mif,
    DI_SIM_MIF_t    *di_contwr_mif,

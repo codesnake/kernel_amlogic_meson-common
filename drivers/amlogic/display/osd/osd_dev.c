@@ -136,6 +136,11 @@ void osddev_get_free_scale_enable(u32 index, u32 *free_scale_enable)
 	osd_get_free_scale_enable_hw(index, free_scale_enable);
 }
 
+void osddev_4k2k_fb_mode(u32 fb_for_4k2k)
+{
+	osd_4k2k_fb_mode_hw(fb_for_4k2k);
+}
+
 void osddev_free_scale_mode(u32 index ,u32 freescale_mode)
 {
 	osd_free_scale_mode_hw(index, freescale_mode);

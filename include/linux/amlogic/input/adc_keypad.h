@@ -10,9 +10,6 @@ struct adc_key{
 };
 
 struct adc_kp_platform_data{
-	int (*led_control)(void *param);
-	int led_control_param_num;
-	
 	struct adc_key *key;
 	int key_num;
 	int repeat_delay;

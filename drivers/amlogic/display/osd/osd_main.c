@@ -1421,29 +1421,29 @@ static int __init osd_info_setup(char *str)
 __setup("osd_reverse=", osd_info_setup);
 
 static struct device_attribute osd_attrs[] = {
-	__ATTR(scale, S_IRUGO|S_IWUSR, show_scale, store_scale),
-	__ATTR(order, S_IRUGO|S_IWUSR, show_order, store_order),
+	__ATTR(scale, S_IRUGO|S_IWUSR|S_IWGRP, show_scale, store_scale),
+	__ATTR(order, S_IRUGO|S_IWUSR|S_IWGRP, show_order, store_order),
 	__ATTR(enable_3d, S_IRUGO|S_IWUSR, show_enable_3d, store_enable_3d),
 	__ATTR(preblend_enable,S_IRUGO|S_IWUSR, show_preblend_enable, store_preblend_enable),
-	__ATTR(free_scale, S_IRUGO|S_IWUSR, show_free_scale, store_free_scale),
+	__ATTR(free_scale, S_IRUGO|S_IWUSR|S_IWGRP, show_free_scale, store_free_scale),
 	__ATTR(scale_axis, S_IRUGO|S_IWUSR, show_scale_axis, store_scale_axis),
-	__ATTR(scale_width, S_IRUGO|S_IWUSR, show_scale_width, store_scale_width),
-	__ATTR(scale_height, S_IRUGO|S_IWUSR, show_scale_height, store_scale_height),
+	__ATTR(scale_width, S_IRUGO|S_IWUSR|S_IWGRP, show_scale_width, store_scale_width),
+	__ATTR(scale_height, S_IRUGO|S_IWUSR|S_IWGRP, show_scale_height, store_scale_height),
     __ATTR(color_key, S_IRUGO|S_IWUSR, show_color_key, store_color_key),
-    __ATTR(enable_key, S_IRUGO|S_IWUSR, show_enable_key, store_enable_key),
-    __ATTR(enable_key_onhold, S_IRUGO|S_IWUSR, show_enable_key_onhold, store_enable_key_onhold),
+    __ATTR(enable_key, S_IRUGO|S_IWUSR|S_IWGRP, show_enable_key, store_enable_key),
+    __ATTR(enable_key_onhold, S_IRUGO|S_IWUSR|S_IWGRP, show_enable_key_onhold, store_enable_key_onhold),
 	__ATTR(block_windows, S_IRUGO|S_IWUSR, show_block_windows, store_block_windows),
-	__ATTR(block_mode, S_IRUGO|S_IWUSR, show_block_mode, store_block_mode),
-	__ATTR(free_scale_axis, S_IRUGO|S_IWUSR, show_free_scale_axis, store_free_scale_axis),
-	__ATTR(request2XScale, S_IRUGO|S_IWUSR, show_request_2xscale, store__request_2xscale),
+	__ATTR(block_mode, S_IRUGO|S_IWUSR|S_IWGRP, show_block_mode, store_block_mode),
+	__ATTR(free_scale_axis, S_IRUGO|S_IWUSR|S_IWGRP, show_free_scale_axis, store_free_scale_axis),
+	__ATTR(request2XScale, S_IRUGO|S_IWUSR|S_IWGRP, show_request_2xscale, store__request_2xscale),
 	__ATTR(osd_info_msg, S_IRUGO|S_IWUSR, NULL, store_osd_info),
 	__ATTR(video_hole, S_IRUGO|S_IWUSR, show_video_hole, store__video_hole),
-	__ATTR(window_axis, S_IRUGO|S_IWUSR, show_window_axis, store_window_axis),
-	__ATTR(freescale_mode, S_IRUGO|S_IWUSR, show_freescale_mode, store_freescale_mode),
+	__ATTR(window_axis, S_IRUGO|S_IWUSR|S_IWGRP, show_window_axis, store_window_axis),
+	__ATTR(freescale_mode, S_IRUGO|S_IWUSR|S_IWGRP, show_freescale_mode, store_freescale_mode),
 	__ATTR(flush_rate, S_IRUGO|S_IWUSR, show_flush_rate, NULL),
-	__ATTR(prot_on, S_IRUGO|S_IWUSR, show_rotate_on, store_rotate_on),
-	__ATTR(prot_angle, S_IRUGO|S_IWUSR, show_rotate_angle, store_rotate_angle),
-	__ATTR(prot_canvas, S_IRUGO|S_IWUSR, show_prot_canvas, store_prot_canvas),
+	__ATTR(prot_on, S_IRUGO|S_IWUSR|S_IWGRP, show_rotate_on, store_rotate_on),
+	__ATTR(prot_angle, S_IRUGO|S_IWUSR|S_IWGRP, show_rotate_angle, store_rotate_angle),
+	__ATTR(prot_canvas, S_IRUGO|S_IWUSR|S_IWGRP, show_prot_canvas, store_prot_canvas),
 	__ATTR(osd_reverse, S_IRUGO|S_IWUSR, show_osd_reverse, store_osd_reverse),
 	__ATTR(prot_state, S_IRUGO|S_IWUSR, show_prot_state, NULL),
 	__ATTR(osd_antiflicker, S_IRUGO|S_IWUSR, show_antiflicker, store_antiflicker),
@@ -1515,6 +1515,9 @@ static struct resource memobj;
 static int 
 osd_probe(struct platform_device *pdev)
 {
+#ifdef CONFIG_AM_HDMI_ONLY
+	extern int read_hpd_gpio(void);
+#endif
 	int r;
 	int ret;
     struct fb_info *fbi=NULL;
@@ -1556,6 +1559,12 @@ osd_probe(struct platform_device *pdev)
 			prop_idx = of_read_ulong(prop, 1);
 		}
 		osddev_free_scale_mode(OSD0, prop_idx);
+
+		prop = of_get_property(pdev->dev.of_node, "4k2k_fb", NULL);
+		if(prop){
+			prop_idx = of_read_ulong(prop, 1);
+		}
+		osddev_4k2k_fb_mode(prop_idx);
 	}
    	if (NULL==init_logo_obj )
     	{
@@ -1568,7 +1577,6 @@ osd_probe(struct platform_device *pdev)
 				}else{
 					DisableVideoLayer();
 					#ifdef CONFIG_AM_HDMI_ONLY
-						extern int read_hpd_gpio(void);
 						hpd_state = read_hpd_gpio();
 
 						cvbs_mode = get_current_cvbs_vmode();

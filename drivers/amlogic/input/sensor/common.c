@@ -173,6 +173,7 @@ int dt_sensor_setup_i2c_dev(struct device_node *node,  struct i2c_board_info *i2
             r = of_property_read_u32(node, "irq",&irq);
             if(r < 0 || irq <= 0)
             {
+                *gpio = -1; 
                 i2c_info->irq = 0;
             }
             else

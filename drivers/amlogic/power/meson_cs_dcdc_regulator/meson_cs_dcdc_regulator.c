@@ -588,15 +588,25 @@ module_exit(meson_cs_cleanup);
 
 #ifdef CONFIG_AML_DVFS
 #include <linux/amlogic/aml_dvfs.h>
+#define PWM_A   0
+#define PWM_B   1
+#define PWM_C   2
+#define PWM_D   3
 
 struct cs_voltage {
     int pwm_value;
     int voltage;
 };
-
 static struct cs_voltage *g_table = NULL;
 static int g_table_cnt = 0;
 static int use_pwm = 0;
+static int pwm_ctrl = PWM_C; 
+static unsigned long pmw_base[] = {
+    P_PWM_PWM_A,    
+    P_PWM_PWM_B,    
+    P_PWM_PWM_C,    
+    P_PWM_PWM_D
+};
 
 static int dvfs_get_voltage_step(void)
 {
@@ -604,7 +614,7 @@ static int dvfs_get_voltage_step(void)
     unsigned int reg_val;
 
     if (use_pwm) {
-        reg_val = aml_read_reg32(P_PWM_PWM_C); 
+        reg_val = aml_read_reg32(pmw_base[pwm_ctrl]); 
         for (i = 0; i < g_table_cnt; i++) {
             if (g_table[i].pwm_value == reg_val) {
                 return i;    
@@ -635,7 +645,7 @@ static int dvfs_set_voltage(int from, int to)
             /*
              * use PMW method to adjust vcck voltage
              */
-            aml_write_reg32(P_PWM_PWM_C, g_table[to].pwm_value);
+            aml_write_reg32(pmw_base[pwm_ctrl], g_table[to].pwm_value);
         } else {
             /*
              * use constant-current source to adjust vcck voltage
@@ -666,7 +676,7 @@ static int dvfs_set_voltage(int from, int to)
             }
         }
         if (use_pwm) {
-            aml_write_reg32(P_PWM_PWM_C, g_table[cur].pwm_value);    
+            aml_write_reg32(pmw_base[pwm_ctrl], g_table[cur].pwm_value);
         } else {
 			aml_set_reg32_bits(P_VGHL_PWM_REG0, cur, 0, 4);
         }
@@ -744,8 +754,21 @@ static const struct of_device_id amlogic_meson_cs_dvfs_match[]={
 #endif
 
 static void dvfs_vcck_pwm_init(struct device * dev) {
-	aml_write_reg32(P_PWM_MISC_REG_CD, (aml_read_reg32(P_PWM_MISC_REG_CD) & ~(0x7f << 8)) | ((1 << 15) | (0 << 8) | (1 << 0)));    
-	aml_write_reg32(P_PWM_PWM_C, g_table[g_table_cnt - 1].pwm_value);    
+    switch (pwm_ctrl) {
+    case PWM_A:
+        aml_write_reg32(P_PWM_MISC_REG_AB, (aml_read_reg32(P_PWM_MISC_REG_AB) & ~(0x7f <<  8)) | ((1 << 15) | (1 << 0)));    
+        break;
+    case PWM_B:
+        aml_write_reg32(P_PWM_MISC_REG_AB, (aml_read_reg32(P_PWM_MISC_REG_AB) & ~(0x7f << 16)) | ((1 << 23) | (1 << 1)));    
+        break;
+    case PWM_C:
+        aml_write_reg32(P_PWM_MISC_REG_CD, (aml_read_reg32(P_PWM_MISC_REG_CD) & ~(0x7f <<  8)) | ((1 << 15) | (1 << 0)));    
+        break;
+    case PWM_D:
+        aml_write_reg32(P_PWM_MISC_REG_CD, (aml_read_reg32(P_PWM_MISC_REG_CD) & ~(0x7f << 16)) | ((1 << 23) | (1 << 1)));    
+        break;
+    }
+    aml_write_reg32(pmw_base[pwm_ctrl], g_table[g_table_cnt - 1].pwm_value);    
 
     if (IS_ERR(devm_pinctrl_get_select_default(dev))) {
 		printk("did not get pins for pwm--------\n");
@@ -760,11 +783,30 @@ static int meson_cs_dvfs_probe(struct platform_device *pdev)
 	struct device_node *np = pdev->dev.of_node;
     int default_uv = 0;
     int i = 0;
+    char *out_str = NULL;
 
     if (!np) {
         return -ENODEV;
     }
     PARSE_UINT32_PROPERTY(np, "use_pwm", use_pwm, out);
+    if (use_pwm) {
+        ret = of_property_read_string(np, "pmw_controller", (const char **)&out_str); 
+        if (ret) {
+            printk("%s, not found 'pwm_controller', use pmw_c as default\n", __func__);    
+        }
+        if (out_str) {
+            if (!strncmp(out_str, "PWM_", 4)) {
+                i = out_str[4] - 'A'; 
+                if (i > PWM_D || i < 0) {
+                    printk("%s, bad pwm controller value:%s\n", __func__, out_str);
+                } else {
+                    pwm_ctrl = i;    
+                }
+            } else {
+                printk("%s, bad pwm controller value:%s\n", __func__, out_str);
+            }
+        }
+    }
     PARSE_UINT32_PROPERTY(np, "table_count", g_table_cnt, out);
     g_table = kzalloc(sizeof(struct cs_voltage) * g_table_cnt, GFP_KERNEL);
     if (g_table == NULL) {
@@ -779,7 +821,7 @@ static int meson_cs_dvfs_probe(struct platform_device *pdev)
         printk("%s, failed to read 'cs_voltage_table', ret:%d\n", __func__, ret);
         goto out;
     }
-    printk("%s, table count:%d, use_pwm:%d\n", __func__, g_table_cnt, use_pwm);
+    printk("%s, table count:%d, use_pwm:%d, pwm controller:%d\n", __func__, g_table_cnt, use_pwm, pwm_ctrl);
     for (i = 0; i < g_table_cnt; i++) {
         printk("%2d, %08x, %7d\n", i, g_table[i].pwm_value, g_table[i].voltage);    
     }

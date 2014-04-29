@@ -17,7 +17,10 @@ ifeq ($(CONFIG_ARCH_MESON6),y)
 obj-y = m6/
 endif
 ifeq ($(CONFIG_ARCH_MESON6TV),y)
-obj-y = m6/
+obj-y = m6tv/
+endif
+ifeq ($(CONFIG_ARCH_MESON6TVD),y)
+obj-y = m6tvd/
 endif
 ifeq ($(CONFIG_ARCH_MESON8),y)
 obj-y = m8/
@@ -38,8 +41,13 @@ ifeq ($(CONFIG_ARCH_MESON6TV),y)
 amports-objs := amstream.o streambuf.o vdec.o adec.o tsdemux.o psparser.o esparser.o rmparser.o amvdec.o amstream_profile.o
 amports-y    := amstream.o streambuf.o vdec.o adec.o tsdemux.o psparser.o esparser.o rmparser.o amvdec.o amstream_profile.o
 else
+ifeq ($(CONFIG_ARCH_MESON6TVD),y)
+amports-objs := amstream.o streambuf.o vdec.o adec.o tsdemux.o psparser.o esparser.o rmparser.o amvdec.o amstream_profile.o
+amports-y    := amstream.o streambuf.o vdec.o adec.o tsdemux.o psparser.o esparser.o rmparser.o amvdec.o amstream_profile.o
+else
 amports-objs := amstream.o streambuf.o vdec.o adec.o tsdemux.o psparser.o esparser.o rmparser.o amvdec.o amve.o amcm.o amstream_profile.o
 amports-y    := amstream.o streambuf.o vdec.o adec.o tsdemux.o psparser.o esparser.o rmparser.o amvdec.o amve.o amcm.o amstream_profile.o
+endif
 endif
 endif
 endif
@@ -75,6 +83,12 @@ amvdec_mjpeg-y    := vmjpeg.o
 obj-$(CONFIG_AM_VDEC_REAL) += amvdec_real.o
 amvdec_real-objs := vreal.o
 amvdec_real-y    := vreal.o
+
+ifeq ($(CONFIG_ARCH_MESON6TVD),y)
+obj-$(CONFIG_AM_VDEC_AVS) += amvdec_avs.o
+amvdec_avs-objs := vavs.o
+amvdec_avs-y    := vavs.o
+endif
 
 obj-$(CONFIG_AM_JPEGDEC) += jpegdec.o
 

@@ -5,6 +5,7 @@
 #include <linux/amlogic/amports/ptsserv.h>
 #include <linux/amlogic/amports/timestamp.h>
 #include <linux/amlogic/amports/tsync.h>
+#include "ampotrs_priv.h"
 
 #include <mach/am_regs.h>
 
@@ -15,9 +16,14 @@
 #define VIDEO_LOOKUP_RESOLUTION 2500
 #define AUDIO_LOOKUP_RESOLUTION 1024
 
+#define INTERPOLATE_AUDIO_PTS
+#define INTERPOLATE_AUDIO_RESOLUTION 9000
+
 #define OFFSET_DIFF(x, y)  ((int)(x - y))
 #define OFFSET_LATER(x, y) (OFFSET_DIFF(x, y) > 0)
 #define OFFSET_EQLATER(x, y) (OFFSET_DIFF(x, y) >= 0)
+
+#define VAL_DIFF(x, y) ((int)(x - y))
 
 enum {
     PTS_IDLE       = 0,
@@ -56,6 +62,7 @@ typedef struct pts_table_s {
     u32 last_checkin_pts;
     u32 last_checkout_pts;
     u32 last_checkout_offset;
+       u32 last_checkin_jiffies;
     u32 last_bitrate;
     u32 last_avg_bitrate;
 #endif
@@ -186,13 +193,15 @@ int calculation_stream_delayed_ms(u8 type,u32 *latestbitrate,u32*avg_bitare)
 	else 
 		outtime=timestamp_pcrscr_get();
     timestampe_delayed=(pTable->last_checkin_pts-outtime)/90;
-	///printk("get delay =%d ms\n",timestampe_delayed);
 	if((timestampe_delayed<0 ||timestampe_delayed>5*1000) && pTable->last_avg_bitrate>0){
 		int diff=pTable->last_checkin_offset-pTable->last_checkout_offset;
+		int diff2=stbuf_level(get_buf_by_type(type));
+		if((diff-diff2)> (pTable->last_avg_bitrate/8/10) || (diff-diff2*10))
+			diff =diff2;
 		int delay_ms=diff*1000/(1+pTable->last_avg_bitrate/8);
 		if(timestampe_delayed< 0 ||abs(timestampe_delayed-delay_ms)>3*1000){
 			timestampe_delayed=delay_ms;
-			///printk("..recalculated %d ms delay\n",timestampe_delayed);
+			printk("..recalculated %d ms delay,diff=%d\n",timestampe_delayed,diff);
 		}
 	}
 	if(latestbitrate)
@@ -202,6 +211,19 @@ int calculation_stream_delayed_ms(u8 type,u32 *latestbitrate,u32*avg_bitare)
 	return timestampe_delayed;
 }
 EXPORT_SYMBOL(calculation_stream_delayed_ms);
+int calculation_stream_ext_delayed_ms(u8 type)
+{
+       pts_table_t *pTable;
+       int extdelay_ms;
+       if (type >= PTS_TYPE_MAX) {
+        return 0;
+    }
+       pTable = &pts_table[type];
+       extdelay_ms=jiffies-pTable->last_checkin_jiffies;
+       if(extdelay_ms<0)
+               extdelay_ms=0;
+       return extdelay_ms*1000/HZ;
+}
 
 #endif
 
@@ -279,6 +301,7 @@ static int pts_checkin_offset_inline(u8 type, u32 offset, u32 val,u64 uS64)
 			}
 			pTable->last_checkin_offset = offset;
 			pTable->last_checkin_pts    = val;
+			pTable->last_checkin_jiffies = jiffies;
 			
 		}
 	}
@@ -582,7 +605,52 @@ static int pts_lookup_offset_inline(
             }
             return 0;
 
-        } else {
+        }
+#ifdef INTERPOLATE_AUDIO_PTS
+        else if ((type == PTS_TYPE_AUDIO) &&
+            (p2 != NULL) &&
+            (!list_is_last(&p2->list,  &pTable->valid_list)) &&
+            (VAL_DIFF((p = list_entry(p2->list.next, pts_rec_t, list))->val, p2->val) < INTERPOLATE_AUDIO_RESOLUTION)) {
+            /* do interpolation between [p2, p] */
+            *val = div_u64(((p->val - p2->val) * (offset - p2->offset)), (p->offset - p2->offset)) + p2->val;
+            *uS64 = (u64)(*val) << 32;
+
+            if (tsync_get_debug_pts_checkout()) {
+                if (tsync_get_debug_apts() && (type == PTS_TYPE_AUDIO)) {
+                    printk("apts look up offset<0x%x> --> <0x%x> <0x%x:0x%x>-<0x%x:0x%x>\n",
+                           offset, *val, p2->offset, p2->val, p->offset, p->val);
+                }
+            }
+
+#ifdef CALC_CACHED_TIME
+            pTable->last_checkout_pts = *val;
+                pTable->last_checkout_offset = offset;
+ 
+#endif
+            pTable->lookup_cache_pts = *val;
+            pTable->lookup_cache_offset = offset;
+            pTable->lookup_cache_valid = true;
+
+            /* update next look up search start point */
+            pTable->pts_search = p2->list.prev;
+
+            list_move_tail(&p2->list, &pTable->free_list);
+
+            spin_unlock_irqrestore(&lock, flags);
+
+            if (!pTable->first_lookup_ok) {
+                pTable->first_lookup_ok = 1;
+                if (tsync_get_debug_pts_checkout()) {
+                    if (tsync_get_debug_apts() && (type == PTS_TYPE_AUDIO)) {
+                        printk("====first apts look up offset<0x%x> --> <0x%x> <0x%x:0x%x>-<0x%x:0x%x>\n",
+                               offset, *val, p2->offset, p2->val, p->offset, p->val);
+                    }
+                }
+            }
+            return 0;
+        }
+#endif
+        else {
             /* when first pts lookup failed, use first checkin pts instead */
             if (!pTable->first_lookup_ok) {
                 *val = pTable->first_checkin_pts;

@@ -52,7 +52,7 @@
 #define _READ_ST_REG(r) \
     (__raw_readl((volatile void __iomem *)(buf->reg_base+(r<<2))))
 
-#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8
+#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6TVD
 #define _READ_VDEC2_ST_REG(r) \
     (__raw_readl((volatile void __iomem *)(buf->reg_base + DOS_REG_ADDR(VDEC2_VLD_MEM_VIFIFO_START_PTR) - DOS_REG_ADDR(VLD_MEM_VIFIFO_START_PTR) + (r<<2))))
 #define _WRITE_VDEC2_ST_REG(r, val) \

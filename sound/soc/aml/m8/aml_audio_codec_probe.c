@@ -24,6 +24,10 @@
 #include <linux/amlogic/aml_gpio_consumer.h>
 
 codec_info_t codec_info;
+int ext_codec = 0;
+
+EXPORT_SYMBOL(ext_codec);
+
 
 static const struct regmap_config codec_regmaps[] = {
 	{
@@ -177,7 +181,7 @@ static int register_i2c_codec_device(aml_audio_codec_info_t* audio_codec_dev)
 
 static int aml_audio_codec_probe(struct platform_device *pdev)
 {
-	int ret = 0, ext_codec = 0;
+	int ret = 0;
 	struct device_node* audio_codec_node = pdev->dev.of_node;
     struct device_node* child;
     aml_audio_codec_info_t *audio_codec_dev;

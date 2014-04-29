@@ -317,6 +317,7 @@ int ppmgr2_process(struct vframe_s* vf, struct ppmgr2_device *ppd, int index) {
     int dst_pixel_format = ppd->ge2d_fmt;
     ge2d_context_t *context = ppd->context;
     config_para_ex_t* ge2d_config = &(ppd->ge2d_config);
+    int angle = (ppd->angle + src_vf->orientation) % 4;
 
     src_position[0] = 0;
     src_position[1] = 0;
@@ -334,7 +335,7 @@ int ppmgr2_process(struct vframe_s* vf, struct ppmgr2_device *ppd, int index) {
     ge2d_src_config(src_vf, ge2d_config);
 
     ge2d_mirror_config(ppd->mirror, ge2d_config);
-    ge2d_angle_config(ppd->angle, ge2d_config);
+    ge2d_angle_config(angle, ge2d_config);
     paint_mode_convert(ppd->paint_mode, src_position, dst_paint_position, dst_plane_position);
 
     if(src_vf->type & VIDTYPE_INTERLACE) {

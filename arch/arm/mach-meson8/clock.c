@@ -44,6 +44,11 @@
 //#include <mach/hardware.h>
 //#include <mach/clk_set.h>
 //#include <mach/power_gate.h>
+
+#ifdef CONFIG_MESON_TRUSTZONE
+#include <mach/meson-secure.h>
+#endif
+
 static DEFINE_SPINLOCK(clockfw_lock);
 static DEFINE_MUTEX(clock_ops_lock);
 
@@ -874,14 +879,31 @@ void meson_set_cpu_power_ctrl(uint32_t cpu,int is_power_on)
 void meson_set_cpu_ctrl_reg(int cpu,int is_on)
 {
 	spin_lock(&clockfw_lock);
+
+#ifdef CONFIG_MESON_TRUSTZONE
+	uint32_t value = 0;
+	value = meson_read_corectrl();
+	value |= is_on << cpu;
+	value |= 1;
+	meson_modify_corectrl(value);
+#else
 	aml_set_reg32_bits(MESON_CPU_CONTROL_REG,is_on,cpu,1);
 	aml_set_reg32_bits(MESON_CPU_CONTROL_REG,1,0,1);
+#endif
+
 	spin_unlock(&clockfw_lock);
 }
+
 void meson_set_cpu_ctrl_addr(uint32_t cpu, const uint32_t addr)
 {
 	spin_lock(&clockfw_lock);
+
+#ifdef CONFIG_MESON_TRUSTZONE
+	meson_auxcoreboot_addr(cpu, addr);
+#else
 	aml_write_reg32((MESON_CPU1_CONTROL_ADDR_REG + ((cpu-1) << 2)), addr);
+#endif
+
 	spin_unlock(&clockfw_lock);	
 }
 
@@ -911,7 +933,11 @@ static inline void meson_smp_init_transaction(void)
 {
     int cpu;
 
+#ifdef CONFIG_MESON_TRUSTZONE
+	meson_modify_corectrl(0);
+#else
     aml_write_reg32(MESON_CPU_CONTROL_REG, 0);
+#endif
 
     for_each_online_cpu(cpu) {
         aml_write_reg32(MESON_CPU_STATUS_REG(cpu), 0);
@@ -1159,6 +1185,9 @@ SETPLL:
 					aml_set_reg32_bits(P_HHI_SYS_PLL_CNTL4, 0, 10, 1);
 					printk(KERN_ERR"  HHI_SYS_PLL_CNTL4: %08x\n", 
 						aml_read_reg32(P_HHI_SYS_PLL_CNTL4));
+				}else{
+					latency.b.afc_dsel_bp_in = !latency.b.afc_dsel_bp_in;
+					printk(KERN_ERR"  INV afc_dsel_bp_in, new latency=%08x\n",latency.d32);
 				}
 				printk(KERN_ERR"  Try again!\n");
 				goto SETPLL;
@@ -1634,7 +1663,7 @@ static ssize_t freq_limit_show(struct class *cla, struct class_attribute *attr, 
 
 
 static struct class_attribute freq_limit_class_attrs[] = {
-	__ATTR(limit, S_IRWXU, freq_limit_show, freq_limit_store),
+	__ATTR(limit, S_IRUGO|S_IWUSR|S_IWGRP, freq_limit_show, freq_limit_store),
 	__ATTR_NULL,
 };
 
@@ -1705,14 +1734,14 @@ static int __init meson_clock_init(void)
     // Add clk usb0
     CLK_DEFINE(usb0,xtal,4,NULL,clk_msr_get,clk_enable_usb,clk_disable_usb,"usb0");
     meson_clk_register(&clk_usb0,&clk_xtal);
-    clk_usb0.clk_gate_reg_adr = P_USB_ADDR0;
-    clk_usb0.clk_gate_reg_mask = (1<<0);
+    //clk_usb0.clk_gate_reg_adr = P_USB_ADDR0;
+    //clk_usb0.clk_gate_reg_mask = (1<<0);
     
     // Add clk usb1
     CLK_DEFINE(usb1,xtal,5,NULL,clk_msr_get,clk_enable_usb,clk_disable_usb,"usb1");
     meson_clk_register(&clk_usb1,&clk_xtal);
-    clk_usb1.clk_gate_reg_adr = P_USB_ADDR8;
-    clk_usb1.clk_gate_reg_mask = (1<<0);
+    //clk_usb1.clk_gate_reg_adr = P_USB_ADDR8;
+    //clk_usb1.clk_gate_reg_mask = (1<<0);
 #endif
 		
 	{

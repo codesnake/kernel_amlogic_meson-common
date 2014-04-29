@@ -37,7 +37,7 @@
 #define ALSA_PRINT(fmt,args...)	printk(KERN_INFO "[aml-platform]" fmt,##args)
 #ifdef DEBUG_ALSA_PLATFRORM
 #define ALSA_DEBUG(fmt,args...) 	printk(KERN_INFO "[aml-platform]" fmt,##args)
-#define ALSA_TRACE()     			printk("[aml-platform] enter func %s,line %d\n",__FUNCTION__,__LINE__);
+#define ALSA_TRACE()     			printk("[aml-platform] enter func %s,line %d\n",__FUNCTION__,__LINE__)
 #else
 #define ALSA_DEBUG(fmt,args...) 
 #define ALSA_TRACE()   
@@ -64,8 +64,8 @@ unsigned int aml_iec958_playback_start_phy = 0;
 unsigned int aml_iec958_playback_size = 0;  // in bytes
 
 
-static int audio_type_info = -1;
-static int audio_sr_info = -1;
+//static int audio_type_info = -1;
+//static int audio_sr_info = -1;
 extern unsigned audioin_mode;
 
 static DEFINE_MUTEX(gate_mutex);
@@ -75,6 +75,10 @@ EXPORT_SYMBOL(aml_i2s_playback_start_addr);
 EXPORT_SYMBOL(aml_i2s_capture_start_addr);
 EXPORT_SYMBOL(aml_i2s_playback_off);
 EXPORT_SYMBOL(aml_i2s_playback_enable);
+EXPORT_SYMBOL(aml_i2s_playback_phy_start_addr);
+EXPORT_SYMBOL(aml_i2s_playback_phy_end_addr);
+EXPORT_SYMBOL(aml_i2s_capture_phy_start_addr);
+EXPORT_SYMBOL(aml_i2s_capture_phy_end_addr);
 
 
 /*--------------------------------------------------------------------------*\
@@ -142,11 +146,12 @@ static struct snd_pcm_hw_constraint_list hw_constraints_period_sizes = {
 static int aml_i2s_preallocate_dma_buffer(struct snd_pcm *pcm,
 	int stream)
 {
-	ALSA_TRACE();
+	
 	struct snd_pcm_substream *substream = pcm->streams[stream].substream;
 	struct snd_dma_buffer *buf = &substream->dma_buffer;
 
 	size_t size = 0;
+    ALSA_TRACE();
 	    if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK){
 		    size = aml_i2s_hardware.buffer_bytes_max;
 		    buf->dev.type = SNDRV_DMA_TYPE_DEV;
@@ -243,11 +248,11 @@ static int aml_i2s_prepare(struct snd_pcm_substream *substream)
 static int aml_i2s_trigger(struct snd_pcm_substream *substream,
 	int cmd)
 {
-	ALSA_TRACE();
 	struct snd_pcm_runtime *rtd = substream->runtime;
 	struct aml_runtime_data *prtd = rtd->private_data;
 	audio_stream_t *s = &prtd->s;
 	int ret = 0;
+    ALSA_TRACE();
 
 	switch (cmd) {
 	case SNDRV_PCM_TRIGGER_START:
@@ -322,6 +327,7 @@ static snd_pcm_uframes_t aml_i2s_pointer(
 
 	return 0;
 }	
+#if USE_HRTIMER ==1
 static enum hrtimer_restart aml_i2s_hrtimer_callback(struct hrtimer* timer)
 {
   struct aml_runtime_data* prtd =  container_of(timer, struct aml_runtime_data, hrtimer);
@@ -330,7 +336,7 @@ static enum hrtimer_restart aml_i2s_hrtimer_callback(struct hrtimer* timer)
   struct snd_pcm_runtime* runtime= substream->runtime;
   
   unsigned int last_ptr, size;
-  unsigned long flag;
+  //unsigned long flag;
   //printk("------------->hrtimer start\n");
   if(s->active == 0){
     hrtimer_forward_now(timer, ns_to_ktime(HRTIMER_PERIOD));
@@ -369,7 +375,7 @@ static enum hrtimer_restart aml_i2s_hrtimer_callback(struct hrtimer* timer)
   hrtimer_forward_now(timer, ns_to_ktime(HRTIMER_PERIOD));
   return HRTIMER_RESTART;
 }
-
+#endif
 static void aml_i2s_timer_callback(unsigned long data)
 {
     struct snd_pcm_substream *substream = (struct snd_pcm_substream *)data;
@@ -441,11 +447,11 @@ static void aml_i2s_timer_callback(unsigned long data)
 static int num_clk_gate = 0;
 static int aml_i2s_open(struct snd_pcm_substream *substream)
 {
-	ALSA_TRACE();
 	struct snd_pcm_runtime *runtime = substream->runtime;
 	struct aml_runtime_data *prtd = runtime->private_data;
 	audio_stream_t *s ;		
 	int ret = 0;
+    ALSA_TRACE();
 	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK){
 		snd_soc_set_runtime_hwparams(substream, &aml_i2s_hardware);
 	}else{
@@ -646,9 +652,8 @@ static int aml_i2s_copy_playback(struct snd_pcm_runtime *runtime, int channel,
 	}else{
 	  res = -EFAULT;
 	}
-
-	return res;
     }
+    return res;
 }
 
 
@@ -727,10 +732,10 @@ static int aml_i2s_copy(struct snd_pcm_substream *substream, int channel,
 int aml_i2s_silence(struct snd_pcm_substream *substream, int channel,
 		       snd_pcm_uframes_t pos, snd_pcm_uframes_t count)
 {
-	ALSA_TRACE();
 		char* ppos;
 		int n;
 		struct snd_pcm_runtime *runtime = substream->runtime;
+        ALSA_TRACE();
 
 		n = frames_to_bytes(runtime, count);
 		ppos = runtime->dma_area + frames_to_bytes(runtime, pos);
@@ -759,10 +764,10 @@ static u64 aml_i2s_dmamask = 0xffffffff;
 
 static int aml_i2s_new(struct snd_soc_pcm_runtime *rtd)
 {
-	ALSA_TRACE();
 	int ret = 0;
        struct snd_soc_card *card = rtd->card;
        struct snd_pcm *pcm =rtd->pcm ;  
+    ALSA_TRACE();
 	if (!card->dev->dma_mask)
 		card->dev->dma_mask = &aml_i2s_dmamask;
 	if (!card->dev->coherent_dma_mask)
@@ -790,10 +795,10 @@ static int aml_i2s_new(struct snd_soc_pcm_runtime *rtd)
 
 static void aml_i2s_free_dma_buffers(struct snd_pcm *pcm)
 {
-	ALSA_TRACE();
 	struct snd_pcm_substream *substream;
 	struct snd_dma_buffer *buf;
 	int stream;
+    ALSA_TRACE();
 	for (stream = 0; stream < 2; stream++) {
 		substream = pcm->streams[stream].substream;
 		if (!substream)

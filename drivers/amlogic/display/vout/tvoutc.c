@@ -25,7 +25,6 @@
 #include <linux/errno.h>
 #include <linux/kernel.h>
 #include <linux/delay.h>
-#include <linux/utils.h>
 #include <mach/am_regs.h>
 
 #include <linux/amlogic/vout/vinfo.h>
@@ -49,8 +48,8 @@ static const unsigned int  signal_set[SIGNAL_SET_MAX][3]=
 	},
 	{
 		VIDEO_SIGNAL_TYPE_CVBS,            	//cvbs&svideo
-		VIDEO_SIGNAL_TYPE_SVIDEO_LUMA,    
-    	VIDEO_SIGNAL_TYPE_SVIDEO_CHROMA,   
+		VIDEO_SIGNAL_TYPE_SVIDEO_LUMA,
+    	VIDEO_SIGNAL_TYPE_SVIDEO_CHROMA,
 	},
 	{	VIDEO_SIGNAL_TYPE_PROGRESSIVE_Y,     //progressive.
 		VIDEO_SIGNAL_TYPE_PROGRESSIVE_PB,
@@ -79,7 +78,7 @@ static  const  char*   signal_table[]={
          "PROGEESSIVE_R",   /**< Progressive R signal */
          "PROGEESSIVE_G",   /**< Progressive G signal */
          "PROGEESSIVE_B",   /**< Progressive B signal */
-		
+
 	};
 int 	 get_current_vdac_setting(void)
 {
@@ -102,7 +101,7 @@ void  change_vdac_setting(unsigned int  vdec_setting,vmode_t  mode)
 		break;
 		case VMODE_480CVBS:
 		case VMODE_576CVBS:
-		signal_set_index=1;	
+		signal_set_index=1;
 		bit=2;
 		break;
 		case VMODE_SVGA:
@@ -132,7 +131,7 @@ static void enable_vsync_interrupt(void)
     printk("enable_vsync_interrupt\n");
 
     CLEAR_CBUS_REG_MASK(HHI_MPEG_CLK_CNTL, 1<<11);
-	
+
     if (READ_MPEG_REG(ENCP_VIDEO_EN) & 1) {
         WRITE_MPEG_REG(VENC_INTCTRL, 0x200);
 
@@ -210,7 +209,7 @@ int tvoutc_setclk(tvmode_t mode)
 		}
 	else
 		{
-		printk(KERN_WARNING "UNsupport xtal setting for vidoe xtal=%d,default to 24M\n",xtal);	
+		printk(KERN_WARNING "UNsupport xtal setting for vidoe xtal=%d,default to 24M\n",xtal);
 		xtal=0;
 		}
 	switch(mode)
@@ -236,7 +235,7 @@ int tvoutc_setclk(tvmode_t mode)
 			  }
 			  break;
 		default:
-			printk(KERN_ERR "unsupport tv mode,video clk is not set!!\n");	
+			printk(KERN_ERR "unsupport tv mode,video clk is not set!!\n");
 	}
 
 	return 0 ;
@@ -258,7 +257,7 @@ static int uboot_display_already(tvmode_t mode)
     tvmode_t source = vmode_to_tvmode(get_resolution_vmode());
     if(source == mode)
         return 1;
-    else 
+    else
         return 0;
     /*
     const  reg_t *s = tvregsTab[mode];
@@ -303,7 +302,7 @@ int tvoutc_setmode(tvmode_t mode)
 #endif
 
     printk("TV mode %s selected.\n", tvinfoTab[mode].id);
-   
+
     s = tvregsTab[mode];
 
     if(uboot_display_flag) {
@@ -316,7 +315,7 @@ int tvoutc_setmode(tvmode_t mode)
     while (MREG_END_MARKER != s->reg)
         setreg(s++);
     printk("%s[%d]\n", __func__, __LINE__);
-    
+
     if(mode >= TVMODE_VGA || mode <= TVMODE_SXGA){
         aml_write_reg32(P_PERIPHS_PIN_MUX_0,aml_read_reg32(P_PERIPHS_PIN_MUX_0)|(3<<20));
     }else{
@@ -355,12 +354,12 @@ int tvoutc_setmode(tvmode_t mode)
         aml_set_reg32_bits(P_VPU_VIU_VENC_MUX_CTRL, 2, 0, 2); //reg0x271a, select ENCP to VIU1
         aml_set_reg32_bits(P_VPU_VIU_VENC_MUX_CTRL, 2, 4, 4); //reg0x271a, Select encP clock to VDIN
         aml_set_reg32_bits(P_VPU_VIU_VENC_MUX_CTRL, 2, 8, 4); //reg0x271a,Enable VIU of ENC_P domain to VDIN;
-        break;		    
+        break;
 		default:
-			printk(KERN_ERR "unsupport tv mode,video clk is not set!!\n");	
+			printk(KERN_ERR "unsupport tv mode,video clk is not set!!\n");
 	}
 #endif
-    
+
     aml_write_reg32(P_VPP_POSTBLEND_H_SIZE, tvinfoTab[mode].xres);
 
 #ifdef CONFIG_ARCH_MESON3
@@ -373,6 +372,28 @@ printk(" clk_util_clk_msr 27 = %d\n", clk_util_clk_msr(27));
 printk(" clk_util_clk_msr 29 = %d\n", clk_util_clk_msr(29));
 #endif
 
+#ifdef CONFIG_ARCH_MESON6
+	if( (mode==TVMODE_480CVBS) || (mode==TVMODE_576CVBS) )
+	{
+		msleep(1000);
+
+#ifdef CONFIG_MACH_MESON6_G02_DONGLE
+    	aml_write_reg32(P_VENC_VDAC_SETTING, 0x7);
+#else
+    	aml_write_reg32(P_VENC_VDAC_SETTING, 0x5);
+#endif
+	}
+#endif
+
+#ifdef CONFIG_ARCH_MESON8
+	if( (mode==TVMODE_480CVBS) || (mode==TVMODE_576CVBS) )
+	{
+		msleep(1000);
+
+		aml_write_reg32(P_HHI_VDAC_CNTL0,0x650001);
+		aml_write_reg32(P_HHI_VDAC_CNTL1,0x1);
+	}
+#endif
 //while(1);
 
 

@@ -40,7 +40,7 @@ LIST_HEAD(__aml_dvfs_list);
 int aml_dvfs_register_driver(struct aml_dvfs_driver *driver)
 {
     struct list_head *element;
-    struct aml_dvfs_master *master;
+    struct aml_dvfs_master *master = NULL;
     int    success = 0;
 
     if (driver == NULL) {
@@ -333,7 +333,6 @@ static int aml_dvfs_init_for_master(struct aml_dvfs_master *master)
 {
     int ret = 0;
     int i, size;
-    struct cpufreq_frequency_table *freq_table;
 
     mutex_init(&master->mutex);
     size = sizeof(struct cpufreq_frequency_table) * (master->table_count + 1);

@@ -2,6 +2,7 @@
 #define _WIFI_POWER_H_
 struct wifi_power_platform_data{
     int power_gpio;
+    int power_gpio2;
     int (*set_power)(int val);
     int (*set_reset)(int val);
     int (*set_carddetect)(int val);

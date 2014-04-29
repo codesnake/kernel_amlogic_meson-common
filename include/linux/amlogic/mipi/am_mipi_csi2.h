@@ -9,8 +9,8 @@
  *
  *******************************************************************/
 
-#ifndef AM_MIPI_CSI2
-#define AM_MIPI_CSI2
+#ifndef __AM_MIPI_CSI2_H__
+#define __AM_MIPI_CSI2_H__
 
 #include <mach/io.h>
 #include <linux/amlogic/tvin/tvin_v4l2.h>
@@ -157,6 +157,13 @@ struct am_csi2_s{
     struct am_csi2_ops_s *ops;
 };
 
+extern int start_mipi_csi2_service(struct am_csi2_camera_para *para);
+extern int stop_mipi_csi2_service(struct am_csi2_camera_para *para);
+extern void am_mipi_csi2_init(csi_parm_t* info);
+extern void am_mipi_csi2_uninit(void);
+extern void init_am_mipi_csi2_clock(void);
+extern void cal_csi_para(csi_parm_t* info);
+
 #define MIPI_DEBUG
 #ifdef MIPI_DEBUG
 #define mipi_dbg(fmt, args...) printk(fmt,## args)
@@ -209,45 +216,45 @@ struct am_csi2_s{
 //struct device;
 //struct v4l2_device;
 
-//#define CSI2_CLK_RESET                             0x2a00
+//#define CSI2_CLK_RESET                0x2a00
 #define CSI2_CFG_CLK_ENABLE_DWC         3 
-#define CSI2_CFG_CLK_AUTO_GATE_OFF     2
-#define CSI2_CFG_CLK_ENABLE                    1
-#define CSI2_CFG_SW_RESET                       0
+#define CSI2_CFG_CLK_AUTO_GATE_OFF      2
+#define CSI2_CFG_CLK_ENABLE             1
+#define CSI2_CFG_SW_RESET               0
 
-//#define CSI2_GEN_CTRL0                             0x2a01
-#define CSI2_CFG_CLR_WRRSP                      27
-#define CSI2_CFG_DDR_EN                            26
-#define CSI2_CFG_A_BRST_NUM                   20  //25:20
-#define CSI2_CFG_A_ID                                14  //19:14
-#define CSI2_CFG_URGENT_EN                     13
-#define CSI2_CFG_DDR_ADDR_LPBK             12
-#define CSI2_CFG_BUFFER_PIC_SIZE           11
-#define CSI2_CFG_422TO444_MODE             10
-#define CSI2_CFG_INV_FIELD                        9
-#define CSI2_CFG_INTERLACE_EN                 8
-#define CSI2_CFG_FORCE_LINE_COUNT         7
-#define CSI2_CFG_FORCE_PIX_COUNT           6
-#define CSI2_CFG_COLOR_EXPAND                 5
-#define CSI2_CFG_ALL_TO_MEM                     4
+//#define CSI2_GEN_CTRL0                0x2a01
+#define CSI2_CFG_CLR_WRRSP              27
+#define CSI2_CFG_DDR_EN                 26
+#define CSI2_CFG_A_BRST_NUM             20  //25:20
+#define CSI2_CFG_A_ID                   14  //19:14
+#define CSI2_CFG_URGENT_EN              13
+#define CSI2_CFG_DDR_ADDR_LPBK          12
+#define CSI2_CFG_BUFFER_PIC_SIZE        11
+#define CSI2_CFG_422TO444_MODE          10
+#define CSI2_CFG_INV_FIELD              9
+#define CSI2_CFG_INTERLACE_EN           8
+#define CSI2_CFG_FORCE_LINE_COUNT       7
+#define CSI2_CFG_FORCE_PIX_COUNT        6
+#define CSI2_CFG_COLOR_EXPAND           5
+#define CSI2_CFG_ALL_TO_MEM             4
 #define CSI2_CFG_VIRTUAL_CHANNEL_EN     0  //3:0
 
-//#define CSI2_FORCE_PIC_SIZE                        0x2a02
-#define CSI2_CFG_LINE_COUNT                     16 //31:16
-#define CSI2_CFG_PIX_COUNT                       0 //15:0
+//#define CSI2_FORCE_PIC_SIZE           0x2a02
+#define CSI2_CFG_LINE_COUNT             16 //31:16
+#define CSI2_CFG_PIX_COUNT              0 //15:0
 
-//#define CSI2_INTERRUPT_CTRL_STAT                   0x2a05
-#define CSI2_CFG_VS_RISE_INTERRUPT_CLR         18 
-#define CSI2_CFG_VS_FAIL_INTERRUPT_CLR         17 
-#define CSI2_CFG_FIELD_DONE_INTERRUPT_CLR  16 
-#define CSI2_CFG_VS_RISE_INTERRUPT                 2 
-#define CSI2_CFG_VS_FAIL_INTERRUPT                 1 
-#define CSI2_CFG_FIELD_DONE_INTERRUPT          0 
+//#define CSI2_INTERRUPT_CTRL_STAT              0x2a05
+#define CSI2_CFG_VS_RISE_INTERRUPT_CLR          18
+#define CSI2_CFG_VS_FAIL_INTERRUPT_CLR          17
+#define CSI2_CFG_FIELD_DONE_INTERRUPT_CLR       16
+#define CSI2_CFG_VS_RISE_INTERRUPT              2
+#define CSI2_CFG_VS_FAIL_INTERRUPT              1
+#define CSI2_CFG_FIELD_DONE_INTERRUPT           0
 
-extern int start_mipi_csi2_service(struct am_csi2_camera_para *para);
-extern int stop_mipi_csi2_service(struct am_csi2_camera_para *para);
-extern void am_mipi_csi2_init(csi_parm_t* info);
-extern void am_mipi_csi2_uninit(void);
-extern void init_am_mipi_csi2_clock(void);
+//#define MIPI_PHY_CTRL                         0x00
+#define MIPI_PHY_CFG_CHPU_TO_ANALOG             5
+#define MIPI_PHY_CFG_SHTDWN_CLK_LANE            4
+#define MIPI_PHY_CFG_SHTDWN_DATA_LANE           0
 
-#endif
+#define MIPI_PHY_CFG_CLK_CHNLB_SHIFT            2
+#endif //__AM_MIPI_CSI2_H__

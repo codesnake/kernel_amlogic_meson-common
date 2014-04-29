@@ -78,6 +78,11 @@ static int lowmem_shrink(struct shrinker *s, struct shrink_control *sc)
 	short selected_oom_score_adj;
 	int array_size = ARRAY_SIZE(lowmem_adj);
 	int other_free = global_page_state(NR_FREE_PAGES) - totalreserve_pages;
+
+    /* For request of unmovable pages, take no account of free CMA pages*/
+    if(IS_ENABLED(CONFIG_CMA) && (allocflags_to_migratetype(sc->gfp_mask) != MIGRATE_MOVABLE))
+        other_free -= global_page_state(NR_FREE_CMA_PAGES);
+
 	int other_file = global_page_state(NR_FILE_PAGES) -
 						global_page_state(NR_SHMEM);
 

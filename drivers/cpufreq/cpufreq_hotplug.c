@@ -36,6 +36,8 @@
 #include <linux/sched/rt.h>
 #include <linux/notifier.h>
 #include "cpufreq_governor.h"
+unsigned int max_cpu_num=NR_CPUS;
+unsigned int last_max_cpu_num=NR_CPUS;
 
 /* greater than 80% avg load across online CPUs increases frequency */
 #define DEFAULT_UP_FREQ_MIN_LOAD			(80)
@@ -539,6 +541,24 @@ wait_next_event:
 	}
 	return 1;
 }
+void cpufreq_set_max_cpu_num(unsigned int cpu_num)
+{
+	if(cpu_num>=NR_CPUS){
+		max_cpu_num=NR_CPUS;
+	}else{
+		if(cpu_num>last_max_cpu_num)
+			max_cpu_num=cpu_num;
+		else{
+			max_cpu_num=cpu_num;
+			if(cpu_num>=num_online_cpus())
+				return ;
+			cpu_hotplug_flag = CPU_HOTPLUG_UNPLUG;
+			wake_up_process(cpu_hotplug_task);
+		}
+	}
+	last_max_cpu_num=max_cpu_num;
+	return ;
+}
 static int __ref cpu_hotplug_thread(void *data)
 {
 	int i, j,target_cpu = 1;
@@ -570,7 +590,7 @@ static int __ref cpu_hotplug_thread(void *data)
 		if(*hotplug_flag == CPU_HOTPLUG_PLUG){
 			*hotplug_flag = CPU_HOTPLUG_NONE;
 			j = 0;
-			for(i = 0; i < NR_CPUS; i++){
+			for(i = 0; i < max_cpu_num; i++){
 				if(cpu_online(i))
 					continue;
 				j++;
@@ -610,6 +630,7 @@ wait_next_hotplug:
 	}
 	return 1;
 }
+
 static void hg_check_cpu(int cpu, unsigned int max_load)
 {
 	/* largest CPU load in terms of frequency */

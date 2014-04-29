@@ -282,7 +282,9 @@ static const reg_t tvregs_480i[] = {
 };
 
 static const reg_t tvregs_480cvbs[] = {
-     {P_VENC_VDAC_SETTING,            0xff,  },
+    {P_HHI_VDAC_CNTL0,               0x0   },
+    {P_HHI_VDAC_CNTL1,               0x8   },
+    {P_VENC_VDAC_SETTING,            0xff,  },
 
     {P_HHI_VID_CLK_CNTL,           0x0,       },
     {P_HHI_VID_PLL_CNTL,           0x2001042d,},
@@ -340,11 +342,11 @@ static const reg_t tvregs_480cvbs[] = {
     {P_ENCI_DACSEL_1,                0x11   },
     {P_ENCP_VIDEO_EN,                0,     },
     {P_ENCI_VIDEO_EN,                1,     },
-    {P_HHI_VDAC_CNTL0,               0x650001   },
-    {P_HHI_VDAC_CNTL1,               0x1        },
     {P_ENCI_VIDEO_SAT,               0x7        },
     {P_VENC_VDAC_DAC0_FILT_CTRL0,    0x1        },
     {P_VENC_VDAC_DAC0_FILT_CTRL1,    0xfc48     },
+    //{P_HHI_VDAC_CNTL0,               0x650001   },
+    //{P_HHI_VDAC_CNTL1,               0x1        },
     {P_ENCI_MACV_N0,                 0x0        },
     {MREG_END_MARKER,              0      }
 };
@@ -485,6 +487,8 @@ static const reg_t tvregs_576i[] = {
 };
 
 static const reg_t tvregs_576cvbs[] = {
+    {P_HHI_VDAC_CNTL0,               0x0   },
+    {P_HHI_VDAC_CNTL1,               0x8   },
     {P_VENC_VDAC_SETTING,               0xff,      },
 
     {P_HHI_VID_CLK_CNTL,           0x0,       },
@@ -543,11 +547,11 @@ static const reg_t tvregs_576cvbs[] = {
     {P_ENCI_DACSEL_1,                   0x11       },
     {P_ENCP_VIDEO_EN,                   0,         },
     {P_ENCI_VIDEO_EN,                   1,         },
-    {P_HHI_VDAC_CNTL0,                  0x650001   },
-    {P_HHI_VDAC_CNTL1,                  0x1        },
     {P_ENCI_VIDEO_SAT,                  0x7        },
     {P_VENC_VDAC_DAC0_FILT_CTRL0,       0x1        },
     {P_VENC_VDAC_DAC0_FILT_CTRL1,       0xfc48     },
+    //{P_HHI_VDAC_CNTL0,                  0x650001   },
+    //{P_HHI_VDAC_CNTL1,                  0x1        },
     {P_ENCI_MACV_N0,                    0x0        },
     {MREG_END_MARKER,                 0          }
 };

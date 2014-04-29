@@ -31,9 +31,24 @@
 #include "aml_audio_hw.h"
 #include <sound/aml_m6tv_audio.h>
 
+#ifdef CONFIG_USE_OF
+#include <linux/of.h>
+#include <linux/pinctrl/consumer.h>
+#include <linux/amlogic/aml_gpio_consumer.h>
+#include <linux/of_gpio.h>
+#include <mach/pinmux.h>
+#include <plat/io.h>
+#endif
+
 static struct platform_device *m6tv_audio_snd_device = NULL;
 static struct m6tv_audio_codec_platform_data *m6tv_audio_snd_pdata = NULL;
 //static struct m6tv_audio_private_data* m6tv_audio_snd_priv = NULL;
+struct aml_audio_private_data {
+	struct pinctrl *pin_ctl;
+	int gpio_mute;
+	bool mute_inv;
+};
+
 #define CODEC_DEBUG  printk
 static void m6tv_audio_dev_init(void)
 {
@@ -97,11 +112,12 @@ static int m6tv_audio_hw_params(struct snd_pcm_substream *substream,
 static struct snd_soc_ops m6tv_audio_soc_ops = {
     .prepare   = m6tv_audio_prepare,
     .hw_params = m6tv_audio_hw_params,
-};	
+};
 
 
 static int m6tv_audio_set_bias_level(struct snd_soc_card *card,
-					enum snd_soc_bias_level level)
+						struct snd_soc_dapm_context *dapm,
+						enum snd_soc_bias_level level)
 {
 	int ret = 0;
     	CODEC_DEBUG( "enter %s level: %d\n", __func__, level);
@@ -141,13 +157,6 @@ static int m6tv_audio_resume_post(struct snd_soc_card *card)
 
 static int m6tv_audio_codec_init(struct snd_soc_pcm_runtime *rtd)
 {
-    struct snd_soc_codec *codec = rtd->codec;
-    struct snd_soc_dapm_context *dapm = &codec->dapm;
-    int ret = 0;
-
-    CODEC_DEBUG( "enter %s\n", __func__);
-
-  
     return 0;
 }
 #ifdef CONFIG_SND_AML_M6TV_STA380
@@ -162,7 +171,6 @@ static int m6tv_sta381xx_init(struct snd_soc_dapm_context *dapm)
 #ifdef CONFIG_SND_AML_M6TV_TAS5711
 static int m6tv_tas5711_init(struct snd_soc_dapm_context *dapm)
 {
-	struct snd_soc_codec *codec = dapm->codec;
 	CODEC_DEBUG("~~~~%s\n", __func__);
 
 	return 0;
@@ -180,16 +188,9 @@ static struct snd_soc_dai_link m6tv_audio_dai_link[] = {
         .codec_name = "syno9629.0",
         .ops = &m6tv_audio_soc_ops,
     },
-#endif    
+#endif
 };
 struct snd_soc_aux_dev m6tv_audio_aux_dev[] = {
-#ifdef CONFIG_SND_AML_M6TV_RT5631	
-	{
-		.name = "rt5631",
-		.codec_name = "rt5631.0-001a",
-		.init = NULL,
-	},
-#endif	
 #ifdef CONFIG_SND_AML_M6TV_STA380
 	{
 		.name = "sta381xx",
@@ -200,29 +201,22 @@ struct snd_soc_aux_dev m6tv_audio_aux_dev[] = {
 #ifdef CONFIG_SND_AML_M6TV_TAS5711
 	{
 		.name = "tas5711",
-		.codec_name = "tas5711.0-001b",
+		.codec_name = "tas5711.1-001b",
 		.init = m6tv_tas5711_init,
 	},
 #endif
 };
 
 static struct snd_soc_codec_conf m6tv_audio_codec_conf[] = {
-#ifdef CONFIG_SND_AML_M6TV_RT5631	
-	
-	{
-		.dev_name = "rt5631.0-001a",
-		.name_prefix = "b",
-	},
-#endif
-#ifdef CONFIG_SND_AML_M6TV_STA380	
+#ifdef CONFIG_SND_AML_M6TV_STA380
 	{
 		.dev_name = "sta381xx.0-001c",
 		.name_prefix = "AMP",
 	},
 #endif
-#ifdef CONFIG_SND_AML_M6TV_TAS5711	
+#ifdef CONFIG_SND_AML_M6TV_TAS5711
 	{
-		.dev_name = "tas5711.0-001b",
+		.dev_name = "tas5711.1-001b",
 		.name_prefix = "AMP",
 	},
 #endif
@@ -237,7 +231,7 @@ static struct snd_soc_card snd_soc_m6tv_audio = {
     .num_aux_devs = ARRAY_SIZE(m6tv_audio_aux_dev),
     .codec_conf = m6tv_audio_codec_conf,
     .num_configs = ARRAY_SIZE(m6tv_audio_codec_conf),
-    
+
 #ifdef CONFIG_PM_SLEEP
 	.suspend_pre    = m6tv_audio_suspend_pre,
 	.suspend_post   = m6tv_audio_suspend_post,
@@ -246,53 +240,74 @@ static struct snd_soc_card snd_soc_m6tv_audio = {
 #endif
 };
 
+static void aml_m6_pinmux_init(struct snd_soc_card *card)
+{
+	struct aml_audio_private_data *p_aml_audio;
+	const char *str=NULL;
+	int ret = 0;
+
+	p_aml_audio = snd_soc_card_get_drvdata(card);
+	p_aml_audio->pin_ctl = devm_pinctrl_get_select(card->dev, "aml_m6tv_audio");
+
+	ret = of_property_read_string(card->dev->of_node, "mute_gpio", &str);
+	if (ret < 0) {
+		printk("aml_snd_m6tv: failed to get mute_gpio!\n");
+	}else{
+		p_aml_audio->gpio_mute = amlogic_gpio_name_map_num(str);
+		p_aml_audio->mute_inv = of_property_read_bool(card->dev->of_node,"mute_inv");
+		amlogic_gpio_request_one(p_aml_audio->gpio_mute,GPIOF_OUT_INIT_LOW,"mute_spk");
+		amlogic_set_value(p_aml_audio->gpio_mute, 1, "mute_spk");
+	}
 
 
+	printk("=%s=,aml_m6tv_pinmux_init done\n",__func__);
+}
 
+static void aml_m6_pinmux_deinit(struct snd_soc_card *card)
+{
+	struct aml_audio_private_data *p_aml_audio;
+
+	p_aml_audio = snd_soc_card_get_drvdata(card);
+
+	//amlogic_gpio_free(p_aml_audio->gpio_hp_det,"rt5631");
+	devm_pinctrl_put(p_aml_audio->pin_ctl);
+}
 
 
 static int m6tv_audio_audio_probe(struct platform_device *pdev)
 {
 	int ret = 0;
+	struct snd_soc_card *card = &snd_soc_m6tv_audio;
+	struct aml_audio_private_data *p_aml_audio;
 
 	CODEC_DEBUG( "enter %s\n", __func__);
-
-	m6tv_audio_snd_pdata = pdev->dev.platform_data;
-	snd_BUG_ON(!m6tv_audio_snd_pdata);
-#if 0
-	m6tv_audio_snd_priv = (struct m6tv_audio_private_data*)kzalloc(sizeof(struct m6tv_audio_private_data), GFP_KERNEL);
-	if (!m6tv_audio_snd_priv) {
-		CODEC_DEBUG(KERN_ERR "ASoC: Platform driver data allocation failed\n");
-		return -ENOMEM;
-	}
-#endif
-	m6tv_audio_snd_device = platform_device_alloc("soc-audio", -1);
-	if (!m6tv_audio_snd_device) {
-		CODEC_DEBUG(KERN_ERR "ASoC: Platform device allocation failed\n");
+	p_aml_audio = devm_kzalloc(&pdev->dev,
+			sizeof(struct aml_audio_private_data), GFP_KERNEL);
+	if (!p_aml_audio) {
+		dev_err(&pdev->dev, "Can't allocate aml_audio_private_data\n");
 		ret = -ENOMEM;
 		goto err;
 	}
 
-	platform_set_drvdata(m6tv_audio_snd_device, &snd_soc_m6tv_audio);
-	m6tv_audio_snd_device->dev.platform_data = m6tv_audio_snd_pdata;
-
-	ret = platform_device_add(m6tv_audio_snd_device);
+	card->dev = &pdev->dev;
+	platform_set_drvdata(pdev, card);
+	snd_soc_card_set_drvdata(card, p_aml_audio);
+	if (!(pdev->dev.of_node)) {
+		dev_err(&pdev->dev, "Must be instantiated using device tree\n");
+		ret = -EINVAL;
+		goto err;
+	}
+	ret = snd_soc_register_card(card);
 	if (ret) {
-		CODEC_DEBUG(KERN_ERR "ASoC: Platform device allocation failed\n");
-		goto err_device_add;
+		dev_err(&pdev->dev, "snd_soc_register_card failed (%d)\n",
+			ret);
+		goto err;
 	}
 
-//	m6tv_audio_snd_priv->bias_level = SND_SOC_BIAS_OFF;
-//	m6tv_audio_snd_priv->clock_en = 0;
-
-	m6tv_audio_dev_init();
-	return ret;
-err_device_add:
-	platform_device_put(m6tv_audio_snd_device);
+	aml_m6_pinmux_init(card);
 
 err:
 //	kfree(m6tv_audio_snd_priv);
-
 	return ret;
 }
 
@@ -308,12 +323,23 @@ static int m6tv_audio_audio_remove(struct platform_device *pdev)
     return ret;
 }
 
+#ifdef CONFIG_USE_OF
+static const struct of_device_id amlogic_audio_dt_match[]={
+	{	.compatible = "sound_card,aml_m6tv_audio",
+	},
+	{},
+};
+#else
+#define amlogic_audio_dt_match NULL
+#endif
+
 static struct platform_driver aml_m6tv_audio_driver = {
     .probe  = m6tv_audio_audio_probe,
-    .remove = __devexit_p(m6tv_audio_audio_remove),
+    .remove = m6tv_audio_audio_remove,
     .driver = {
         .name = "aml_m6tv_audio",
         .owner = THIS_MODULE,
+        .of_match_table = amlogic_audio_dt_match,
     },
 };
 

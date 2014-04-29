@@ -422,27 +422,27 @@ static ssize_t store_subtype(struct class *class,
 }
 
 static struct class_attribute subtitle_class_attrs[] = {
-    __ATTR(enable,     S_IRUGO | S_IWUSR, show_enable,  store_enable),
-    __ATTR(total,     S_IRUGO | S_IWUSR, show_total,  store_total),
-    __ATTR(width,     S_IRUGO | S_IWUSR, show_width,  store_width),
-    __ATTR(height,     S_IRUGO | S_IWUSR, show_height,  store_height),
-    __ATTR(type,     S_IRUGO | S_IWUSR, show_type,  store_type),
-    __ATTR(curr,     S_IRUGO | S_IWUSR, show_curr,  store_curr),
-    __ATTR(index,     S_IRUGO | S_IWUSR, show_index,  store_index),
-    __ATTR(size,     S_IRUGO | S_IWUSR, show_size,  store_size),
-    __ATTR(data,     S_IRUGO | S_IWUSR, show_data,  store_data),
-    __ATTR(startpts,     S_IRUGO | S_IWUSR, show_startpts,  store_startpts),
-    __ATTR(fps,     S_IRUGO | S_IWUSR, show_fps,  store_fps),
-    __ATTR(subtype,     S_IRUGO | S_IWUSR, show_subtype,  store_subtype),
+    __ATTR(enable,     S_IRUGO | S_IWUSR | S_IWGRP, show_enable,  store_enable),
+    __ATTR(total,     S_IRUGO | S_IWUSR | S_IWGRP, show_total,  store_total),
+    __ATTR(width,     S_IRUGO | S_IWUSR | S_IWGRP, show_width,  store_width),
+    __ATTR(height,     S_IRUGO | S_IWUSR | S_IWGRP, show_height,  store_height),
+    __ATTR(type,     S_IRUGO | S_IWUSR | S_IWGRP, show_type,  store_type),
+    __ATTR(curr,     S_IRUGO | S_IWUSR | S_IWGRP, show_curr,  store_curr),
+    __ATTR(index,     S_IRUGO | S_IWUSR | S_IWGRP, show_index,  store_index),
+    __ATTR(size,     S_IRUGO | S_IWUSR | S_IWGRP, show_size,  store_size),
+    __ATTR(data,     S_IRUGO | S_IWUSR | S_IWGRP, show_data,  store_data),
+    __ATTR(startpts,     S_IRUGO | S_IWUSR | S_IWGRP, show_startpts,  store_startpts),
+    __ATTR(fps,     S_IRUGO | S_IWUSR | S_IWGRP, show_fps,  store_fps),
+    __ATTR(subtype,     S_IRUGO | S_IWUSR | S_IWGRP, show_subtype,  store_subtype),
 	__ATTR(reset, 	S_IRUGO | S_IWUSR, show_reset,  store_reset),
     __ATTR_NULL
 };
-
+/*
 static struct class subtitle_class = {
         .name = "subtitle",
         .class_attrs = subtitle_class_attrs,
     };
-
+*/
 /*********************************************************
  * /dev/amvideo APIs
  *********************************************************/
@@ -526,7 +526,7 @@ static long amsubtitle_ioctl(struct file *file,
                 break;
             case SUB_DATA_T_DATA: {
                     if (states->subtitle_info > 0) {
-						states->subtitle_info = subtitle_data[subtitle_write_pos].data;
+                        states->subtitle_info = (int)subtitle_data[subtitle_write_pos].data;
                     }
 				}
                 break;

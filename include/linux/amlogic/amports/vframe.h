@@ -68,12 +68,12 @@ typedef enum pixel_aspect_ratio_e {
  */
 typedef struct vframe_hist_s
 {
-	    unsigned int   hist_pow;
+	unsigned int   hist_pow;
         unsigned int   luma_sum;
         unsigned int   chroma_sum;
         unsigned int   pixel_sum;  // [31:30] POW [21:0] PIXEL_SUM
         unsigned int   height;
-        unsigned int   width;  
+        unsigned int   width;
         unsigned char  luma_max;
         unsigned char  luma_min;
         unsigned short gamma[64];
@@ -189,6 +189,7 @@ typedef struct vframe_s {
         struct tvafe_vga_parm_s vga_parm;
         /* pixel aspect ratio */
         enum pixel_aspect_ratio_e pixel_ratio;
+        u64 ready_jiffies64;//ready from decode on  jiffies_64
 } vframe_t;
 
 #if 0

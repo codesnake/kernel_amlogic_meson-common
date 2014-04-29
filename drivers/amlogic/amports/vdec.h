@@ -22,8 +22,12 @@
 #ifndef VDEC_H
 #define VDEC_H
 
+#include <linux/platform_device.h>
 
-extern int vdec_set_resource(struct resource * s, void *param);
+#include <mach/cpu.h>
+
+extern void vdec_set_decinfo(void *p);
+extern int vdec_set_resource(struct resource *s, struct device *p);
 
 extern s32 vdec_init(vformat_t vf);
 extern s32 vdec_release(vformat_t vf);
@@ -32,7 +36,7 @@ s32 vdec_dev_register(void);
 s32 vdec_dev_unregister(void);
 void vdec_power_mode(int level);
 
-#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8
+#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6TVD
 
 typedef enum {
     VDEC_1,

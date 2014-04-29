@@ -109,11 +109,55 @@ typedef struct {
     u32 VPP_postproc_misc_;
     u32 vscale_skip_count;
     u32 hscale_skip_count;
+    u32 vpp_3d_mode;
+    u32 vpp_2pic_mode;//bit[1:0] 0: 1 pic,1:two pic one buf,2:tow pic two buf
+    		      //bit[2]0:select pic0,1:select pic1
+    		      //bit[3]0:pic0 first,1:pic1 first
+    bool vpp_3d_scale;
+
 } vpp_frame_par_t;
 
+#if (MESON_CPU_TYPE==MESON_CPU_TYPE_MESON6TV)||(MESON_CPU_TYPE==MESON_CPU_TYPE_MESON6TVD)
+#define TV_3D_FUNCTION_OPEN
+#endif
+
+#ifdef TV_3D_FUNCTION_OPEN
+
+/*cmd use for 3d operation*/
+#define MODE_3D_DISABLE     0x00000000
+#define MODE_3D_ENABLE      0x00000001
+#define MODE_3D_AUTO        0x00000002
+#define MODE_3D_LR          0x00000004
+#define MODE_3D_TB          0x00000008
+#define MODE_3D_LA          0x00000010
+#define MODE_3D_FA          0x00000020
+#define MODE_3D_LR_SWITCH   0x00000100
+#define MODE_3D_TO_2D_L     0x00000200
+#define MODE_3D_TO_2D_R     0x00000400
+#define MODE_3D_MVC	    0x00000800
+#define MODE_3D_TO_2D_MASK  (MODE_3D_TO_2D_L|MODE_3D_TO_2D_R)
+
+#define VPP_3D_MODE_NULL 0x0
+#define VPP_3D_MODE_LR   0x1
+#define VPP_3D_MODE_TB   0x2
+#define VPP_3D_MODE_LA	 0x3
+#define VPP_3D_MODE_FA	 0x4
+
+#define VPP_SELECT_PIC0  0x0
+#define VPP_SELECT_PIC1  0x4
+
+#define VPP_PIC0_FIRST	0x0
+#define VPP_PIC1_FIRST	0x8
+
+extern
+void vpp_set_3d_scale(bool enable);
+
+#endif
+
 extern void
-vpp_set_filters(u32 wide_mode, vframe_t * vf,
+vpp_set_filters(u32 process_3d_type,u32 wide_mode, vframe_t * vf,
                 vpp_frame_par_t * next_frame_par, const vinfo_t *vinfo);
+
 
 extern void
 vpp_set_video_source_crop(u32 t, u32 l, u32 b, u32 r);

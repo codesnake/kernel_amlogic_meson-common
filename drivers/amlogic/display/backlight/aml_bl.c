@@ -31,12 +31,15 @@
 #include <linux/backlight.h>
 #include <linux/slab.h>
 #include <linux/amlogic/aml_bl.h>
+#include <linux/workqueue.h>
 #include <mach/power_gate.h>
 #ifdef CONFIG_ARCH_MESON6    
 #include <mach/mod_gate.h>
 #endif /* CONFIG_ARCH_MESON6 */
 #include <linux/amlogic/aml_gpio_consumer.h>
 #include <linux/pinctrl/consumer.h>
+#include <linux/delay.h>
+#include <linux/amlogic/aml_lcd_bl.h>
 
 //#define MESON_BACKLIGHT_DEBUG
 #ifdef MESON_BACKLIGHT_DEBUG
@@ -56,7 +59,6 @@
 #define bl_gpio_get_value(gpio) 			amlogic_get_value(gpio, BL_NAME)
 #define bl_gpio_set_value(gpio,val) 		amlogic_set_value(gpio, val, BL_NAME)
 
-#include "aml_lcd_bl.h"
 #ifdef LCD_BACKLIGHT_SUPPORT
 /* for lcd backlight power */
 typedef enum {
@@ -89,6 +91,7 @@ typedef struct {
 	unsigned level_mid_mapping;
 	unsigned level_min;
 	unsigned level_max;
+	unsigned short power_on_delay;
     unsigned char method;
 	int gpio;
 	unsigned dim_max;
@@ -115,6 +118,8 @@ typedef struct {
 	unsigned combo_low_duty_min;
 	
 	struct pinctrl *p;
+	struct workqueue_struct *workqueue;
+	struct delayed_work bl_delayed_work;
 } Lcd_Bl_Config_t;
 
 static Lcd_Bl_Config_t bl_config;
@@ -125,46 +130,44 @@ static int bl_real_status = 1;
 #define FIN_FREQ				(24 * 1000)
 
 static DEFINE_MUTEX(bl_power_mutex);
-void bl_power_on(int bl_flag)
+static void power_on_bl(void)
 {
 	struct pinctrl_state *s;
 	int ret;
-
-	mutex_lock(&bl_power_mutex);
-	if (bl_flag == LCD_BL_FLAG)
-		bl_status = 1;
 	
-	DPRINT("%s(bl_flag=%s): bl_level=%u, bl_status=%s, bl_real_status=%s\n", __FUNCTION__, (bl_flag ? "LCD_BL_FLAG" : "DRV_BL_FLAG"), bl_level, (bl_status ? "ON" : "OFF"), (bl_real_status ? "ON" : "OFF"));
-	if ((bl_level == 0) || (bl_real_status == 1)) {
-		goto exit_bl_power_on;
+	mutex_lock(&bl_power_mutex);
+	DPRINT("%s: bl_level=%u, bl_status=%s, bl_real_status=%s\n", __FUNCTION__, bl_level, (bl_status ? "ON" : "OFF"), (bl_real_status ? "ON" : "OFF"));
+	if ((bl_level == 0) || (bl_status == 0)) {
+		goto exit_power_on_bl;
 	}
 	
 	if (bl_config.method == BL_CTL_GPIO) {
 		aml_set_reg32_bits(P_LED_PWM_REG0, 1, 12, 2);
+		mdelay(20);
 		bl_gpio_direction_output(bl_config.gpio, 1);
 	}
 	else if ((bl_config.method == BL_CTL_PWM_NEGATIVE) || (bl_config.method == BL_CTL_PWM_POSITIVE)) {
 		switch (bl_config.pwm_port) {
 			case BL_PWM_A:
-				aml_set_reg32_bits(P_PWM_MISC_REG_AB, bl_config.combo_high_pre_div, 8, 7);  //pwm_a_clk_div
+				aml_set_reg32_bits(P_PWM_MISC_REG_AB, bl_config.pwm_pre_div, 8, 7);  //pwm_a_clk_div
 				aml_set_reg32_bits(P_PWM_MISC_REG_AB, 0, 4, 2);  //pwm_a_clk_sel
 				aml_set_reg32_bits(P_PWM_MISC_REG_AB, 1, 15, 1);  //pwm_a_clk_en
 				aml_set_reg32_bits(P_PWM_MISC_REG_AB, 1, 0, 1);  //enable pwm_a
 				break;
 			case BL_PWM_B:
-				aml_set_reg32_bits(P_PWM_MISC_REG_AB, bl_config.combo_high_pre_div, 16, 7);  //pwm_b_clk_div
+				aml_set_reg32_bits(P_PWM_MISC_REG_AB, bl_config.pwm_pre_div, 16, 7);  //pwm_b_clk_div
 				aml_set_reg32_bits(P_PWM_MISC_REG_AB, 0, 6, 2);  //pwm_b_clk_sel
 				aml_set_reg32_bits(P_PWM_MISC_REG_AB, 1, 23, 1);  //pwm_b_clk_en
 				aml_set_reg32_bits(P_PWM_MISC_REG_AB, 1, 1, 1);  //enable pwm_b
 				break;
 			case BL_PWM_C:
-				aml_set_reg32_bits(P_PWM_MISC_REG_CD, bl_config.combo_high_pre_div, 8, 7);  //pwm_c_clk_div
+				aml_set_reg32_bits(P_PWM_MISC_REG_CD, bl_config.pwm_pre_div, 8, 7);  //pwm_c_clk_div
 				aml_set_reg32_bits(P_PWM_MISC_REG_CD, 0, 4, 2);  //pwm_c_clk_sel
 				aml_set_reg32_bits(P_PWM_MISC_REG_CD, 1, 15, 1);  //pwm_c_clk_en
 				aml_set_reg32_bits(P_PWM_MISC_REG_CD, 1, 0, 1);  //enable pwm_c
 				break;
 			case BL_PWM_D:
-				aml_set_reg32_bits(P_PWM_MISC_REG_CD, bl_config.combo_high_pre_div, 16, 7);  //pwm_d_clk_div
+				aml_set_reg32_bits(P_PWM_MISC_REG_CD, bl_config.pwm_pre_div, 16, 7);  //pwm_d_clk_div
 				aml_set_reg32_bits(P_PWM_MISC_REG_CD, 0, 6, 2);  //pwm_d_clk_sel
 				aml_set_reg32_bits(P_PWM_MISC_REG_CD, 1, 23, 1);  //pwm_d_clk_en
 				aml_set_reg32_bits(P_PWM_MISC_REG_CD, 1, 1, 1);  //enable pwm_d
@@ -175,21 +178,22 @@ void bl_power_on(int bl_flag)
 	
 		if (IS_ERR(bl_config.p)) {
 			printk("set backlight pinmux error.\n");
-			goto exit_bl_power_on;
+			goto exit_power_on_bl;
 		}
 		s = pinctrl_lookup_state(bl_config.p, "default");	//select pinctrl
 		if (IS_ERR(s)) {
 			printk("set backlight pinmux error.\n");
 			devm_pinctrl_put(bl_config.p);
-			goto exit_bl_power_on;
+			goto exit_power_on_bl;
 		}
 	
 		ret = pinctrl_select_state(bl_config.p, s);	//set pinmux and lock pins
 		if (ret < 0) {
 			printk("set backlight pinmux error.\n");
 			devm_pinctrl_put(bl_config.p);
-			goto exit_bl_power_on;
+			goto exit_power_on_bl;
 		}
+		mdelay(20);
 		if (bl_config.pwm_gpio_used) {
 			if (bl_config.gpio)
 				bl_gpio_direction_output(bl_config.gpio, 1);
@@ -226,25 +230,25 @@ void bl_power_on(int bl_flag)
 		}
 		switch (bl_config.combo_low_port) {
 			case BL_PWM_A:
-				aml_set_reg32_bits(P_PWM_MISC_REG_AB, bl_config.combo_high_pre_div, 8, 7);  //pwm_a_clk_div
+				aml_set_reg32_bits(P_PWM_MISC_REG_AB, bl_config.combo_low_pre_div, 8, 7);  //pwm_a_clk_div
 				aml_set_reg32_bits(P_PWM_MISC_REG_AB, 0, 4, 2);  //pwm_a_clk_sel
 				aml_set_reg32_bits(P_PWM_MISC_REG_AB, 1, 15, 1);  //pwm_a_clk_en
 				aml_set_reg32_bits(P_PWM_MISC_REG_AB, 1, 0, 1);  //enable pwm_a
 				break;
 			case BL_PWM_B:
-				aml_set_reg32_bits(P_PWM_MISC_REG_AB, bl_config.combo_high_pre_div, 16, 7);  //pwm_b_clk_div
+				aml_set_reg32_bits(P_PWM_MISC_REG_AB, bl_config.combo_low_pre_div, 16, 7);  //pwm_b_clk_div
 				aml_set_reg32_bits(P_PWM_MISC_REG_AB, 0, 6, 2);  //pwm_b_clk_sel
 				aml_set_reg32_bits(P_PWM_MISC_REG_AB, 1, 23, 1);  //pwm_b_clk_en
 				aml_set_reg32_bits(P_PWM_MISC_REG_AB, 1, 1, 1);  //enable pwm_b
 				break;
 			case BL_PWM_C:
-				aml_set_reg32_bits(P_PWM_MISC_REG_CD, bl_config.combo_high_pre_div, 8, 7);  //pwm_c_clk_div
+				aml_set_reg32_bits(P_PWM_MISC_REG_CD, bl_config.combo_low_pre_div, 8, 7);  //pwm_c_clk_div
 				aml_set_reg32_bits(P_PWM_MISC_REG_CD, 0, 4, 2);  //pwm_c_clk_sel
 				aml_set_reg32_bits(P_PWM_MISC_REG_CD, 1, 15, 1);  //pwm_c_clk_en
 				aml_set_reg32_bits(P_PWM_MISC_REG_CD, 1, 0, 1);  //enable pwm_c
 				break;
 			case BL_PWM_D:
-				aml_set_reg32_bits(P_PWM_MISC_REG_CD, bl_config.combo_high_pre_div, 16, 7);  //pwm_d_clk_div
+				aml_set_reg32_bits(P_PWM_MISC_REG_CD, bl_config.combo_low_pre_div, 16, 7);  //pwm_d_clk_div
 				aml_set_reg32_bits(P_PWM_MISC_REG_CD, 0, 6, 2);  //pwm_d_clk_sel
 				aml_set_reg32_bits(P_PWM_MISC_REG_CD, 1, 23, 1);  //pwm_d_clk_en
 				aml_set_reg32_bits(P_PWM_MISC_REG_CD, 1, 1, 1);  //enable pwm_d
@@ -255,31 +259,49 @@ void bl_power_on(int bl_flag)
 	
 		if (IS_ERR(bl_config.p)) {
 			printk("set backlight pinmux error.\n");
-			goto exit_bl_power_on;
+			goto exit_power_on_bl;
 		}
 		s = pinctrl_lookup_state(bl_config.p, "pwm_combo");	//select pinctrl	
 		if (IS_ERR(s)) {
 			printk("set backlight pinmux error.\n");
 			devm_pinctrl_put(bl_config.p);
-			goto exit_bl_power_on;
+			goto exit_power_on_bl;
 		}
 	
 		ret = pinctrl_select_state(bl_config.p, s);	//set pinmux and lock pins
 		if (ret < 0) {
 			printk("set backlight pinmux error.\n");
 			devm_pinctrl_put(bl_config.p);
-			goto exit_bl_power_on;
+			goto exit_power_on_bl;
 		}
 	}
 	else {
 		printk("Wrong backlight control method\n");
-		goto exit_bl_power_on;
+		goto exit_power_on_bl;
 	}
 	bl_real_status = 1;
 	printk("backlight power on\n");
 	
-exit_bl_power_on:
+exit_power_on_bl:
 	mutex_unlock(&bl_power_mutex);
+}
+
+void bl_power_on(int bl_flag)
+{
+	mutex_lock(&bl_power_mutex);
+	if (bl_flag == LCD_BL_FLAG)
+		bl_status = 1;
+	
+	DPRINT("%s(bl_flag=%s): bl_level=%u, bl_status=%s, bl_real_status=%s\n", __FUNCTION__, (bl_flag ? "LCD_BL_FLAG" : "DRV_BL_FLAG"), bl_level, (bl_status ? "ON" : "OFF"), (bl_real_status ? "ON" : "OFF"));
+	if ((bl_level == 0) || (bl_real_status == 1)) {
+		mutex_unlock(&bl_power_mutex);
+		return;
+	}
+	
+	mutex_unlock(&bl_power_mutex);
+	queue_delayed_work(bl_config.workqueue, &bl_config.bl_delayed_work, msecs_to_jiffies(bl_config.power_on_delay)); 
+	
+	DPRINT("bl_power_on...\n");
 }
 
 void bl_power_off(int bl_flag)
@@ -675,9 +697,19 @@ static inline int _get_backlight_config(struct platform_device *pdev)
 		}
 		DPRINT("bl level max=%u, min=%u\n", bl_config.level_max, bl_config.level_min);
 		
+		ret = of_property_read_u32(pdev->dev.of_node, "bl_power_on_delay", &val);
+		if (ret) {
+			printk("faild to get bl_power_on_delay\n");
+			bl_config.power_on_delay = 100;
+		}
+		else {
+			val = val & 0xffff;
+			bl_config.power_on_delay = (unsigned short)val;
+		}
+		DPRINT("bl power_on_delay: %ums\n", bl_config.power_on_delay);
 		ret = of_property_read_u32(pdev->dev.of_node, "bl_ctrl_method", &val);
 		if (ret) {
-			printk("faild to get bl_ctrl_method!\n");
+			printk("faild to get bl_ctrl_method\n");
 #if (MESON_CPU_TYPE == MESON_CPU_TYPE_MESON6)
 			bl_config.method = BL_CTL_GPIO;
 #elif (MESON_CPU_TYPE == MESON_CPU_TYPE_MESON8)
@@ -689,6 +721,7 @@ static inline int _get_backlight_config(struct platform_device *pdev)
 			bl_config.method = (unsigned char)val;
 		}
 		DPRINT("bl control_method: %s(%u)\n", bl_ctrl_method_table[bl_config.method], bl_config.method);
+		
 		ret = of_property_read_string_index(pdev->dev.of_node, "bl_pwm_port_gpio_used", 1, &str);
 		if (ret) {
 			printk("faild to get bl_pwm_port_gpio_used!\n");
@@ -987,6 +1020,14 @@ static int aml_bl_probe(struct platform_device *pdev)
     if (pdata->set_bl_level)
         pdata->set_bl_level(bldev->props.brightness);
 	
+	//init workqueue	
+	INIT_DELAYED_WORK(&bl_config.bl_delayed_work, power_on_bl);
+	//bl_config.workqueue = create_singlethread_workqueue("bl_power_on_queue");
+	bl_config.workqueue = create_workqueue("bl_power_on_queue");
+	if (bl_config.workqueue == NULL) {
+		printk("can't create bl work queue\n");
+	}
+	
 	printk("aml bl probe OK.\n");
     return 0;
 
@@ -1000,6 +1041,10 @@ static int __exit aml_bl_remove(struct platform_device *pdev)
     struct aml_bl *amlbl = platform_get_drvdata(pdev);
 
     DTRACE();
+	
+	if (bl_config.workqueue)
+		destroy_workqueue(bl_config.workqueue);
+	
     backlight_device_unregister(amlbl->bldev);
     platform_set_drvdata(pdev, NULL);
     kfree(amlbl);

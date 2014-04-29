@@ -33,7 +33,6 @@
 #include <linux/syscore_ops.h>
 
 #include <trace/events/power.h>
-
 /**
  * The "cpufreq driver" - the arch- or hardware-dependent low
  * level driver of CPUFreq support, and its spinlock. This lock
@@ -397,6 +396,7 @@ show_one(cpuinfo_max_freq, cpuinfo.max_freq);
 show_one(cpuinfo_transition_latency, cpuinfo.transition_latency);
 show_one(scaling_min_freq, min);
 show_one(scaling_max_freq, max);
+show_one(scaling_dflt_freq, dflt);
 show_one(scaling_cur_freq, cur);
 
 static int __cpufreq_set_policy(struct cpufreq_policy *data,
@@ -417,7 +417,7 @@ static ssize_t store_##file_name					\
 	if (ret)							\
 		return -EINVAL;						\
 									\
-	ret = sscanf(buf, "%u", &freq);			\
+	ret = sscanf(buf, "%lu", &freq);			\
 	if (ret != 1)							\
 		return -EINVAL;						\
 		\
@@ -426,7 +426,6 @@ static ssize_t store_##file_name					\
 	if(freq < policy->cpuinfo.min_freq)	\
 		freq = policy->cpuinfo.min_freq;   \
 	new_policy.object = freq;	\
-									\
 	ret = __cpufreq_set_policy(policy, &new_policy);		\
 	policy->user_policy.object = policy->object;			\
 									\
@@ -435,6 +434,7 @@ static ssize_t store_##file_name					\
 
 store_one(scaling_min_freq, min);
 store_one(scaling_max_freq, max);
+store_one(scaling_dflt_freq, dflt);
 
 /**
  * show_cpuinfo_cur_freq - current CPU frequency as detected by hardware
@@ -619,6 +619,7 @@ cpufreq_freq_attr_ro(related_cpus);
 cpufreq_freq_attr_ro(affected_cpus);
 cpufreq_freq_attr_rw(scaling_min_freq);
 cpufreq_freq_attr_rw(scaling_max_freq);
+cpufreq_freq_attr_rw(scaling_dflt_freq);
 cpufreq_freq_attr_rw(scaling_governor);
 cpufreq_freq_attr_rw(scaling_setspeed);
 
@@ -628,6 +629,7 @@ static struct attribute *default_attrs[] = {
 	&cpuinfo_transition_latency.attr,
 	&scaling_min_freq.attr,
 	&scaling_max_freq.attr,
+	&scaling_dflt_freq.attr,
 	&affected_cpus.attr,
 	&related_cpus.attr,
 	&scaling_governor.attr,
@@ -1717,6 +1719,7 @@ static int __cpufreq_set_policy(struct cpufreq_policy *data,
 
 	data->min = policy->min;
 	data->max = policy->max;
+	data->dflt = policy->dflt;
 
 	pr_debug("new min and max freqs are %u - %u kHz\n",
 					data->min, data->max);

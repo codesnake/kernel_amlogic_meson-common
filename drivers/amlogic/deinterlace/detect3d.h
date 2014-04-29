@@ -1,7 +1,7 @@
 #ifndef _DET3D_H
 #define _DET3D_H
 
-#if MESON_CPU_TYPE == MESON_CPU_TYPE_MESON6TV
+#if (MESON_CPU_TYPE==MESON_CPU_TYPE_MESON6TV)||(MESON_CPU_TYPE==MESON_CPU_TYPE_MESON6TVD)
 //***************************************************************************
 //******** DET3D REGISTERS ********
 //***************************************************************************

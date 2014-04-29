@@ -300,6 +300,14 @@ static int blktrans_ioctl(struct block_device *bdev, fmode_t mode,
 	case BLKFLSBUF:
 		ret = dev->tr->flush ? dev->tr->flush(dev) : 0;
 		break;
+		//add this for m6 old nand driver
+	case BLKWIPEPART:
+	//printk("blktrans_ioctl BLKWIPEPART \n");
+	if(dev->tr->wipe_part){
+	printk("blktrans_ioctl dev->tr->wipe_part : \n");
+	ret = dev->tr->wipe_part(dev);
+	}
+	break;
 	default:
 		ret = -ENOTTY;
 	}
@@ -405,7 +413,7 @@ int add_mtd_blktrans_dev(struct mtd_blktrans_dev *new)
 		snprintf(gd->disk_name, sizeof(gd->disk_name),
 			 "%s%d", tr->name, new->devnum);
 
-	set_capacity(gd, (new->size * tr->blksize) >> 9);
+	set_capacity(gd, new->size *(tr->blksize >> 9));
 
 	/* Create the request queue */
 	spin_lock_init(&new->queue_lock);

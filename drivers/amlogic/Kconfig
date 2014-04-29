@@ -10,7 +10,7 @@ menu "Amlogic Device Drivers"
 comment "Char devices"
 
 source "drivers/amlogic/early_init/Kconfig"
-#source "drivers/amlogic/regd/Kconfig"
+source "drivers/amlogic/regd/Kconfig"
 source "drivers/amlogic/uart/Kconfig"
 source "drivers/amlogic/of/Kconfig"
 source "drivers/amlogic/rtc/Kconfig"
@@ -21,17 +21,9 @@ source "drivers/amlogic/pinctrl/Kconfig"
 source "drivers/amlogic/power/Kconfig"
 source "drivers/amlogic/securitykeys/Kconfig"
 source "drivers/amlogic/keymanage/Kconfig"
-#source "drivers/amlogic/extern_io/Kconfig"
-#source "drivers/amlogic/minilvds/Kconfig"
 source "drivers/amlogic/efuse/Kconfig"
-#source "drivers/amlogic/smartcard/Kconfig"
-#source "drivers/amlogic/gps/Kconfig"
-#source "drivers/amlogic/modem/Kconfig"
-#source "drivers/amlogic/debug/Kconfig"
-#source "drivers/amlogic/sensors/Kconfig"
+source "drivers/amlogic/smartcard/Kconfig"
 source "drivers/amlogic/boot_monitor/Kconfig"
-#source "drivers/amlogic/aml_watchdog/Kconfig"
-#source "drivers/amlogic/spi/Kconfig"
 source "drivers/amlogic/thermal/Kconfig"
 
 #
@@ -42,8 +34,8 @@ source "drivers/amlogic/usb/Kconfig"
 #source "drivers/amlogic/cardreader/Kconfig"
 source "drivers/amlogic/mmc/Kconfig"
 source "drivers/amlogic/spi_nor/Kconfig"
-source "drivers/amlogic/nand/Kconfig"
-source "drivers/amlogic/amlnf/Kconfig"
+isource "../hardware/amlogic/nand/amlnf/Kconfig"
+isource "../hardware/amlogic/nand/nand/Kconfig"
 
 #
 #	Network devices
@@ -51,22 +43,21 @@ source "drivers/amlogic/amlnf/Kconfig"
 comment "Network devices"
 source "drivers/amlogic/ethernet/Kconfig"
 source "drivers/amlogic/wifi/Kconfig"
-#isource "../../hardware/wifi/broadcom/drivers/ap6xxx/broadcm_40181/Kconfig"
-isource "../../hardware/wifi/realtek/drivers/8188eu/rtl8xxx_EU/Kconfig"
-isource "../../hardware/wifi/realtek/drivers/8188eu/rtl8xxx_EU_MP/Kconfig"
-#isource "../../hardware/wifi/realtek/drivers/8192cu/rtl8xxx_CU/Kconfig"
-#isource "../../hardware/wifi/realtek/drivers/8192du/rtl8xxx_DU/Kconfig"
-#isource "../../hardware/wifi/realtek/drivers/8192eu/rtl8192EU/Kconfig"
+isource "../hardware/wifi/broadcom/drivers/ap6xxx/broadcm_40181/Kconfig"
+isource "../hardware/wifi/realtek/drivers/8188eu/rtl8xxx_EU/Kconfig"
+isource "../hardware/wifi/realtek/drivers/8188eu/rtl8xxx_EU_MP/Kconfig"
+isource "../hardware/wifi/realtek/drivers/8192cu/rtl8xxx_CU/Kconfig"
+isource "../hardware/wifi/realtek/drivers/8192du/rtl8xxx_DU/Kconfig"
+isource "../hardware/wifi/realtek/drivers/8192eu/rtl8192EU/Kconfig"
 source "drivers/amlogic/bluetooth/Kconfig"
-#3G module power manager
-#source "drivers/amlogic/modem/Kconfig"
-#nfc
 source "drivers/amlogic/nfc/Kconfig"
+
 #
 #  Audio
 #
 comment "Audio devices"
 source "drivers/amlogic/amaudio/Kconfig"
+source "drivers/amlogic/amaudio2/Kconfig"
 source "drivers/amlogic/audiodsp/Kconfig"
 
 #
@@ -77,30 +68,27 @@ source "drivers/amlogic/amports/Kconfig"
 source "drivers/amlogic/canvas/Kconfig"
 source "drivers/amlogic/display/Kconfig"
 source "drivers/amlogic/hdmi/Kconfig"
-isource "../../hardware/tvin/Kconfig"
-#source "drivers/amlogic/cmem/Kconfig"
-#source "drivers/amlogic/jpeglogo/Kconfig"
-#source "drivers/amlogic/dvb/Kconfig"
+isource "../hardware/tvin/Kconfig"
+source "drivers/amlogic/ext_hdmiin/Kconfig"
 source "drivers/amlogic/ppmgr/Kconfig"
 source "drivers/amlogic/camera/Kconfig"
 source "drivers/amlogic/video_dev/Kconfig"
 source "drivers/amlogic/ionvideo/Kconfig"
 source "drivers/amlogic/deinterlace/Kconfig"
-#source "drivers/amlogic/freescale/Kconfig"
 source "drivers/amlogic/mipi/Kconfig"
-#source "drivers/amlogic/d2d3/Kconfig"
-#source "drivers/amlogic/amvecm/Kconfig"
-
-#deferred module for speed
-#source "drivers/amlogic/load_deferred_module/Kconfig"
+source "drivers/amlogic/d2d3/Kconfig"
+source "drivers/amlogic/amvecm/Kconfig"
+source "drivers/amlogic/dvb_tv/Kconfig"
 
 #
 #	GPU
 #
 comment "GPU (ARM Mali)"
-source "drivers/amlogic/ump/Kconfig"
-source "drivers/amlogic/mali/Kconfig"
+#isource "drivers/amlogic/ump/Kconfig"
+#isource "drivers/amlogic/mali/Kconfig"
 #comment "GPU (ARM Mali (external))"
+isource "../hardware/arm/gpu/ump/Kconfig"
+isource "../hardware/arm/gpu/mali/Kconfig"
 source "drivers/amlogic/ion_dev/Kconfig"
 
 #
@@ -109,4 +97,5 @@ source "drivers/amlogic/ion_dev/Kconfig"
 source "drivers/amlogic/crypto/Kconfig"
 
 source "drivers/amlogic/mhl/Kconfig"
+isource "../hardware/amlogic/pmu/Kconfig"
 endmenu

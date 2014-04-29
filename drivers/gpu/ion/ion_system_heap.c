@@ -24,6 +24,9 @@
 #include <linux/seq_file.h>
 #include <linux/slab.h>
 #include <linux/vmalloc.h>
+#include <plat/io.h>
+#include <mach/io.h>
+#include <mach/register.h>
 #include "ion_priv.h"
 
 static unsigned int high_order_gfp_flags = (GFP_HIGHUSER | __GFP_ZERO |
@@ -31,7 +34,7 @@ static unsigned int high_order_gfp_flags = (GFP_HIGHUSER | __GFP_ZERO |
 					   ~__GFP_WAIT;
 static unsigned int low_order_gfp_flags  = (GFP_HIGHUSER | __GFP_ZERO |
 					 __GFP_NOWARN);
-static const unsigned int orders[] = {8, 4, 0};
+static const unsigned int orders[] = {8, 4, 3, 2, 1, 0};
 static const int num_orders = ARRAY_SIZE(orders);
 static int order_to_index(unsigned int order)
 {
@@ -118,8 +121,25 @@ static struct page_info *alloc_largest_available(struct ion_system_heap *heap,
 	struct page *page;
 	struct page_info *info;
 	int i;
+	struct zone *zone = NULL;
+	struct zoneref *z;
+	struct zonelist *zonelist;
+	bool ret;
+
+	zonelist = NODE_DATA(numa_node_id())->node_zonelists;
 
 	for (i = 0; i < num_orders; i++) {
+
+		for_each_zone_zonelist(zone, z, zonelist,
+				gfp_zone(heap->pools[order_to_index(orders[i])]->gfp_mask)) {
+			ret = zone_watermark_ok_safe(zone, orders[i], low_wmark_pages(zone), 0, 0);
+			if(ret)
+				break;
+		}
+		if(!ret && i !=  num_orders - 1){
+			continue;
+		}
+
 		if (size < order_to_size(orders[i]))
 			continue;
 		if (max_order < orders[i])

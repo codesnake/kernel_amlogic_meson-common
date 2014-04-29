@@ -50,10 +50,14 @@
 #include <plat/io.h>
 #endif
 
-#define USE_EXTERNAL_DAC 1
-#define DRV_NAME "aml_snd_m8"
-#define HP_DET                  0//1
+#ifdef CONFIG_MESON_TRUSTZONE
+#include <mach/meson-secure.h>
+#endif
 
+//#define USE_EXTERNAL_DAC 1
+#define DRV_NAME "aml_snd_m8"
+#define HP_DET                  1
+extern int ext_codec;
 static void aml_set_clock(int enable)
 {
     /* set clock gating */
@@ -127,8 +131,8 @@ static int aml_audio_hp_detect(struct aml_audio_private_data *p_aml_audio)
 {
    int loop_num = 0;
    int ret;
-
-    mutex_lock(&p_aml_audio->lock);
+   p_aml_audio->hp_det_status = false;
+   // mutex_lock(&p_aml_audio->lock);
 
     while(loop_num < 3){
         ret = hp_det_adc_value(p_aml_audio);
@@ -146,7 +150,7 @@ static int aml_audio_hp_detect(struct aml_audio_private_data *p_aml_audio)
         }
     }
  
-    mutex_unlock(&p_aml_audio->lock);
+   // mutex_unlock(&p_aml_audio->lock);
 
     return ret; 
 }
@@ -210,15 +214,18 @@ static void aml_asoc_work_func(struct work_struct *work)
         }
         
     }
+    p_aml_audio->hp_det_status = true;
 }
 
 
 static void aml_asoc_timer_func(unsigned long data)
 {
     struct aml_audio_private_data *p_aml_audio = (struct aml_audio_private_data *)data;
-    unsigned long delay = msecs_to_jiffies(200);
+    unsigned long delay = msecs_to_jiffies(150);
 
-    schedule_work(&p_aml_audio->work);
+    if(p_aml_audio->hp_det_status){
+        schedule_work(&p_aml_audio->work);
+    }
     mod_timer(&p_aml_audio->timer, jiffies + delay);
 }
 #endif
@@ -242,8 +249,13 @@ static int aml_asoc_hw_params(struct snd_pcm_substream *substream,
     }
 
     /* set cpu DAI configuration */
-    ret = snd_soc_dai_set_fmt(cpu_dai, SND_SOC_DAIFMT_I2S |
-        SND_SOC_DAIFMT_NB_NF | SND_SOC_DAIFMT_CBM_CFM);
+    if(!strncmp(codec_info.name_bus,"rt5616",6)){
+        ret = snd_soc_dai_set_fmt(cpu_dai, SND_SOC_DAIFMT_I2S |
+            SND_SOC_DAIFMT_IB_NF | SND_SOC_DAIFMT_CBM_CFM);
+    }else{
+        ret = snd_soc_dai_set_fmt(cpu_dai, SND_SOC_DAIFMT_I2S |
+            SND_SOC_DAIFMT_NB_NF | SND_SOC_DAIFMT_CBM_CFM);
+    }
     if (ret < 0) {
         printk(KERN_ERR "%s: set cpu dai fmt failed!\n", __func__);
         return ret;
@@ -445,6 +457,7 @@ static int speaker_events(struct snd_soc_dapm_widget *w,
 	switch (event) {
 	case SND_SOC_DAPM_POST_PMU:
 		amlogic_set_value(p_audio->gpio_mute, 1, "mute_spk");
+        msleep(50);
 		break;
 	case SND_SOC_DAPM_PRE_PMD:
 		amlogic_set_value(p_audio->gpio_mute, 0, "mute_spk");
@@ -501,6 +514,21 @@ static int aml_asoc_init(struct snd_soc_pcm_runtime *rtd)
                 ARRAY_SIZE(aml_m8_controls));
     if (ret)
        return ret;
+#if HP_DET
+
+    p_aml_audio->sdev.name = "h2w";//for report headphone to android
+    ret = switch_dev_register(&p_aml_audio->sdev);
+    if (ret < 0){
+        printk(KERN_ERR "ASoC: register hp switch dev failed\n");
+        return ret;
+    }
+
+    p_aml_audio->mic_sdev.name = "mic_dev";//for micphone detect
+    ret = switch_dev_register(&p_aml_audio->mic_sdev);
+    if (ret < 0){
+        printk(KERN_ERR "ASoC: register mic switch dev failed\n");
+        return ret;
+    }
 
     /* Add specific widgets */
     snd_soc_dapm_new_controls(dapm, aml_asoc_dapm_widgets,
@@ -515,7 +543,7 @@ static int aml_asoc_init(struct snd_soc_pcm_runtime *rtd)
         }
     }
 
-#if HP_DET
+    p_aml_audio->hp_det_status = true;
     p_aml_audio->mic_det = of_property_read_bool(card->dev->of_node,"mic_det");
 
     printk("entern %s : mic_det=%d \n",__func__,p_aml_audio->mic_det);
@@ -608,10 +636,18 @@ static void aml_m8_pinmux_init(struct snd_soc_card *card)
     p_aml_audio->pin_ctl = devm_pinctrl_get_select(card->dev, "aml_snd_m8");
     
     p_audio = p_aml_audio;
- #if USE_EXTERNAL_DAC
-    aml_write_reg32(P_AO_SECURE_REG1,0x00000000);
-    aml_clr_reg32_mask(P_AO_SECURE_REG1, ((1<<8) | (1<<1)));
- #endif
+//#if USE_EXTERNAL_DAC
+    if(ext_codec){
+#ifndef CONFIG_MESON_TRUSTZONE
+    //aml_write_reg32(P_AO_SECURE_REG1,0x00000000);
+        aml_clr_reg32_mask(P_AO_SECURE_REG1, ((1<<8) | (1<<1)));
+#else
+    /* Secure reg can only be accessed in Secure World if TrustZone enabled. */
+    //meson_secure_reg_write(P_AO_SECURE_REG1, 0x00000000);
+	meson_secure_reg_write(P_AO_SECURE_REG1, meson_secure_reg_read(P_AO_SECURE_REG1) & (~((1<<8) | (1<<1))));
+#endif /* CONFIG_MESON_TRUSTZONE */
+    }
+//#endif
 	ret = of_property_read_string(card->dev->of_node, "mute_gpio", &str);
 	if (ret < 0) {
 		printk("aml_snd_m8: faild to get mute_gpio!\n");
@@ -698,19 +734,6 @@ static int aml_m8_audio_probe(struct platform_device *pdev)
 
     aml_m8_pinmux_init(card);
 
-    p_aml_audio->sdev.name = "h2w";//for report headphone to android
-    ret = switch_dev_register(&p_aml_audio->sdev);
-    if (ret < 0){
-        printk(KERN_ERR "ASoC: register hp switch dev failed\n");
-        goto err;
-    }
-
-    p_aml_audio->mic_sdev.name = "mic_dev";//for micphone detect
-    ret = switch_dev_register(&p_aml_audio->mic_sdev);
-    if (ret < 0){
-        printk(KERN_ERR "ASoC: register mic switch dev failed\n");
-        goto err;
-    }
 
     return 0;
 #endif

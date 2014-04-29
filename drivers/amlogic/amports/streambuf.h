@@ -53,6 +53,7 @@ typedef struct stream_buf_s {
 	u32	buf_wp;
 	u32	buf_rp;
     u32 max_buffer_delay_ms;
+    u64 last_write_jiffies64;
 } stream_buf_t;
 
 typedef struct stream_port_s {
@@ -98,7 +99,7 @@ extern u32 stbuf_sub_start_get(void);
 extern u32 stbuf_userdata_start_get(void);
 extern stream_buf_t* get_stream_buffer(int id);
 
-#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8
+#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6TVD
 extern void stbuf_vdec2_init(struct stream_buf_s *buf);
 #endif
 

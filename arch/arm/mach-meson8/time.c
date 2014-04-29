@@ -31,6 +31,7 @@
 #include <asm/sched_clock.h>
 #include <plat/io.h>
 #include <mach/am_regs.h>
+#include <linux/delay.h>
 
 
 
@@ -84,6 +85,7 @@ static struct clocksource clocksource_timer_e = {
     .flags  = CLOCK_SOURCE_IS_CONTINUOUS,
 };
 
+static struct delay_timer aml_delay_timer;
 
 static u32 notrace meson8_read_sched_clock(void)
 {
@@ -563,5 +565,10 @@ void __init meson_timer_init(void)
 #ifdef CONFIG_SMP
 	local_timer_register(&meson_local_timer_ops);
 #endif
+
+	aml_delay_timer.read_current_timer = &cycle_read_timerE;
+	aml_delay_timer.freq = 1000*1000;//1us resolution
+	register_current_timer_delay(&aml_delay_timer);
+
 }
 

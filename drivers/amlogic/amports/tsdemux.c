@@ -641,7 +641,7 @@ static int limited_delay_check(struct file *file,
 			return 0;
 	}
     write_size = min(stbuf_space(vbuf), stbuf_space(abuf));
-    write_size = min(count, write_size);
+    write_size = min((int)count, write_size);
 	return write_size;
 }
 
@@ -684,6 +684,8 @@ ssize_t tsdemux_write(struct file *file,
 	        }
         }
     }
+	vbuf->last_write_jiffies64=jiffies_64;
+	abuf->last_write_jiffies64=jiffies_64;
 	write_size=limited_delay_check(file,vbuf,abuf,buf,count);
     if (write_size > 0) {
         return _tsdemux_write(buf, write_size);

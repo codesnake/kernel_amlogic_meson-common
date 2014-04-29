@@ -641,11 +641,10 @@ static const struct snd_kcontrol_new rt5616_lout_mix[] = {
 
 static int rt5616_adc_event(struct snd_soc_dapm_widget *w,
     struct snd_kcontrol *kcontrol, int event)
-{
-    printk(KERN_INFO"enter %s : event=0x%x\n",__func__,event);
+{ 
     struct snd_soc_codec *codec = w->codec;
-    unsigned int val, mask;
-    
+    //unsigned int val, mask;
+   printk(KERN_INFO"enter %s : event=0x%x\n",__func__,event); 
     switch (event) {
     case SND_SOC_DAPM_POST_PMU:
         msleep(20);   // mute po sound in record begin
@@ -807,9 +806,9 @@ static int rt5616_hp_event(struct snd_soc_dapm_widget *w,
 static int rt5616_lout_event(struct snd_soc_dapm_widget *w,
     struct snd_kcontrol *kcontrol, int event)
 {
-    printk(KERN_DEBUG"enter %s : event=0x%x \n",__func__,event);
     struct snd_soc_codec *codec = w->codec;
-    int ret;
+    //int ret;
+    printk(KERN_DEBUG"enter %s : event=0x%x \n",__func__,event);
     switch (event) {
     case SND_SOC_DAPM_POST_PMU:
         hp_amp_power(codec,1);
@@ -1159,10 +1158,50 @@ static const struct snd_soc_dapm_route rt5616_dapm_routes[] = {
 
 };
 
-static int rt5616_codec_digital_mute(struct snd_soc_dai *dai, int mute)
+static int rt5616_codec_mute_stream(struct snd_soc_dai *dai, int mute, int stream)
 {
     int ret;
     unsigned int reg_value;
+    struct snd_soc_codec *codec = dai->codec;
+    
+    printk(KERN_DEBUG "enter:%s, stream=%d, mute=%d \n",__func__,stream,mute);
+    if(stream == SNDRV_PCM_STREAM_PLAYBACK){
+        if(mute){
+            msleep(20);
+            snd_soc_update_bits(codec, RT5616_LOUT_CTRL1,
+                RT5616_L_MUTE | RT5616_R_MUTE,
+                RT5616_L_MUTE | RT5616_R_MUTE);
+            snd_soc_update_bits(codec, RT5616_HP_VOL,
+                RT5616_L_MUTE | RT5616_R_MUTE,
+                RT5616_L_MUTE | RT5616_R_MUTE);
+        }else{
+            msleep(50);
+            snd_soc_update_bits(codec, RT5616_LOUT_CTRL1,
+                RT5616_L_MUTE | RT5616_R_MUTE, 0);
+            snd_soc_update_bits(codec, RT5616_HP_VOL,
+                RT5616_L_MUTE | RT5616_R_MUTE, 0);
+        }
+    }
+
+    if(stream == SNDRV_PCM_STREAM_CAPTURE){
+        if (mute){
+            snd_soc_update_bits(codec,RT5616_ADC_DIG_VOL, 
+                RT5616_L_MUTE | RT5616_R_MUTE,
+                RT5616_L_MUTE | RT5616_R_MUTE);       
+        }else{
+            msleep(200);
+            snd_soc_update_bits(codec,RT5616_ADC_DIG_VOL, 
+                RT5616_L_MUTE | RT5616_R_MUTE,0);
+        }
+            
+    }
+    
+    return 0;
+}
+static int rt5616_codec_digital_mute(struct snd_soc_dai *dai, int mute)
+{
+   // int ret;
+   // unsigned int reg_value;
     struct snd_soc_codec *codec = dai->codec;
     
     if(mute){
@@ -1366,7 +1405,8 @@ static int rt5616_pll_calc(const unsigned int freq_in,
     int max_n = RT5616_PLL_N_MAX, max_m = RT5616_PLL_M_MAX;
     int k, n, m, red, n_t, m_t, in_t, out_t, red_t = abs(freq_out - freq_in);
     bool bypass = false;
-
+    m = 0;
+    n = 0;
     if (RT5616_PLL_INP_MAX < freq_in || RT5616_PLL_INP_MIN > freq_in)
         return -EINVAL;
 
@@ -1620,7 +1660,7 @@ static int rt5616_remove(struct snd_soc_codec *codec)
 }
 
 #ifdef CONFIG_PM
-static int rt5616_suspend(struct snd_soc_codec *codec, pm_message_t state)
+static int rt5616_suspend(struct snd_soc_codec *codec)
 {
     //amlogic_set_value(spk_gpio_mute, 0, "mute_spk");
     //spk_mute_num = 0;
@@ -1650,6 +1690,7 @@ struct snd_soc_dai_ops rt5616_aif_dai_ops = {
     .set_sysclk = rt5616_set_dai_sysclk,
     .set_pll = rt5616_set_dai_pll,
     .digital_mute = rt5616_codec_digital_mute,
+    .mute_stream = rt5616_codec_mute_stream,
 };
 
 struct snd_soc_dai_driver rt5616_dai[] = {
@@ -1728,7 +1769,7 @@ static int rt5616_i2c_remove(struct i2c_client *i2c)
     return 0;
 }
 
-static int rt5616_i2c_shutdown(struct i2c_client *client)
+static void rt5616_i2c_shutdown(struct i2c_client *client)
 {
     struct rt5616_priv *rt5616 = i2c_get_clientdata(client);
     struct snd_soc_codec *codec = rt5616->codec;
@@ -1741,7 +1782,7 @@ static int rt5616_i2c_shutdown(struct i2c_client *client)
         rt5616_set_bias_level(codec, SND_SOC_BIAS_OFF);
     }
 
-    return 0;
+//    return 0;
 }
 
 struct i2c_driver rt5616_i2c_driver = {

@@ -844,7 +844,7 @@ static struct class_attribute ppmgr_class_attrs[] = {
            show_ppmgr_info,
            NULL),
     __ATTR(angle,
-           S_IRUGO | S_IWUSR,
+           S_IRUGO | S_IWUSR | S_IWGRP,
            angle_read,
            angle_write),
     __ATTR(rect,
@@ -857,7 +857,7 @@ static struct class_attribute ppmgr_class_attrs[] = {
            bypass_write),
 
     __ATTR(disp,
-           S_IRUGO | S_IWUSR,
+           S_IRUGO | S_IWUSR | S_IWGRP,
            disp_read,
            disp_write),
 
@@ -867,16 +867,16 @@ static struct class_attribute ppmgr_class_attrs[] = {
            orientation_write),
 #ifdef CONFIG_POST_PROCESS_MANAGER_PPSCALER
     __ATTR(ppscaler,
-           S_IRUGO | S_IWUSR,
+           S_IRUGO | S_IWUSR | S_IWGRP,
            ppscaler_read,
            ppscaler_write),
     __ATTR(ppscaler_rect,
-           S_IRUGO | S_IWUSR,
+           S_IRUGO | S_IWUSR | S_IWGRP,
            ppscaler_rect_read,
            ppscaler_rect_write),
 #endif
        __ATTR(vtarget,
-           S_IRUGO | S_IWUSR,
+           S_IRUGO | S_IWUSR | S_IWGRP,
            receiver_read,
            receiver_write),
 #ifdef CONFIG_POST_PROCESS_MANAGER_3D_PROCESS

@@ -110,6 +110,10 @@
 #include <mach/meson-secure.h>
 #endif
 #define CONFIG_AMVIDEOCAP_OUT
+#ifdef CONFIG_AM_ETHERNET
+#include <mach/am_regs.h>
+#include <mach/am_eth_reg.h>
+#endif
 /***********************************************************************
  * IO Mapping
  **********************************************************************/
@@ -629,6 +633,116 @@ static struct platform_device aml_uart_device = {
     },
 };
 
+#ifdef CONFIG_AM_ETHERNET
+#include <plat/eth.h>
+//#define ETH_MODE_RGMII
+//#define ETH_MODE_RMII_INTERNAL
+#define ETH_MODE_RMII_EXTERNAL
+void eth_phy_hardware_reset(void)
+{
+	/* hardware reset ethernet phy */
+	gpio_out(PAD_GPIOY_15, 0);
+	msleep(20);
+	gpio_out(PAD_GPIOY_15, 1);
+}
+
+static void aml_eth_reset(void)
+{
+        unsigned int val = 0;
+
+        printk(KERN_INFO "****** aml_eth_reset() ******\n");
+#ifdef ETH_MODE_RGMII
+        val = 0x211;
+#else
+        val = 0x241;
+#endif
+        /* setup ethernet mode */
+        aml_write_reg32(P_PREG_ETHERNET_ADDR0, val);
+
+        /* setup ethernet interrupt */
+        aml_set_reg32_mask(P_SYS_CPU_0_IRQ_IN0_INTR_MASK, 1 << 8);
+        aml_set_reg32_mask(P_SYS_CPU_0_IRQ_IN1_INTR_STAT, 1 << 8);
+
+	eth_phy_hardware_reset();
+}
+static void aml_eth_clock_enable(void)
+{
+        unsigned int val = 0;
+
+        printk(KERN_INFO "****** aml_eth_clock_enable() ******\n");
+#ifdef ETH_MODE_RGMII
+        val = 0x309;
+#elif defined(ETH_MODE_RMII_EXTERNAL)
+        val = 0x130;
+#else
+        val = 0x702;
+#endif
+        /* setup ethernet clk */
+        aml_write_reg32(P_HHI_ETH_CLK_CNTL, val);
+}
+
+static void aml_eth_clock_disable(void)
+{
+        printk(KERN_INFO "****** aml_eth_clock_disable() ******\n");
+        /* disable ethernet clk */
+        aml_clr_reg32_mask(P_HHI_ETH_CLK_CNTL, 1 << 8);
+}
+
+static pinmux_item_t aml_eth_pins[] = {
+        /* RMII pin-mux */
+        {
+                .reg = PINMUX_REG(6),
+                .clrmask = 0,
+#ifdef ETH_MODE_RMII_EXTERNAL
+                .setmask = 0x8007ffe0,
+#else
+                .setmask = 0x4007ffe0,
+#endif
+        },
+        PINMUX_END_ITEM
+};
+static pinmux_set_t aml_eth_pinmux = {
+        .chip_select = NULL,
+        .pinmux = aml_eth_pins,
+};
+
+static void aml_eth_pinmux_setup(void)
+{
+        printk(KERN_INFO "****** aml_eth_pinmux_setup() ******\n");
+
+        pinmux_set(&aml_eth_pinmux);
+}
+
+static void aml_eth_pinmux_cleanup(void)
+{
+        printk(KERN_INFO "****** aml_eth_pinmux_cleanup() ******\n");
+
+        pinmux_clr(&aml_eth_pinmux);
+}
+
+static void aml_eth_init(void)
+{
+        aml_eth_pinmux_setup();
+        aml_eth_clock_enable();
+        aml_eth_reset();
+}
+
+static struct aml_eth_platdata aml_eth_pdata __initdata = {
+        .pinmux_items   = aml_eth_pins,
+        .pinmux_setup   = aml_eth_pinmux_setup,
+        .pinmux_cleanup = aml_eth_pinmux_cleanup,
+        .clock_enable   = aml_eth_clock_enable,
+        .clock_disable  = aml_eth_clock_disable,
+        .reset          = aml_eth_reset,
+};
+static void __init setup_eth_device(void)
+{
+        meson_eth_set_platdata(&aml_eth_pdata);
+        aml_eth_init();
+}
+#endif
+
+
 /***********************************************************************
  * Nand Section
  **********************************************************************/
@@ -771,6 +885,8 @@ static struct mtd_partition spi_partition_info[] = {
                     .offset = 0,
 #ifdef CONFIG_MESON_TRUSTZONE
                     .size = 0x100000,
+#elif defined CONFIG_AM_IPTV_SECURITY
+                    .size = 0x70000,
 #else
                     .size = 0x60000,
 #endif
@@ -785,7 +901,13 @@ static struct mtd_partition spi_partition_info[] = {
 #endif
         .size = 0x8000,
     },
-   
+#ifdef CONFIG_AM_IPTV_SECURITY
+    {
+        .name = "hashtable",
+        .offset = 0x90000,
+        .size = 0x100000,
+    },
+#endif 
 };
 
 static struct flash_platform_data amlogic_spi_platform = {
@@ -823,6 +945,15 @@ static struct platform_device aml_keys_device = {
 };
 #endif
 
+#ifdef CONFIG_EBOOT_KEY
+static struct platform_device aml_ebootkey_device = {
+    .name   = "ebootkey",
+    .id = -1,
+    .dev = {
+//                .platform_data = &secure_device[0],
+           },
+};
+#endif
 
 
 /***********************************************************************
@@ -1364,6 +1495,14 @@ static __initdata struct map_desc meson_io_desc[] = {
         .length     = RESERVED_MEM_END - RESERVED_MEM_START + 1,
         .type       = MT_MEMORY_NONCACHED,
     },
+#ifdef CONFIG_AM_IPTV_SECURITY
+     {
+        .virtual    = PAGE_ALIGN(__phys_to_virt(0x9fe00000)),
+        .pfn        = __phys_to_pfn(0x9fe00000),
+        .length     = SZ_1M,
+        .type       = MT_MEMORY_NONCACHED,
+      },
+#endif
 #ifdef CONFIG_MESON_SUSPEND
         {
         .virtual    = PAGE_ALIGN(__phys_to_virt(0x9ff00000)),
@@ -1402,6 +1541,13 @@ static void __init meson_fixup(struct machine_desc *mach, struct tag *tag, char 
 #else
     pbank->size  = (PHYS_MEM_END-RESERVED_MEM_END) & PAGE_MASK;
 #endif
+#ifdef CONFIG_AM_IPTV_SECURITY
+    unsigned size;
+    size = PHYS_MEM_END-RESERVED_MEM_END;
+    size -= SZ_1M;
+    pbank->size  = size & PAGE_MASK;
+#endif
+
     m->nr_banks++;
 }
 
@@ -2970,6 +3116,9 @@ static struct platform_device meson_device_vdac_switch = {
  * Device Register Section
  **********************************************************************/
 static struct platform_device  *platform_devs[] = {
+#ifdef CONFIG_AM_ETHERNET
+    &meson_device_eth,
+#endif
 #if defined(CONFIG_I2C_AML) || defined(CONFIG_I2C_HW_AML)
     &aml_i2c_device_a,
     &aml_i2c_device_b,
@@ -3094,6 +3243,9 @@ static struct platform_device  *platform_devs[] = {
 #ifdef CONFIG_AML_VIDEO_RES_MGR
 	&resmgr_device,
 #endif
+#ifdef CONFIG_EBOOT_KEY
+	&aml_ebootkey_device,
+#endif
 };
 
 static __init void meson_init_machine(void)
@@ -3114,6 +3266,9 @@ static __init void meson_init_machine(void)
 #ifdef CONFIG_AML_HDMI_TX
     extern int setup_hdmi_dev_platdata(void* platform_data);
     setup_hdmi_dev_platdata(&aml_hdmi_pdata);
+#endif
+#ifdef CONFIG_AM_ETHERNET
+    setup_eth_device();
 #endif
 #ifdef CONFIG_AM_REMOTE
 	setup_remote_device();

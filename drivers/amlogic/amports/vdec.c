@@ -37,9 +37,7 @@
 #include <linux/of_fdt.h>
 #include <linux/module.h>
 
-#include <linux/platform_device.h>
-
-#if MESON_CPU_TYPE == MESON_CPU_TYPE_MESON8
+#if MESON_CPU_TYPE == MESON_CPU_TYPE_MESON6TVD
 #include "amvdec.h"
 #endif
 
@@ -94,11 +92,11 @@ HHI_VDEC_CLK_CNTL
     VDEC1_CLOCK_OFF(); \
     VDEC1_255M(); \
     VDEC1_CLOCK_ON(); \
-    clock_level = 0; 
+    clock_level = 0;
 
 #define vdec_clock_hi_enable() \
     VDEC1_CLOCK_OFF(); \
-    VDEC1_319M(); \
+    VDEC1_364M(); \
     VDEC1_CLOCK_ON(); \
     clock_level = 1;
 
@@ -106,11 +104,11 @@ HHI_VDEC_CLK_CNTL
     VDEC2_CLOCK_OFF(); \
     VDEC2_255M(); \
     VDEC2_CLOCK_ON(); \
-    clock_level2 = 0; 
+    clock_level2 = 0;
 
 #define vdec2_clock_hi_enable() \
     VDEC2_CLOCK_OFF(); \
-    VDEC2_319M(); \
+    VDEC2_364M(); \
     VDEC2_CLOCK_ON(); \
     clock_level2 = 1;
 
@@ -119,13 +117,83 @@ HHI_VDEC_CLK_CNTL
     HCODEC_255M(); \
     HCODEC_CLOCK_ON();
 
-#elif MESON_CPU_TYPE == MESON_CPU_TYPE_MESON6TV
+#elif MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6TVD
+
 /*
 HHI_VDEC_CLK_CNTL..
 bits,9~11:
 0x106d[11:9] :
-0 for fclk_div2,  1GHz   
-1 for fclk_div3,  2G/3Hz  
+0 for fclk_div2,  1GHz
+1 for fclk_div3,  2G/3Hz
+2 for fclk_div5, 2G/5Hz
+3 for fclk_div7, 2G/7HZ
+
+4 for mp1_clk_out
+5 for ddr_pll_clk
+
+bit0~6: div N=bit[0-7]+1
+bit8: vdec.gate
+*/
+#define VDEC1_166M() WRITE_MPEG_REG_BITS(HHI_VDEC_CLK_CNTL, (0 << 9) | (1 << 8) | (5), 0, 16)
+#define VDEC2_166M() WRITE_MPEG_REG(HHI_VDEC2_CLK_CNTL, (0 << 9) | (1 << 8) | (5))
+
+#define VDEC1_200M() WRITE_MPEG_REG_BITS(HHI_VDEC_CLK_CNTL, (0 << 9) | (1 << 8) | (4), 0, 16)
+#define VDEC2_200M() WRITE_MPEG_REG(HHI_VDEC2_CLK_CNTL, (0 << 9) | (1 << 8) | (4))
+
+#define VDEC1_250M() WRITE_MPEG_REG_BITS(HHI_VDEC_CLK_CNTL, (0 << 9) | (1 << 8) | (3), 0, 16)
+#define VDEC2_250M() WRITE_MPEG_REG(HHI_VDEC2_CLK_CNTL, (0 << 9) | (1 << 8) | (3))
+#define HCODEC_250M() WRITE_MPEG_REG_BITS(HHI_VDEC_CLK_CNTL, (0 << 9) | (1 << 8) | (3), 16, 16)
+
+#define VDEC1_333M() WRITE_MPEG_REG_BITS(HHI_VDEC_CLK_CNTL, (0 << 9) | (1 << 8) | (2), 0, 16)
+#define VDEC2_333M() WRITE_MPEG_REG(HHI_VDEC2_CLK_CNTL, (0 << 9) | (1 << 8) | (2))
+
+#define VDEC1_CLOCK_ON()   WRITE_MPEG_REG_BITS(HHI_VDEC_CLK_CNTL, 1, 8, 1); \
+                           WRITE_VREG_BITS(DOS_GCLK_EN0, 0x3ff, 0, 10)
+#define VDEC2_CLOCK_ON()   WRITE_MPEG_REG_BITS(HHI_VDEC2_CLK_CNTL, 1, 8, 1); \
+                           WRITE_VREG(DOS_GCLK_EN1, 0x3ff)
+#define HCODEC_CLOCK_ON()  WRITE_MPEG_REG_BITS(HHI_VDEC_CLK_CNTL, 1, 24, 1); \
+                           WRITE_VREG_BITS(DOS_GCLK_EN0, 0x7fff, 12, 15)
+#define VDEC1_CLOCK_OFF()  WRITE_MPEG_REG_BITS(HHI_VDEC_CLK_CNTL,  0, 8, 1)
+#define VDEC2_CLOCK_OFF()  WRITE_MPEG_REG_BITS(HHI_VDEC2_CLK_CNTL, 0, 8, 1)
+#define HCODEC_CLOCK_OFF() WRITE_MPEG_REG_BITS(HHI_VDEC_CLK_CNTL, 0, 24, 1)
+
+#define vdec_clock_enable() \
+    VDEC1_CLOCK_OFF(); \
+    VDEC1_250M(); \
+    VDEC1_CLOCK_ON(); \
+    clock_level = 0;
+
+#define vdec_clock_hi_enable() \
+    VDEC1_CLOCK_OFF(); \
+    VDEC1_250M(); \
+    VDEC1_CLOCK_ON(); \
+    clock_level = 1;
+
+#define vdec2_clock_enable() \
+    VDEC2_CLOCK_OFF(); \
+    VDEC2_250M(); \
+    VDEC2_CLOCK_ON(); \
+    clock_level2 = 0;
+
+#define vdec2_clock_hi_enable() \
+    VDEC2_CLOCK_OFF(); \
+    VDEC2_250M(); \
+    VDEC2_CLOCK_ON(); \
+    clock_level2 = 1;
+
+#define hcodec_clock_enable() \
+    HCODEC_CLOCK_OFF(); \
+    HCODEC_250M(); \
+    HCODEC_CLOCK_ON();
+
+#elif MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6TV
+
+/*
+HHI_VDEC_CLK_CNTL..
+bits,9~11:
+0x106d[11:9] :
+0 for fclk_div2,  1GHz
+1 for fclk_div3,  2G/3Hz
 2 for fclk_div5, 2G/5Hz
 3 for fclk_div7, 2G/7HZ
 
@@ -194,7 +262,7 @@ bit8: vdec.gate
 #define SUPPORT_VCODEC_NUM  1
 static int inited_vcodec_num = 0;
 static int clock_level;
-#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8 
+#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6TVD
 static int clock_level2;
 #endif
 static struct platform_device *vdec_device = NULL;
@@ -213,7 +281,12 @@ static struct resource amvdec_mem_resource[]  = {
         .start = 0,
         .end   = 0,
         .flags = 0,
-    }
+    },
+    [2] = {
+        .start = 0,
+        .end   = 0,
+        .flags = 0,
+    },
 };
 
 static const char *vdec_device_name[] = {
@@ -230,24 +303,25 @@ static const char *vdec_device_name[] = {
     "amvdec_h264_4k2k"
 };
 
-/*
-This function used for change the memory reasource on system run;
-It can used for system swap memory for codec and some othor use;
-We must call it at the amstream start for register a memory resource
-*/
-int vdec_set_resource(struct resource *s, void *param)
+void vdec_set_decinfo(void *p)
+{
+    amvdec_mem_resource[1].start = (resource_size_t)p;
+}
+
+int vdec_set_resource(struct resource *s, struct device *p)
 {
     if (inited_vcodec_num != 0) {
         printk("ERROR:We can't support the change resource at code running\n");
         return -1;
     }
+
     if(s){
         amvdec_mem_resource[0].start = s->start;
         amvdec_mem_resource[0].end = s->end;
         amvdec_mem_resource[0].flags = s->flags;
     }
-	if(param)
-        amvdec_mem_resource[1].start = (resource_size_t)param;
+
+    amvdec_mem_resource[2].start = (resource_size_t)p;
 
     return 0;
 }
@@ -320,7 +394,7 @@ s32 vdec_release(vformat_t vf)
     return 0;
 }
 
-#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8 
+#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8
 void vdec_poweron(vdec_type_t core)
 {
     ulong flags;
@@ -440,6 +514,80 @@ bool vdec_on(vdec_type_t core)
     return ret;
 }
 
+#elif MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6TVD
+void vdec_poweron(vdec_type_t core)
+{
+    ulong flags;
+
+    spin_lock_irqsave(&lock, flags);
+
+    if (core == VDEC_1) {
+        // vdec1 soft reset
+        WRITE_VREG(DOS_SW_RESET0, 0xfffffffc);
+        WRITE_VREG(DOS_SW_RESET0, 0);
+        // enable vdec1 clock
+        vdec_clock_enable();
+        // reset DOS top registers
+        WRITE_VREG(DOS_VDEC_MCRCC_STALL_CTRL, 0);
+    } else if (core == VDEC_2) {
+        // vdec2 soft reset
+        WRITE_VREG(DOS_SW_RESET2, 0xffffffff);
+        WRITE_VREG(DOS_SW_RESET2, 0);
+        // enable vdec2 clock
+        vdec2_clock_enable();
+        // reset DOS top registers
+        WRITE_VREG(DOS_VDEC2_MCRCC_STALL_CTRL, 0);
+    } else if (core == VDEC_HCODEC) {
+        // hcodec soft reset
+        WRITE_VREG(DOS_SW_RESET1, 0xffffffff);
+        WRITE_VREG(DOS_SW_RESET1, 0);
+        // enable hcodec clock
+        hcodec_clock_enable();
+    }
+
+    spin_unlock_irqrestore(&lock, flags);
+}
+
+void vdec_poweroff(vdec_type_t core)
+{
+    ulong flags;
+
+    spin_lock_irqsave(&lock, flags);
+
+    if (core == VDEC_1) {
+        // disable vdec1 clock
+        VDEC1_CLOCK_OFF();
+    } else if (core == VDEC_2) {
+        // disable vdec2 clock
+        VDEC2_CLOCK_OFF();
+    } else if (core == VDEC_HCODEC) {
+        // disable hcodec clock
+        HCODEC_CLOCK_OFF();
+    }
+
+    spin_unlock_irqrestore(&lock, flags);
+}
+
+bool vdec_on(vdec_type_t core)
+{
+    bool ret = false;
+
+    if (core == VDEC_1) {
+        if (READ_MPEG_REG(HHI_VDEC_CLK_CNTL) & 0x100) {
+            ret = true;
+        }
+    } else if (core == VDEC_2) {
+        if (READ_MPEG_REG(HHI_VDEC2_CLK_CNTL) & 0x100) {
+            ret = true;
+        }
+    } else if (core == VDEC_HCODEC) {
+        if (READ_MPEG_REG(HHI_VDEC_CLK_CNTL) & 0x1000000) {
+            ret = true;
+        }
+    }
+
+    return ret;
+}
 #endif
 
 void vdec_power_mode(int level)
@@ -468,7 +616,7 @@ void vdec_power_mode(int level)
     spin_unlock_irqrestore(&lock, flags);
 }
 
-#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8
+#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6TVD
 void vdec2_power_mode(int level)
 {
     /* todo: add level routines for clock adjustment per chips */
@@ -519,14 +667,14 @@ static ssize_t amrisc_regs_show(struct class *class, struct class_attribute *att
     int i;
     unsigned  val;
 	unsigned long flags;
-	
-#if MESON_CPU_TYPE == MESON_CPU_TYPE_MESON8
+
+#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6TVD
     spin_lock_irqsave(&lock, flags);
-	if(!vdec_on(VDEC_1)){
-		spin_unlock_irqrestore(&lock, flags);
-		pbuf += sprintf(pbuf, "amrisc not power off\n");
-		return (pbuf - buf);
-	}
+    if (!vdec_on(VDEC_1)) {
+        spin_unlock_irqrestore(&lock, flags);
+        pbuf += sprintf(pbuf, "amrisc not power off\n");
+        return (pbuf - buf);
+    }
 #elif MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6
     switch_mod_gate_by_type(MOD_VDEC, 1);
 #endif
@@ -536,7 +684,7 @@ static ssize_t amrisc_regs_show(struct class *class, struct class_attribute *att
         pbuf += sprintf(pbuf, "%s(%#x)\t:%#x(%d)\n",
                         regs[i].name, regs[i].offset, val, val);
     }
-#if MESON_CPU_TYPE == MESON_CPU_TYPE_MESON8
+#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6TVD
     spin_unlock_irqrestore(&lock, flags);
 #elif MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6
     switch_mod_gate_by_type(MOD_VDEC, 0);
@@ -572,6 +720,7 @@ static int  vdec_probe(struct platform_device *pdev)
 {
     s32 r;
     static struct resource res;
+
     r = class_register(&vdec_class);
     if (r) {
         printk("vdec class create fail.\n");
@@ -585,17 +734,22 @@ static int  vdec_probe(struct platform_device *pdev)
     }
     res.start = (phys_addr_t)get_reserve_block_addr(r);
     res.end = res.start+ (phys_addr_t)get_reserve_block_size(r)-1;
-	printk("init vdec memsource %d->%d\n",res.start,res.end);
+
+    printk("init vdec memsource %d->%d\n",res.start,res.end);
     res.flags = IORESOURCE_MEM;
-    vdec_set_resource(&res,NULL);
-#if MESON_CPU_TYPE < MESON_CPU_TYPE_MESON8
+
+    vdec_set_resource(&res, &pdev->dev);
+
+#if MESON_CPU_TYPE < MESON_CPU_TYPE_MESON6TVD
     /* default to 250MHz */
     vdec_clock_hi_enable();
 #endif
     return 0;
+
 error:
-	class_unregister(&vdec_class);
-	return r;
+    class_unregister(&vdec_class);
+
+    return r;
 }
 
 static int  vdec_remove(struct platform_device *pdev)

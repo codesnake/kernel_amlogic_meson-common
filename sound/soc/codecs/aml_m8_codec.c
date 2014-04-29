@@ -179,6 +179,31 @@ static int aml_m8_codec_hw_params(struct snd_pcm_substream *substream,
 	return 0;
 }
 
+static int aml_m8_codec_mute_stream(struct snd_soc_dai *dai, int mute, int stream)
+{
+    printk(KERN_DEBUG "enter:%s, mute=%d, stream=%d \n",__func__,mute,stream);
+    struct snd_soc_codec *codec = dai->codec;
+	u16 mute_reg = snd_soc_read(codec, AMLM8_MUTE_2) & 0xfc;
+    u16 mic_mute_reg = snd_soc_read(codec, AMLM8_MUTE_0) & 0xfc;
+
+    if(stream == SNDRV_PCM_STREAM_PLAYBACK){
+    	if (mute){
+    		//snd_soc_write(codec, AMLM8_MUTE_2, mute_reg | 0x3);
+    	}else{
+    		snd_soc_write(codec, AMLM8_MUTE_2, mute_reg);
+    	}
+    }
+    if(stream == SNDRV_PCM_STREAM_CAPTURE){
+        if (mute){
+            snd_soc_write(codec, AMLM8_MUTE_0,mic_mute_reg | 0x3);
+        }else{
+            msleep(200);
+            snd_soc_write(codec, AMLM8_MUTE_0,mic_mute_reg);
+        }
+            
+    }
+	return 0;
+}
 static int aml_m8_codec_mute(struct snd_soc_dai *dai, int mute)
 {
 	struct snd_soc_codec *codec = dai->codec;
@@ -249,6 +274,7 @@ static int aml_m8_codec_set_dai_clkdiv(struct snd_soc_dai *codec_dai,
 static struct snd_soc_dai_ops aml_m8_codec_dai_ops = {
  	.hw_params	= aml_m8_codec_hw_params,
 	.digital_mute = aml_m8_codec_mute,
+	.mute_stream = aml_m8_codec_mute_stream,
 	.set_sysclk	= aml_m8_codec_set_dai_sysclk,
 	.set_clkdiv = aml_m8_codec_set_dai_clkdiv,
     .set_pll = aml_m8_codec_set_dai_pll,
@@ -287,7 +313,8 @@ static int aml_m8_set_bias_level(struct snd_soc_codec *codec,
         case SND_SOC_BIAS_STANDBY:
 	    // WRITE_MPEG_REG_BITS( HHI_MPLL_CNTL9, 1,14, 1);			
             adac_wr_reg(89,0x0101);
-            adac_wr_reg(24,adac_rd_reg(24) | 0x3); // power on the DAC
+            snd_soc_write(codec,AMLM8_PD_3,snd_soc_read(codec,AMLM8_PD_3) | 0xf3);         
+            //adac_wr_reg(24,adac_rd_reg(24) | 0x3); // power on the DAC
             break;
 
         default:
@@ -300,7 +327,7 @@ static int aml_m8_set_bias_level(struct snd_soc_codec *codec,
         case SND_SOC_BIAS_PREPARE:
 	   //  WRITE_MPEG_REG_BITS( HHI_MPLL_CNTL9, 1,14, 1);
             adac_wr_reg(89,0x0000); 
-            adac_wr_reg(24,adac_rd_reg(24) & 0xfc); //power down the DAC
+           // adac_wr_reg(24,adac_rd_reg(24) & 0xfc); //power down the DAC
 	    // WRITE_MPEG_REG_BITS( HHI_MPLL_CNTL9, 0,14, 1);
             break;
 
@@ -558,7 +585,7 @@ static void start_codec(struct snd_soc_codec *codec)
     data32 |= 1 << 1;   // [    1] rstadcdpz
     data32 |= 1 << 0;   // [    0] rstdacdpz
     snd_soc_write(codec, 0, data32);
-
+	snd_soc_write(codec, 24, 0xf3);
     data32  = 0;
     data32 |= 1 << 4;   // [    4] pd_micb2z
     data32 |= 1 << 3;   // [    3] pd_micb1z
@@ -586,6 +613,15 @@ void aml_m8_codec_reset(struct snd_soc_codec* codec)
 
 	start_codec(codec);
     snd_soc_write(codec,0x7b,0x03);  // record left frame output the playback left and right channels. 
+}
+static int pd3_env(struct snd_soc_dapm_widget *w,
+    struct snd_kcontrol *kcontrol, int event)
+{
+    struct snd_soc_codec *codec = w->codec;
+    unsigned int mask = 1<<w->shift;
+    printk(KERN_INFO "Amlogic <> %s: name %s , event(%d)\n",__func__, w->name, event);
+    snd_soc_update_bits(codec, AMLM8_PD_3, mask, mask);
+    return 0;
 }
 static const char *left_linein_texts[] = {
 	"Left Input 1 Differential", "Left Input 1 Single Ended",
@@ -694,16 +730,27 @@ static const struct snd_soc_dapm_widget aml_m8_dapm_widgets[] = {
 	SND_SOC_DAPM_PGA("Left IN PGA", AMLM8_PD_1, 2, 0, NULL, 0),
 	SND_SOC_DAPM_PGA("Right IN PGA", AMLM8_PD_1, 3, 0, NULL, 0),
 
-	SND_SOC_DAPM_DAC("Left DAC", "Playback", AMLM8_PD_3, 0, 0),
-	SND_SOC_DAPM_DAC("Right DAC", "Playback", AMLM8_PD_3, 1, 0),
-	SND_SOC_DAPM_PGA("Left HP OUT PGA", AMLM8_PD_3, 4, 0, NULL, 0),
-	SND_SOC_DAPM_PGA("Right HP OUT PGA", AMLM8_PD_3, 5, 0, NULL, 0),
-	SND_SOC_DAPM_MIXER("Left Output Mixer", AMLM8_PD_3, 6, 0,
+	//SND_SOC_DAPM_DAC("Left DAC", "Playback", AMLM8_PD_3, 0, 0),
+	//SND_SOC_DAPM_DAC("Right DAC", "Playback", AMLM8_PD_3, 1, 0),
+	//SND_SOC_DAPM_PGA("Left HP OUT PGA", AMLM8_PD_3, 4, 0, NULL, 0),
+	//SND_SOC_DAPM_PGA("Right HP OUT PGA", AMLM8_PD_3, 5, 0, NULL, 0),
+	SND_SOC_DAPM_MIXER("Left Output Mixer", SND_SOC_NOPM, 6, 0,
 		&amlm8_left_ld1_mixer[0],
 		ARRAY_SIZE(amlm8_left_ld1_mixer)),
-	SND_SOC_DAPM_MIXER("Right Output Mixer", AMLM8_PD_3, 7, 0,
+	SND_SOC_DAPM_MIXER("Right Output Mixer", SND_SOC_NOPM, 7, 0,
 		&amlm8_right_ld1_mixer[0],
 		ARRAY_SIZE(amlm8_right_ld1_mixer)),
+    SND_SOC_DAPM_DAC_E("Left DAC", "Playback", SND_SOC_NOPM, 0, 0, pd3_env,
+        SND_SOC_DAPM_PRE_PMD|SND_SOC_DAPM_PRE_PMU|SND_SOC_DAPM_POST_PMD),
+         
+    SND_SOC_DAPM_DAC_E("Right DAC", "Playback", SND_SOC_NOPM, 1, 0, pd3_env,
+        SND_SOC_DAPM_PRE_PMD|SND_SOC_DAPM_PRE_PMU|SND_SOC_DAPM_POST_PMD),
+
+    SND_SOC_DAPM_PGA_E("Left HP OUT PGA", SND_SOC_NOPM, 4, 0, NULL, 0, pd3_env, 
+        SND_SOC_DAPM_PRE_PMD|SND_SOC_DAPM_PRE_PMU),
+        
+    SND_SOC_DAPM_PGA_E("Right HP OUT PGA", SND_SOC_NOPM, 5, 0, NULL, 0, pd3_env, 
+        SND_SOC_DAPM_PRE_PMD|SND_SOC_DAPM_PRE_PMU),
 	SND_SOC_DAPM_MIXER("Mono Output Mixer", AMLM8_PD_4, 2, 0,
 		&amlm8_mono_ld2_mixer[0],
 		ARRAY_SIZE(amlm8_mono_ld2_mixer)),
@@ -809,9 +856,8 @@ static int aml_m8_codec_remove(struct platform_device *pdev)
 
 static void aml_m8_codec_shutdown(struct platform_device *pdev)
 {
-    printk(KERN_DEBUG "aml_m8_platform_shutdown\n");
     struct snd_soc_codec *codec = m8_codec;
-    
+    printk(KERN_DEBUG "aml_m8_platform_shutdown\n");
     if(codec){
         u16 mute_reg = snd_soc_read(codec, AMLM8_MUTE_2) & 0xfc;
 

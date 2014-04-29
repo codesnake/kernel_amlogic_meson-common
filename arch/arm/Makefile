@@ -157,7 +157,10 @@ machine-$(CONFIG_ARCH_KIRKWOOD)		+= kirkwood
 machine-$(CONFIG_ARCH_KS8695)		+= ks8695
 machine-$(CONFIG_ARCH_LPC32XX)		+= lpc32xx
 machine-$(CONFIG_ARCH_MESON6)           += meson6
+machine-$(CONFIG_ARCH_MESON6TV)		+= meson6tv
+machine-$(CONFIG_ARCH_MESON6TVD)	+= meson6tvd
 machine-$(CONFIG_ARCH_MESON8)           += meson8
+machine-$(CONFIG_ARCH_MESON8B)          += meson8b
 machine-$(CONFIG_ARCH_MMP)		+= mmp
 machine-$(CONFIG_ARCH_MSM)		+= msm
 machine-$(CONFIG_ARCH_MV78XX0)		+= mv78xx0
@@ -297,7 +300,7 @@ zinstall uinstall install: vmlinux
 %.dtb: scripts
 	$(Q)$(MAKE) $(build)=$(subst $(wildcard $(srctree)//),,$(subst $(join /,$(subst dtb,dts,$@)),,$(firstword $(wildcard $(srctree)/$(boot)/dts/amlogic/$(subst dtb,dts,$@) $(srctree)/$(CUSTOMER_DIR_NAME)/meson/dt/$(subst dtb,dts,$@))))) \
 	MACHINE=$(MACHINE) \
-	$(subst $(wildcard $(srctree)//),,$(subst .dts,.dtb,$(firstword $(wildcard $(srctree)/$(boot)/dts/amlogic/$(subst dtb,dts,$@) $(srctree)/$(CUSTOMER_DIR_NAME)/meson/dt/$(subst dtb,dts,$@))))) 
+	$(subst $(wildcard $(srctree)//),,$(subst .dts,.dtb,$(firstword $(wildcard $(srctree)/$(boot)/dts/amlogic/$(subst dtb,dts,$@) $(srctree)/$(CUSTOMER_DIR_NAME)/meson/dt/$(subst dtb,dts,$@)))))
 	rm  $(firstword $(wildcard $(srctree)/$(boot)/dts/amlogic/$(subst dtb,dts,$@) $(srctree)/$(CUSTOMER_DIR_NAME)/meson/dt/$(subst dtb,dts,$@)))
 
 dtbs: scripts

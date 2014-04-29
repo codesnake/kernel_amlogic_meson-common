@@ -65,7 +65,7 @@ static ssize_t  aml_vout_attr_##name##_store(struct class *cla,  struct class_at
 	return strnlen(buf, count);				\
 }											\
 struct  class_attribute  class_vout2_attr_##name =  \
-__ATTR(name, S_IRUGO|S_IWUSR, aml_vout_attr_##name##_show, aml_vout_attr_##name##_store) ; 
+__ATTR(name, S_IRUGO|S_IWUSR|S_IWGRP, aml_vout_attr_##name##_show, aml_vout_attr_##name##_store) ; 
 /*****************************************************************
 **
 **	function  declare  part 

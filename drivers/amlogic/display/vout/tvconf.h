@@ -55,7 +55,6 @@ __ATTR(name, S_IRUGO|S_IWUSR, aml_TV_attr_##name##_show, aml_TV_attr_##name##_st
 **	function declare part 
 **
 ******************************************************************/
-static void  parse_vdac_setting(char *para);
 tvmode_t vmode_to_tvmode(vmode_t mod);
 
 #endif

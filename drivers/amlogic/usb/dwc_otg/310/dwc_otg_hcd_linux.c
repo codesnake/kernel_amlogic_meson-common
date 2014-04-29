@@ -339,6 +339,9 @@ static int _complete(dwc_otg_hcd_t * hcd, void *urb_handle,
 	case -DWC_E_OVERFLOW:
 		status = -EOVERFLOW;
 		break;
+	case -DWC_E_SHUTDOWN:
+ 		status = -ESHUTDOWN;
+ 		break;	
 	default:
 		if (status) {
 			DWC_PRINTF("Uknown urb status %d\n", status);
@@ -899,6 +902,7 @@ static int urb_enqueue(struct usb_hcd *hcd,
 	}
 	if (unlikely(atomic_read(&urb->reject))) {
 		printk("%s:urb(%p) had been killed2\n",__func__,urb);
+		DWC_FREE(dwc_otg_urb);
 		return -EPERM;
 	}
 	urb->hcpriv = dwc_otg_urb;
@@ -911,6 +915,7 @@ static int urb_enqueue(struct usb_hcd *hcd,
 					       (dwc_otg_hcd, ep->hcpriv), urb);
 		}
 	} else {
+		DWC_FREE(dwc_otg_urb);
 		urb->hcpriv = NULL;
 #if 0
 		usb_hcd_unlink_urb_from_ep(hcd,urb);

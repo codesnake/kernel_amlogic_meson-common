@@ -36,19 +36,19 @@ void *pmu_alloc_mutex(void)
     __mutex_init(pmutex, mutex_name, key);
     return (void *)pmutex;
 }
-EXPORT_SYMBOL_GPL(pmu_alloc_mutex);
+EXPORT_SYMBOL(pmu_alloc_mutex);
 
 void pmu_mutex_lock(void *mutex)
 {
     mutex_lock((struct mutex *)mutex);    
 }
-EXPORT_SYMBOL_GPL(pmu_mutex_lock);
+EXPORT_SYMBOL(pmu_mutex_lock);
 
 void pmu_mutex_unlock(void *mutex)
 {
     mutex_unlock((struct mutex *)mutex);    
 }
-EXPORT_SYMBOL_GPL(pmu_mutex_unlock);
+EXPORT_SYMBOL(pmu_mutex_unlock);
 
 int pmu_rtc_device_init(void)
 {
@@ -62,7 +62,7 @@ int pmu_rtc_device_init(void)
     }
     return 0;
 }
-EXPORT_SYMBOL_GPL(pmu_rtc_device_init);
+EXPORT_SYMBOL(pmu_rtc_device_init);
 
 int pmu_rtc_set_alarm(unsigned long seconds) 
 {
@@ -84,7 +84,7 @@ int pmu_rtc_set_alarm(unsigned long seconds)
     time += seconds;
     rtc_time_to_tm(time, &tmp.time);
     ret = rtc_set_alarm(rtc_dev, &tmp);
-    printk("%s, set wake up alarm in %d seconds, ret:%d\n", __func__, seconds, ret);
+    printk("%s, set wake up alarm in %ld seconds, ret:%d\n", __func__, seconds, ret);
     return ret;
 }
-EXPORT_SYMBOL_GPL(pmu_rtc_set_alarm);
+EXPORT_SYMBOL(pmu_rtc_set_alarm);

@@ -158,22 +158,22 @@ static void del_timers(dwc_otg_hcd_t * hcd)
  */
 static void kill_urbs_in_qh_list(dwc_otg_hcd_t * hcd, dwc_list_link_t * qh_list)
 {
-	dwc_list_link_t *qh_item;
+	dwc_list_link_t *qh_item,*qh_tmp;
 	dwc_otg_qh_t *qh;
 	dwc_otg_qtd_t *qtd, *qtd_tmp;
 
-	DWC_LIST_FOREACH(qh_item, qh_list) {
+	DWC_LIST_FOREACH_SAFE(qh_item, qh_tmp, qh_list) {
 		qh = DWC_LIST_ENTRY(qh_item, dwc_otg_qh_t, qh_list_entry);
 		DWC_CIRCLEQ_FOREACH_SAFE(qtd, qtd_tmp,
 					 &qh->qtd_list, qtd_list_entry) {
 			qtd = DWC_CIRCLEQ_FIRST(&qh->qtd_list);
 			if (qtd->urb != NULL) {
 				hcd->fops->complete(hcd, qtd->urb->priv,
-						    qtd->urb, -DWC_E_TIMEOUT);
+						    qtd->urb, -DWC_E_SHUTDOWN);
 				dwc_otg_hcd_qtd_remove_and_free(hcd, qtd, qh);
-			}
-
+			}			
 		}
+		dwc_otg_hcd_qh_remove(hcd, qh);
 	}
 }
 
@@ -543,6 +543,12 @@ int dwc_otg_hcd_urb_enqueue(dwc_otg_hcd_t * hcd,
 	if (!hcd->flags.b.port_connect_status) {
 		/* No longer connected. */
 		DWC_ERROR("Not connected\n");
+		return -DWC_E_NO_DEVICE;
+	}
+
+	if(hcd->flags.b.port_connect_status_change){
+		/* Connect status change processing. */
+		DWC_ERROR("USB Connect status change processing\n");
 		return -DWC_E_NO_DEVICE;
 	}
 
@@ -3363,6 +3369,9 @@ void dwc_otg_hcd_dump_state(dwc_otg_hcd_t * hcd)
 	int i;
 	gnptxsts_data_t np_tx_status;
 	hptxsts_data_t p_tx_status;
+	dwc_irqflags_t flags;
+
+	DWC_SPINLOCK_IRQSAVE(hcd->lock, &flags);
 
 	num_channels = hcd->core_if->core_params->host_channels;
 	DWC_PRINTF("\n");
@@ -3476,6 +3485,7 @@ void dwc_otg_hcd_dump_state(dwc_otg_hcd_t * hcd)
 	DWC_PRINTF
 	    ("************************************************************\n");
 	DWC_PRINTF("\n");
+	DWC_SPINUNLOCK_IRQRESTORE(hcd->lock, flags);
 #endif
 }
 

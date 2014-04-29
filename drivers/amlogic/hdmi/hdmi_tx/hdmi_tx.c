@@ -81,6 +81,8 @@ static void hdmitx_early_suspend(struct early_suspend *h)
     phdmi->output_blank_flag = 0;
     phdmi->HWOp.CntlDDC(phdmi, DDC_HDCP_OP, HDCP_OFF);
     phdmi->HWOp.CntlDDC(phdmi, DDC_HDCP_OP, DDC_RESET_HDCP);
+    phdmi->HWOp.CntlConfig(&hdmitx_device, CONF_CLR_AVI_PACKET, 0);
+    phdmi->HWOp.CntlConfig(&hdmitx_device, CONF_CLR_VSDB_PACKET, 0);
     hdmi_print(IMP, SYS "HDMITX: early suspend\n");
 }
 
@@ -331,6 +333,8 @@ static int set_disp_mode_auto(void)
     if((strncmp(info->name, "480cvbs", 7) == 0) || (strncmp(info->name, "576cvbs", 7) == 0) ||
        (strncmp(info->name, "panel", 5) == 0) || (strncmp(info->name, "null", 4) == 0)) {
         hdmi_print(ERR, VID "%s not valid hdmi mode\n", info->name);
+        hdmitx_device.HWOp.CntlConfig(&hdmitx_device, CONF_CLR_AVI_PACKET, 0);
+        hdmitx_device.HWOp.CntlConfig(&hdmitx_device, CONF_CLR_VSDB_PACKET, 0);
         hdmitx_device.HWOp.CntlMisc(&hdmitx_device, MISC_TMDS_PHY_OP, TMDS_PHY_DISABLE);
         hdmitx_device.HWOp.CntlConfig(&hdmitx_device, CONF_VIDEO_BLANK_OP, VIDEO_UNBLANK);
         return -1;
@@ -577,7 +581,22 @@ static ssize_t store_edid(struct device * dev, struct device_attribute *attr, co
 static ssize_t show_config(struct device * dev, struct device_attribute *attr, char * buf)
 {
     int pos=0;
+    unsigned char *aud_conf;
+    switch(hdmitx_device.tx_aud_cfg) {
+    case 0:
+        aud_conf = "off";
+        break;
+    case 1:
+        aud_conf = "on";
+        break;
+    case 2:
+        aud_conf = "auto";
+        break;
+    default:
+        aud_conf = "none";
+    }
     pos += snprintf(buf+pos, PAGE_SIZE, "disp switch (force or edid): %s\r\n", (hdmitx_device.disp_switch_config==DISP_SWITCH_FORCE)?"force":"edid");
+    pos += snprintf(buf+pos, PAGE_SIZE, "audio config: %s\r\n", aud_conf);
     return pos;
 }
 
@@ -611,12 +630,24 @@ static ssize_t store_config(struct device * dev, struct device_attribute *attr, 
             hdmi_set_3d(&hdmitx_device, 0xf, 0);
         }
     }
-    else if(strncmp(buf, "audio", 5)==0){
-        if(buf[5] == '0') {
+    else if(strncmp(buf, "audio_", 6)==0) {
+        if(strncmp(buf+6, "off", 3) == 0) {
+            hdmitx_device.tx_aud_cfg = 0;
             hdmitx_device.HWOp.CntlConfig(&hdmitx_device, CONF_AUDIO_MUTE_OP, AUDIO_MUTE);
+            hdmi_print(IMP, AUD "configure off\n");
         }
-        else if(buf[5] == '1') {
+        else if(strncmp(buf+6, "on", 2) == 0) {
+            hdmitx_device.tx_aud_cfg = 1;
             hdmitx_device.HWOp.CntlConfig(&hdmitx_device, CONF_AUDIO_MUTE_OP, AUDIO_UNMUTE);
+            hdmi_print(IMP, AUD "configure on\n");
+        }
+        else if(strncmp(buf+6, "auto", 4) == 0) {
+            // auto mode. if sink doesn't support current audio format, then no audio output
+            hdmitx_device.tx_aud_cfg = 2;
+            hdmi_print(IMP, AUD "configure auto\n");
+        }
+        else {
+            hdmi_print(ERR, AUD "configure error\n");
         }
     }
     return 16;
@@ -694,7 +725,7 @@ static ssize_t show_disp_cap_3d(struct device * dev, struct device_attribute *at
 static ssize_t show_aud_cap(struct device * dev, struct device_attribute *attr, char * buf)
 {
     int i,pos=0, j;
-    const char* aud_coding_type[] =  {"ReferToStreamHeader", "PCM", "AC-3", "MPEG1", "MP3", "MPEG2", "AAC", "DTS_ATRAC",
+    const char* aud_coding_type[] =  {"ReferToStreamHeader", "PCM", "AC-3", "MPEG1", "MP3", "MPEG2", "AAC", "DTS", "ATRAC",
                 "OneBitAudio", "Dobly_Digital+", "DTS-HD", "MAT", "DST", "WMA_Pro", "Reserved", NULL};
     const char* aud_sampling_frequency[] = {"ReferToStreamHeader", "32", "44.1", "48", "88.2", "96", "176.4", "192", NULL};
     const char* aud_sample_size[] = {"ReferToStreamHeader", "16", "20", "24", NULL};
@@ -792,21 +823,21 @@ void hdmi_print(int dbg_lvl, const char *fmt, ...)
     }
 }
 
-static DEVICE_ATTR(disp_mode, S_IWUSR | S_IRUGO, show_disp_mode, store_disp_mode);
+static DEVICE_ATTR(disp_mode, S_IWUSR | S_IRUGO | S_IWGRP, show_disp_mode, store_disp_mode);
 static DEVICE_ATTR(aud_mode, S_IWUSR | S_IRUGO, show_aud_mode, store_aud_mode);
 static DEVICE_ATTR(edid, S_IWUSR | S_IRUGO, show_edid, store_edid);
-static DEVICE_ATTR(config, S_IWUSR | S_IRUGO, show_config, store_config);
+static DEVICE_ATTR(config, S_IWUSR | S_IRUGO | S_IWGRP, show_config, store_config);
 static DEVICE_ATTR(debug, S_IWUSR | S_IRUGO, NULL, store_debug);
 static DEVICE_ATTR(disp_cap, S_IWUSR | S_IRUGO, show_disp_cap, NULL);
 static DEVICE_ATTR(aud_cap, S_IWUSR | S_IRUGO, show_aud_cap, NULL);
-static DEVICE_ATTR(aud_ch, S_IWUSR | S_IRUGO, show_aud_ch, store_aud_ch);
+static DEVICE_ATTR(aud_ch, S_IWUSR | S_IRUGO | S_IWGRP, show_aud_ch, store_aud_ch);
 static DEVICE_ATTR(disp_cap_3d, S_IWUSR | S_IRUGO, show_disp_cap_3d, NULL);
 static DEVICE_ATTR(hdcp_ksv_info, S_IWUSR | S_IRUGO, show_hdcp_ksv_info, NULL);
 static DEVICE_ATTR(hpd_state, S_IWUSR | S_IRUGO, show_hpd_state, NULL);
 static DEVICE_ATTR(cec, S_IWUSR | S_IRUGO, show_cec, store_cec);
-static DEVICE_ATTR(cec_config, S_IWUSR | S_IRUGO , show_cec_config, store_cec_config);
+static DEVICE_ATTR(cec_config, S_IWUSR | S_IRUGO | S_IWGRP, show_cec_config, store_cec_config);
 //static DEVICE_ATTR(cec_config, S_IWUGO | S_IRUGO , NULL, store_cec_config);
-static DEVICE_ATTR(cec_lang_config, S_IWUSR | S_IRUGO , show_cec_lang_config, store_cec_lang_config);
+static DEVICE_ATTR(cec_lang_config, S_IWUSR | S_IRUGO | S_IWGRP, show_cec_lang_config, store_cec_lang_config);
 
 /*****************************
 *    hdmitx display client interface
@@ -889,6 +920,72 @@ static struct notifier_block hdmitx_notifier_nb_v2 = {
 #include <sound/initval.h>
 #include <sound/control.h>
 
+static struct rate_map_fs map_fs[] = {
+    {0,      FS_REFER_TO_STREAM},
+    {32000,  FS_32K},
+    {44100,  FS_44K1},
+    {48000,  FS_48K},
+    {88200,  FS_88K2},
+    {96000,  FS_96K},
+    {176400, FS_176K4},
+    {192000, FS_192K},
+};
+
+static audio_fs_t aud_samp_rate_map(unsigned int rate)
+{
+    int i = 0;
+
+    for(i = 0; i < ARRAY_SIZE(map_fs); i++) {
+        if(map_fs[i].rate == rate) {
+            hdmi_print(IMP, AUD "aout notify rate %d\n", rate);
+            return map_fs[i].fs;
+        }
+    }
+    hdmi_print(IMP, AUD "get FS_MAX\n");
+    return FS_MAX;
+}
+
+static unsigned char *aud_type_string[] = {
+    "CT_REFER_TO_STREAM",
+    "CT_PCM",
+    "CT_AC_3",
+    "CT_MPEG1",
+    "CT_MP3",
+    "CT_MPEG2",
+    "CT_AAC",
+    "CT_DTS",
+    "CT_ATRAC",
+    "CT_ONE_BIT_AUDIO",
+    "CT_DOLBY_D",
+    "CT_DTS_HD",
+    "CT_MAT",
+    "CT_DST",
+    "CT_WMA",
+    "CT_MAX",
+};
+
+static struct size_map_ss aud_size_map_ss[] = {
+    {0,     SS_REFER_TO_STREAM},
+    {16,    SS_16BITS},
+    {20,    SS_20BITS},
+    {24,    SS_24BITS},
+    {32,    SS_MAX},
+};
+
+static audio_sample_size_t aud_size_map(unsigned int bits)
+{
+    int i;
+
+    for(i = 0; i < ARRAY_SIZE(aud_size_map_ss); i ++) {
+        if(bits == aud_size_map_ss[i].sample_bits) {
+            hdmi_print(IMP, AUD "aout notify size %d\n", bits);
+            return aud_size_map_ss[i].ss;
+        }
+    }
+    hdmi_print(IMP, AUD "get SS_MAX\n");
+    return SS_MAX;
+}
+
 extern int aout_register_client(struct notifier_block * ) ;
 extern int aout_unregister_client(struct notifier_block * ) ;
 static int hdmitx_notify_callback_a(struct notifier_block *block, unsigned long cmd , void *para);
@@ -897,116 +994,53 @@ static struct notifier_block hdmitx_notifier_nb_a = {
 };
 static int hdmitx_notify_callback_a(struct notifier_block *block, unsigned long cmd , void *para)
 {
+    int i, audio_check = 0;
+    rx_cap_t* pRXCap = &(hdmitx_device.RXCap);
     struct snd_pcm_substream *substream =(struct snd_pcm_substream*)para;
     Hdmi_tx_audio_para_t* audio_param = &(hdmitx_device.cur_audio_param);
+    audio_fs_t n_rate = aud_samp_rate_map(substream->runtime->rate);
+    audio_sample_size_t n_size = aud_size_map(substream->runtime->sample_bits);
 
-    switch (substream->runtime->rate) {
-        case 192000:
-            audio_param->sample_rate = FS_192K;
-            break;
-        case 176400:
-            audio_param->sample_rate = FS_176K4;
-            break;
-        case 96000:
-            audio_param->sample_rate = FS_96K;
-            break;
-        case 88200:
-            audio_param->sample_rate = FS_88K2;
-            break;
-        case 48000:
-            audio_param->sample_rate = FS_48K;
-            break;
-        case 44100:
-            audio_param->sample_rate = FS_44K1;
-            break;
-        case 32000:
-            audio_param->sample_rate = FS_32K;
-            break;
-        default:
-            hdmi_print(ERR, AUD "unknown audio frequence %d\n", substream->runtime->rate);
-            break;
-    }
-    hdmi_print(INF, AUD "aout notify rate %d\n", substream->runtime->rate);
+    hdmitx_device.audio_param_update_flag = 0;
+    hdmitx_device.audio_notify_flag = 0;
 
-    switch (cmd){
-    case AOUT_EVENT_IEC_60958_PCM:
-        audio_param->type = CT_PCM;
-        audio_param->sample_size = SS_16BITS;
-        hdmi_print(INF, AUD "aout notify format PCM\n");
-        break;
-    case AOUT_EVENT_RAWDATA_AC_3:
-        audio_param->type = CT_AC_3;
-        audio_param->sample_size = SS_16BITS;
-        hdmi_print(INF, AUD "aout notify format AC-3\n");
-        break;
-    case AOUT_EVENT_RAWDATA_MPEG1:
-        audio_param->type = CT_MPEG1;
-        audio_param->sample_size = SS_16BITS;
-        hdmi_print(INF, AUD "aout notify format MPEG1(Layer1 2)\n");
-        break;
-    case AOUT_EVENT_RAWDATA_MP3:
-        audio_param->type = CT_MP3;
-        audio_param->sample_size = SS_16BITS;
-        hdmi_print(INF, AUD "aout notify format MP3(MPEG1 Layer3)\n");
-        break;
-    case AOUT_EVENT_RAWDATA_MPEG2:
-        audio_param->type = CT_MPEG2;
-        audio_param->sample_size = SS_16BITS;
-        hdmi_print(INF, AUD "aout notify format MPEG2\n");
-        break;
-    case AOUT_EVENT_RAWDATA_AAC:
-        audio_param->type = CT_AAC;
-        audio_param->sample_size = SS_16BITS;
-        hdmi_print(INF, AUD "aout notify format AAC\n");
-        break;
-    case AOUT_EVENT_RAWDATA_DTS:
-        audio_param->type = CT_DTS;
-        audio_param->sample_size = SS_16BITS;
-        hdmi_print(INF, AUD "aout notify format DTS\n");
-        break;
-    case AOUT_EVENT_RAWDATA_ATRAC:
-        audio_param->type = CT_ATRAC;
-        audio_param->sample_size = SS_16BITS;
-        hdmi_print(INF, AUD "aout notify format ATRAC\n");
-        break;
-    case AOUT_EVENT_RAWDATA_ONE_BIT_AUDIO:
-        audio_param->type = CT_ONE_BIT_AUDIO;
-        audio_param->sample_size = SS_16BITS;
-        hdmi_print(INF, AUD "aout notify format One Bit Audio\n");
-        break;
-    case AOUT_EVENT_RAWDATA_DOBLY_DIGITAL_PLUS:
-        audio_param->type = CT_DOLBY_D;
-        audio_param->sample_size = SS_16BITS;
-        //audio_param->sample_rate = FS_48K;//192K;      // FS_48K;       //
-        hdmi_print(INF, AUD "aout notify format Dobly Digital +\n");
-        break;
-    case AOUT_EVENT_RAWDATA_DTS_HD:
-        audio_param->type = CT_DTS_HD;
-        audio_param->sample_size = SS_16BITS;
-        hdmi_print(INF, AUD "aout notify format DTS-HD\n");
-        break;
-    case AOUT_EVENT_RAWDATA_MAT_MLP:
-        audio_param->type = CT_MAT;
-        audio_param->sample_size = SS_16BITS;
-        hdmi_print(INF, AUD "aout notify format MAT(MLP)\n");
-        break;
-    case AOUT_EVENT_RAWDATA_DST:
-        audio_param->type = CT_DST;
-        audio_param->sample_size = SS_16BITS;
-        hdmi_print(INF, AUD "aout notify format DST\n");
-        break;
-    case AOUT_EVENT_RAWDATA_WMA_PRO:
-        audio_param->type = CT_WMA;
-        audio_param->sample_size = SS_16BITS;
-        hdmi_print(INF, AUD "aout notify format WMA Pro\n");
-        break;
-    default:
-        break;
+    if(audio_param->sample_rate != n_rate) {
+        audio_param->sample_rate = n_rate;
+        hdmitx_device.audio_param_update_flag = 1;
     }
 
-    audio_param->channel_num = substream->runtime->channels - 1;
+    if(audio_param->type != cmd) {
+        audio_param->type = cmd;
+        hdmi_print(INF, AUD "aout notify format %s\n", aud_type_string[audio_param->type]);
+        hdmitx_device.audio_param_update_flag = 1;
+    }
 
-    hdmitx_device.audio_param_update_flag = 1;
+    if(audio_param->sample_size != n_size) {
+        audio_param->sample_size = n_size;
+        hdmitx_device.audio_param_update_flag = 1;
+    }
+
+    if(audio_param->channel_num != (substream->runtime->channels - 1)) {
+        audio_param->channel_num = substream->runtime->channels - 1;
+        hdmitx_device.audio_param_update_flag = 1;
+    }
+    if(hdmitx_device.tx_aud_cfg == 2) {
+        hdmi_print(INF, AUD "auto mode\n");
+        // Detect whether Rx is support current audio format
+        for(i = 0; i < pRXCap->AUD_count; i++){
+            if(pRXCap->RxAudioCap[i].audio_format_code == cmd)
+            audio_check = 1;
+        }
+        if((!audio_check) && (cmd != AOUT_EVENT_IEC_60958_PCM)) {      // sink don't support current audio mode
+            printk("Sink not support this audio format %lu\n", cmd);
+            hdmitx_device.HWOp.CntlConfig(&hdmitx_device, CONF_AUDIO_MUTE_OP, AUDIO_MUTE);
+            hdmitx_device.audio_param_update_flag = 0;
+        }
+    }
+    if(hdmitx_device.audio_param_update_flag == 0)
+        hdmi_print(INF, AUD "no update\n");
+    else
+        hdmitx_device.audio_notify_flag = 1;
     return 0;
 }
 
@@ -1024,6 +1058,8 @@ static int hdmi_task_handle(void *data)
 
     //When init hdmi, clear the hdmitx module edid ram and edid buffer.
     hdmitx_edid_ram_buffer_clear(hdmitx_device);
+
+    hdmitx_device->tx_aud_cfg = 1; // default audio configure is on
 
     hdmitx_device->HWOp.SetupIRQ(hdmitx_device);
     if(init_flag&INIT_FLAG_POWERDOWN){
@@ -1066,6 +1102,13 @@ static int hdmi_task_handle(void *data)
         if((!hdmi_audio_off_flag)&&(hdmitx_device->audio_param_update_flag)) {
             if(hdmitx_device->hpd_state == 1) {     // plug-in & update audio param
                 hdmitx_set_audio(hdmitx_device, &(hdmitx_device->cur_audio_param), hdmi_ch);
+                if((hdmitx_device->audio_notify_flag == 1) || (hdmitx_device->audio_step == 1)) {
+                    hdmitx_device->audio_notify_flag = 0;
+                    hdmitx_device->audio_step = 0;
+#ifndef CONFIG_AML_HDMI_TX_HDCP
+                    hdmitx_device->HWOp.CntlConfig(hdmitx_device, CONF_AUDIO_MUTE_OP, AUDIO_UNMUTE);
+#endif
+                }
                 hdmitx_device->audio_param_update_flag = 0;
                 hdmi_print(INF, AUD "set audio param\n");
             }

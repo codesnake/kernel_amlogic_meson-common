@@ -1,6 +1,6 @@
 /*
  * Amlogic Ethernet Driver
- *
+ * h
  * Copyright (C) 2012 Amlogic, Inc.
  *
  * This program is free software; you can redistribute it and/or modify
@@ -41,9 +41,11 @@
 #include <mach/pinmux.h>
 #include <mach/gpio.h>
 #include <asm/delay.h>
-
+#include <linux/delay.h>
+#include <linux/pinctrl/consumer.h>
+#include <linux/amlogic/aml_gpio_consumer.h>
 #include <linux/of_platform.h>
-#include <linux/kthread.h> 
+#include <linux/kthread.h>
 #include "am_net8218.h"
 #include <mach/mod_gate.h>
 
@@ -52,10 +54,12 @@
 
 #define DRV_NAME	DRIVER_NAME
 #define DRV_VERSION	"v2.0.0"
+
 #ifdef CONFIG_HAS_EARLYSUSPEND
 #include <linux/earlysuspend.h>
 static struct early_suspend early_suspend;
 #endif
+
 MODULE_DESCRIPTION("Amlogic Ethernet Driver");
 MODULE_AUTHOR("Platform-BJ@amlogic.com>");
 MODULE_LICENSE("GPL");
@@ -73,9 +77,16 @@ static int g_debug = 1;
 static unsigned int g_tx_cnt = 0;
 static unsigned int g_rx_cnt = 0;
 static int g_mdcclk = 2;
+static int g_rxnum = 64;
+static int g_txnum = 64;
+
 static unsigned int ethbaseaddr = ETHBASE;
+static unsigned int savepowermode = 0;
 static int interruptnum = ETH_INTERRUPT;
-static int savepowermode = 0;
+static int reset_delay = 0;
+static int reset_pin_num = 0;
+static int reset_pin_enable = 0;
+static char *reset_pin;
 static unsigned int MDCCLK = ETH_MAC_4_GMII_Addr_CR_100_150;
 
 module_param_named(amlog_level, g_debug, int, 0664);
@@ -106,7 +117,7 @@ static int ethernet_reset(struct net_device *dev);
 
 /* --------------------------------------------------------------------------*/
 /**
- * @brief  data_dump 
+ * @brief  data_dump
  *
  * @param  p
  * @param  len
@@ -130,7 +141,7 @@ static void data_dump(unsigned char *p, int len)
 
 /* --------------------------------------------------------------------------*/
 /**
- * @brief  tx_data_dump 
+ * @brief  tx_data_dump
  *
  * @param  p
  * @param  len
@@ -149,7 +160,7 @@ static void tx_data_dump(unsigned char *p, int len)
 
 /* --------------------------------------------------------------------------*/
 /**
- * @brief  rx_data_dump 
+ * @brief  rx_data_dump
  *
  * @param  p
  * @param  len
@@ -168,13 +179,13 @@ static void rx_data_dump(unsigned char *p, int len)
 
 /* --------------------------------------------------------------------------*/
 /**
- * @brief  netdev_ioctl 
+ * @brief  netdev_ioctl
  *
  * @param  dev
  * @param  rq
  * @param  cmd
  *
- * @return 
+ * @return
  */
 /* --------------------------------------------------------------------------*/
 static int netdev_ioctl(struct net_device *dev, struct ifreq *rq, int cmd)
@@ -197,11 +208,11 @@ static int netdev_ioctl(struct net_device *dev, struct ifreq *rq, int cmd)
 
 /* --------------------------------------------------------------------------*/
 /**
- * @brief  init_rxtx_rings 
+ * @brief  init_rxtx_rings
  *
  * @param  dev
  *
- * @return 
+ * @return
  */
 /* --------------------------------------------------------------------------*/
 int init_rxtx_rings(struct net_device *dev)
@@ -283,11 +294,11 @@ int init_rxtx_rings(struct net_device *dev)
 
 /* --------------------------------------------------------------------------*/
 /**
- * @brief  alloc_ringdesc 
+ * @brief  alloc_ringdesc
  *
  * @param  dev
  *
- * @return 
+ * @return
  */
 /* --------------------------------------------------------------------------*/
 static int alloc_ringdesc(struct net_device *dev)
@@ -329,11 +340,11 @@ static int alloc_ringdesc(struct net_device *dev)
 
 /* --------------------------------------------------------------------------*/
 /**
- * @brief  free_ringdesc 
+ * @brief  free_ringdesc
  *
  * @param  dev
  *
- * @return 
+ * @return
  */
 /* --------------------------------------------------------------------------*/
 static int free_ringdesc(struct net_device *dev)
@@ -384,13 +395,13 @@ static int free_ringdesc(struct net_device *dev)
 
 /* --------------------------------------------------------------------------*/
 /**
- * @brief  update_status 
+ * @brief  update_status
  *
  * @param  dev
  * @param  status
  * @param  mask
  *
- * @return 
+ * @return
  */
 /* --------------------------------------------------------------------------*/
 static inline int update_status(struct net_device *dev, unsigned long status,
@@ -402,6 +413,8 @@ static inline int update_status(struct net_device *dev, unsigned long status,
 	int res = 0;
 	if (status & NOR_INTR_EN) {	//Normal Interrupts Process
 		if (status & TX_INTR_EN) {	//Transmit Interrupt Process
+			writel(1,(void*)(np->base_addr + ETH_DMA_1_Tr_Poll_Demand));
+			netif_wake_queue(dev);
 			writel((1 << 0 | 1 << 16),(void*)(np->base_addr + ETH_DMA_5_Status));
 			res |= 1;
 		}
@@ -451,16 +464,22 @@ static inline int update_status(struct net_device *dev, unsigned long status,
 		if (status & EARLY_TX_INTR_EN) {
 			writel((EARLY_TX_INTR_EN | ANOR_INTR_EN),
 			          (void*) (np->base_addr + ETH_DMA_5_Status));
+			writel(1,(void*)(np->base_addr + ETH_DMA_1_Tr_Poll_Demand));
+			netif_wake_queue(dev);
 		}
 		if (status & TX_STOP_EN) {
 			writel((TX_STOP_EN | ANOR_INTR_EN),
 			           (void*)(np->base_addr + ETH_DMA_5_Status));
+			writel(1,(void*)(np->base_addr + ETH_DMA_1_Tr_Poll_Demand));
+			netif_wake_queue(dev);
 			res |= 1;
 		}
 		if (status & TX_JABBER_TIMEOUT) {
 			writel((TX_JABBER_TIMEOUT | ANOR_INTR_EN),
 			          (void*) (np->base_addr + ETH_DMA_5_Status));
 			printk(KERN_WARNING "[" DRV_NAME "]" "tx jabber timeout\n");
+			writel(1,(void*)(np->base_addr + ETH_DMA_1_Tr_Poll_Demand));
+			netif_wake_queue(dev);
 			np->first_tx = 1;
 		}
 		if (status & RX_FIFO_OVER) {
@@ -475,6 +494,8 @@ static inline int update_status(struct net_device *dev, unsigned long status,
 			writel((TX_UNDERFLOW | ANOR_INTR_EN),
 			           (void*)(np->base_addr + ETH_DMA_5_Status));
 			printk(KERN_WARNING "[" DRV_NAME "]" "Tx underflow\n");
+			writel(1,(void*)(np->base_addr + ETH_DMA_1_Tr_Poll_Demand));
+			netif_wake_queue(dev);
 			np->first_tx = 1;
 			res |= 1;
 		}
@@ -492,7 +513,7 @@ static inline int update_status(struct net_device *dev, unsigned long status,
 
 /* --------------------------------------------------------------------------*/
 /**
- * @brief  print_rx_error_log 
+ * @brief  print_rx_error_log
  *
  * @param  status
  */
@@ -541,7 +562,7 @@ static void inline print_rx_error_log(unsigned long status)
 
 /* --------------------------------------------------------------------------*/
 /**
- * @brief  net_tasklet 
+ * @brief  net_tasklet
  *
  * @param  dev_instance
  */
@@ -581,13 +602,15 @@ void net_tasklet(unsigned long dev_instance)
 
 	if (result & 1) {
 		struct _tx_desc *c_tx, *tx = NULL;
-
+		int rx_count = 0;
 		c_tx = (void *)readl((void*)(np->base_addr + ETH_DMA_18_Curr_Host_Tr_Descriptor));
 		c_tx = np->tx_ring + (c_tx - np->tx_ring_dma);
 		tx = np->start_tx;
 		CACHE_RSYNC(tx, sizeof(struct _tx_desc));
 		while (tx != NULL && tx != c_tx && !(tx->status & DescOwnByDma)) {
 #ifdef DMA_USE_SKB_BUF
+			rx_count++;
+
 			if(unlikely(!spin_trylock_irqsave(&np->lock,flags)))
                         {
                             break;
@@ -625,7 +648,8 @@ void net_tasklet(unsigned long dev_instance)
 #endif
 			tx = tx->next;
 			CACHE_RSYNC(tx, sizeof(struct _tx_desc));
-
+		if(rx_count == g_txnum)
+			break;
 		}
 		np->start_tx = tx;
 	}
@@ -634,9 +658,11 @@ void net_tasklet(unsigned long dev_instance)
 		c_rx = (void *)readl((void*)(np->base_addr + ETH_DMA_19_Curr_Host_Re_Descriptor));
 		c_rx = np->rx_ring + (c_rx - np->rx_ring_dma);
 		rx = np->last_rx->next;
+		int rx_cnt = 0;
 		while (rx != NULL) {
 			CACHE_RSYNC(rx, sizeof(struct _rx_desc));
 			if (!(rx->status & (DescOwnByDma))) {
+				rx_cnt++;
 				int ip_summed = CHECKSUM_UNNECESSARY;
 				len = (rx->status & DescFrameLengthMask) >> DescFrameLengthShift;
 				if (unlikely(len < 18 || len > np->rx_buf_sz)) {	//here is fatal error we drop it ;
@@ -661,7 +687,7 @@ void net_tasklet(unsigned long dev_instance)
 					printk("NET skb pointer error!!!\n");
 					break;
 				}
-				
+
 				if (rx->buf_dma != 0) {
 					dma_unmap_single(&dev->dev, rx->buf_dma,/* np->rx_buf_sz*/len, DMA_FROM_DEVICE);
 				}
@@ -740,6 +766,8 @@ to_next:
 			} else {
 				break;
 			}
+			if(rx_cnt == g_rxnum)
+				break;
 
 		}
 	}
@@ -749,12 +777,12 @@ release:
 
 /* --------------------------------------------------------------------------*/
 /**
- * @brief  intr_handler 
+ * @brief  intr_handler
  *
  * @param  irq
  * @param  dev_instance
  *
- * @return 
+ * @return
  */
 /* --------------------------------------------------------------------------*/
 static irqreturn_t intr_handler(int irq, void *dev_instance)
@@ -843,11 +871,11 @@ static int mac_pmt_enable(unsigned int enable)
 
 /* --------------------------------------------------------------------------*/
 /**
- * @brief  phy_reset 
+ * @brief  phy_reset
  *
  * @param  ndev
  *
- * @return 
+ * @return
  */
 /* --------------------------------------------------------------------------*/
 #ifdef CONFIG_AML_NAND_KEY
@@ -883,13 +911,13 @@ static int aml_mac_init(struct net_device *ndev)
 	}
 	memcpy(ndev->dev_addr, mac, ETH_ALEN);
 	}
-#endif	
+#endif
 	printk("--2--write mac add to:");
 	data_dump(ndev->dev_addr, 6);
 	write_mac_addr(ndev, ndev->dev_addr);
 
 	val = 0xc80c |		//8<<8 | 8<<17; //tx and rx all 8bit mode;
-	      1 << 10;		//checksum offload enabled
+	      1 << 10 | 1 << 24;		//checksum offload enabled
 #ifdef MAC_LOOPBACK_TEST
 	val |= 1 << 12; //mac loop back
 #endif
@@ -924,11 +952,16 @@ static void aml_adjust_link(struct net_device *dev)
 	struct phy_device *phydev = priv->phydev;
 	unsigned long flags;
 	int new_state = 0;
+	int val;
 
-	if (phydev == NULL) 
+	if (phydev == NULL)
 		return;
 
 	spin_lock_irqsave(&priv->lock, flags);
+	if(phydev->phy_id == INTERNALPHY_ID){
+		val = (8<<27)|(7 << 24)|(1<<16)|(1<<15)|(1 << 13)|(1 << 12)|(4 << 4)|(0 << 1);
+		PERIPHS_SET_BITS(P_PREG_ETHERNET_ADDR0, val);
+	}
 	if (phydev->link) {
 		u32 ctrl = readl((void*)(priv->base_addr + ETH_MAC_0_Configuration));
 
@@ -936,10 +969,19 @@ static void aml_adjust_link(struct net_device *dev)
 		 * If not, we operate in half-duplex mode. */
 		if (phydev->duplex != priv->oldduplex) {
 			new_state = 1;
-			if (!(phydev->duplex)) 
-				ctrl &= ~(1 << 11);
-			else 
-				ctrl |= (1 << 11);
+			if (!(phydev->duplex)) {
+				ctrl &= ~((1 << 11)|(7<< 17)|(3<<5));
+				ctrl |= (4 << 17);
+				ctrl |= (3 << 5);
+				g_rxnum = 128;
+				g_txnum = 128;
+			}
+			else {
+				ctrl &= ~((7 << 17)|(3 << 5));
+				ctrl |= (1 << 11)|(2 << 17);
+				g_rxnum = 128;
+				g_txnum = 128;
+			}
 
 			priv->oldduplex = phydev->duplex;
 		}
@@ -955,8 +997,12 @@ static void aml_adjust_link(struct net_device *dev)
 					PERIPHS_SET_BITS(P_PREG_ETHERNET_ADDR0, (1 << 1));
 					break;
 				case 10:
-					ctrl &= ~(1 << 14);
+					ctrl &= ~((1 << 14)|(3 << 5));//10m half backoff = 00
 					PERIPHS_CLEAR_BITS(P_PREG_ETHERNET_ADDR0, (1 << 1));
+					if(phydev->phy_id == INTERNALPHY_ID){
+						val =0x4100b040;
+						WRITE_CBUS_REG(P_PREG_ETHERNET_ADDR0, val);
+					}
 					break;
 				default:
 					printk("%s: Speed (%d) is not 10"
@@ -981,13 +1027,13 @@ static void aml_adjust_link(struct net_device *dev)
 
 	}
 
-	if (new_state) 
+	if (new_state)
 		phy_print_status(phydev);
 
 	spin_unlock_irqrestore(&priv->lock, flags);
 
 #ifdef LOOP_BACK_TEST
-#ifdef PHY_LOOPBACK_TEST 
+#ifdef PHY_LOOPBACK_TEST
 	mdio_write(priv->mii, priv->phy_addr, MII_BMCR, BMCR_LOOPBACK | BMCR_SPEED100 | BMCR_FULLDPLX);
 #endif
 	start_test(priv->dev);
@@ -1017,8 +1063,8 @@ static int aml_phy_init(struct net_device *dev)
         snprintf(phy_id, MII_BUS_ID_SIZE + 3, PHY_ID_FMT, bus_id,
                  priv->phy_addr);
         printk("aml_phy_init:  trying to attach to %s\n", phy_id);
-	if(priv->phydev && savepowermode)
-		 priv->phydev->drv->resume(priv->phydev);
+        if(priv->phydev && savepowermode)
+            priv->phydev->drv->resume(priv->phydev);
         phydev = phy_connect(dev, phy_id, &aml_adjust_link, priv->phy_interface);
 
         if (IS_ERR(phydev)) {
@@ -1049,11 +1095,11 @@ static int aml_phy_init(struct net_device *dev)
 
 /* --------------------------------------------------------------------------*/
 /**
- * @brief  ethernet_reset 
+ * @brief  ethernet_reset
  *
  * @param  dev
  *
- * @return 
+ * @return
  */
 /* --------------------------------------------------------------------------*/
 static int ethernet_reset(struct net_device *dev)
@@ -1061,7 +1107,7 @@ static int ethernet_reset(struct net_device *dev)
 	struct am_net_private *np = netdev_priv(dev);
 	int res;
 	unsigned long flags;
-
+	int tmp;
 	printk(KERN_INFO "Ethernet reset\n");
 
 	spin_lock_irqsave(&np->lock, flags);
@@ -1080,7 +1126,13 @@ static int ethernet_reset(struct net_device *dev)
 
 	aml_mac_init(dev);
 
-	np->first_tx = 1;
+	//np->first_tx = 1;
+	tmp = readl((void*)(np->base_addr + ETH_DMA_6_Operation_Mode));//tx enable
+	tmp |= (7 << 14) | (1 << 13);
+	writel(tmp, (void*)(np->base_addr + ETH_DMA_6_Operation_Mode));
+	tmp = readl((void*)(np->base_addr + ETH_MAC_6_Flow_Control));
+	tmp |= (1 << 1) | (1 << 0);
+	writel(tmp, (void*)(np->base_addr + ETH_MAC_6_Flow_Control));
 
 out_err:
 	return res;
@@ -1088,11 +1140,11 @@ out_err:
 
 /* --------------------------------------------------------------------------*/
 /**
- * @brief  netdev_open 
+ * @brief  netdev_open
  *
  * @param  dev
  *
- * @return 
+ * @return
  */
 /* --------------------------------------------------------------------------*/
 static int netdev_open(struct net_device *dev)
@@ -1139,11 +1191,11 @@ out_err:
 
 /* --------------------------------------------------------------------------*/
 /**
- * @brief  netdev_close 
+ * @brief  netdev_close
  *
  * @param  dev
  *
- * @return 
+ * @return
  */
 /* --------------------------------------------------------------------------*/
 static int netdev_close(struct net_device *dev)
@@ -1155,8 +1207,9 @@ static int netdev_close(struct net_device *dev)
 		return 0;
 	}
 
-	if (np->phydev && savepowermode) 
+	if (np->phydev && savepowermode) {
 		np->phydev->drv->suspend(np->phydev);
+	}
 	if (np->phydev) {
 		phy_stop(np->phydev);
 		phy_disconnect(np->phydev);
@@ -1189,12 +1242,12 @@ static int netdev_close(struct net_device *dev)
 
 /* --------------------------------------------------------------------------*/
 /**
- * @brief  start_tx 
+ * @brief  start_tx
  *
  * @param  skb
  * @param  dev
  *
- * @return 
+ * @return
  */
 /* --------------------------------------------------------------------------*/
 static int start_tx(struct sk_buff *skb, struct net_device *dev)
@@ -1260,8 +1313,10 @@ static int start_tx(struct sk_buff *skb, struct net_device *dev)
 		writel(tmp, (void*)(np->base_addr + ETH_DMA_6_Operation_Mode));
 	} else {
 		//ETH_DMA_1_Tr_Poll_Demand
-		writel(1,(void*)(np->base_addr + ETH_DMA_1_Tr_Poll_Demand));
+	//	writel(1,(void*)(np->base_addr + ETH_DMA_1_Tr_Poll_Demand));
 	}
+
+	writel(1,(void*)(np->base_addr + ETH_DMA_1_Tr_Poll_Demand));
 	writel(np->irq_mask, (void*)(np->base_addr + ETH_DMA_7_Interrupt_Enable));	
 	spin_unlock_irqrestore(&np->lock, flags);
 	tasklet_enable(&np->rx_tasklet);
@@ -1279,7 +1334,7 @@ err:
 #ifdef LOOP_BACK_TEST
 /* --------------------------------------------------------------------------*/
 /**
- * @brief  test_loop_back 
+ * @brief  test_loop_back
  *
  * @param  dev
  */
@@ -1338,7 +1393,7 @@ static void force_speed100_duplex_set(struct am_net_private *np)
 }
 /* --------------------------------------------------------------------------*/
 /**
- * @brief  start_test 
+ * @brief  start_test
  *
  * @param  dev
  */
@@ -1367,7 +1422,7 @@ static struct net_device_stats *get_stats(struct net_device *dev) {
 
 /* --------------------------------------------------------------------------*/
 /**
- * @brief  tx_timeout 
+ * @brief  tx_timeout
  *
  * @param  dev
  */
@@ -1394,7 +1449,7 @@ static void tx_timeout(struct net_device *dev)
 
 /* --------------------------------------------------------------------------*/
 /**
- * @brief  write_mac_addr 
+ * @brief  write_mac_addr
  *
  * @param  dev
  * @param  macaddr
@@ -1405,7 +1460,7 @@ static void tx_timeout(struct net_device *dev)
 	int ret;
 	int use_nand_mac=0;
 	u8 mac[ETH_ALEN];
-	
+
 	extenal_api_key_set_version("nand3");
 	ret = get_aml_key_kernel("mac_wifi", print_buff, 0);
 	printk("ret = %d\nprint_buff=%s\n", ret, print_buff);
@@ -1441,11 +1496,11 @@ static void write_mac_addr(struct net_device *dev, char *macaddr)
 
 /* --------------------------------------------------------------------------*/
 /**
- * @brief  chartonum 
+ * @brief  chartonum
  *
  * @param  c
  *
- * @return 
+ * @return
  */
 /* --------------------------------------------------------------------------*/
 static unsigned char inline chartonum(char c)
@@ -1465,7 +1520,7 @@ static unsigned char inline chartonum(char c)
 
 /* --------------------------------------------------------------------------*/
 /**
- * @brief  config_mac_addr 
+ * @brief  config_mac_addr
  *
  * @param  dev
  * @param  mac
@@ -1473,21 +1528,21 @@ static unsigned char inline chartonum(char c)
 /* --------------------------------------------------------------------------*/
 static void config_mac_addr(struct net_device *dev, void *mac)
 {
-	if(g_mac_addr_setup) 
+	if(g_mac_addr_setup)
 		memcpy(dev->dev_addr, mac, 6);
 	else
-		random_ether_addr(dev->dev_addr);	
+		random_ether_addr(dev->dev_addr);
 
 	write_mac_addr(dev, dev->dev_addr);
 }
 
 /* --------------------------------------------------------------------------*/
 /**
- * @brief  mac_addr_set 
+ * @brief  mac_addr_set
  *
  * @param  line
  *
- * @return 
+ * @return
  */
 /* --------------------------------------------------------------------------*/
 static int __init mac_addr_set(char *line)
@@ -1511,11 +1566,11 @@ __setup("mac=", mac_addr_set);
 
 /* --------------------------------------------------------------------------*/
 /**
- * @brief  phy_mc_hash 
+ * @brief  phy_mc_hash
  *
  * @param  addr
  *
- * @return 
+ * @return
  */
 /* --------------------------------------------------------------------------*/
 static inline int phy_mc_hash(__u8 *addr)
@@ -1525,7 +1580,7 @@ static inline int phy_mc_hash(__u8 *addr)
 
 /* --------------------------------------------------------------------------*/
 /**
- * @brief  set_multicast_list 
+ * @brief  set_multicast_list
  *
  * @param  dev
  */
@@ -1616,13 +1671,81 @@ static const struct net_device_ops am_netdev_ops = {
 	.ndo_validate_addr      = eth_validate_addr,
 };
 
+static int aml_ethtool_get_settings(struct net_device *dev,
+					 struct ethtool_cmd *cmd)
+{
+	struct am_net_private *np = netdev_priv(dev);
+
+	if (!np->phydev)
+		return -ENODEV;
+
+	cmd->maxtxpkt = 1;
+	cmd->maxrxpkt = 1;
+	return phy_ethtool_gset(np->phydev, cmd);
+}
+
+static int aml_ethtool_set_settings(struct net_device *dev,
+					 struct ethtool_cmd *cmd)
+{
+	struct am_net_private *np = netdev_priv(dev);
+
+	if (!np->phydev)
+		return -ENODEV;
+
+	return phy_ethtool_sset(np->phydev, cmd);
+}
+
+static int aml_ethtool_nway_reset(struct net_device *netdev)
+{
+	struct am_net_private *np = netdev_priv(netdev);
+
+	if (!np->phydev)
+		return -ENODEV;
+
+	return phy_start_aneg(np->phydev);
+}
+static void aml_eth_get_wol(struct net_device *dev, struct ethtool_wolinfo *wol)
+{
+	struct am_net_private *np = netdev_priv(dev);
+	wol->supported = 0;
+	wol->wolopts = 0;
+	if (np->phydev)
+		phy_ethtool_get_wol(np->phydev, wol);
+}
+
+static int aml_eth_set_wol(struct net_device *dev, struct ethtool_wolinfo *wol)
+{
+	struct am_net_private *np = netdev_priv(dev);
+	int err;
+
+	if (np->phydev == NULL)
+		return -EOPNOTSUPP;
+
+	err = phy_ethtool_set_wol(np->phydev, wol);
+	/* Given that amlogic mac works without the micrel PHY driver,
+	 * this debugging hint is useful to have.
+	 */
+	if (err == -EOPNOTSUPP)
+		printk( "The PHY does not support set_wol, was CONFIG_MICREL_PHY enabled?\n");
+	return err;
+}
+
+static const struct ethtool_ops aml_ethtool_ops = {
+	.get_settings = aml_ethtool_get_settings,
+	.set_settings = aml_ethtool_set_settings,
+	.nway_reset = aml_ethtool_nway_reset,
+	.get_link = ethtool_op_get_link,
+	.get_wol  = aml_eth_get_wol,
+	.set_wol  = aml_eth_set_wol,
+
+};
 /* --------------------------------------------------------------------------*/
 /**
- * @brief  setup_net_device 
+ * @brief  setup_net_device
  *
  * @param  dev
  *
- * @return 
+ * @return
  */
 /* --------------------------------------------------------------------------*/
 static int setup_net_device(struct net_device *dev)
@@ -1632,7 +1755,7 @@ static int setup_net_device(struct net_device *dev)
 	dev->dev.coherent_dma_mask = DMA_BIT_MASK(32);
 	dev->features = NETIF_F_GEN_CSUM;
 	dev->netdev_ops = &am_netdev_ops;
-	dev->ethtool_ops = NULL;	// &netdev_ethtool_ops;
+	dev->ethtool_ops = &aml_ethtool_ops;	// &netdev_ethtool_ops;
 	dev->watchdog_timeo = TX_TIMEOUT;
 	np->irq_mask = (1 << 16) |          //NIE: Normal Interrupt Summary Enable
 	               (1 << 15) |          //abnormal int summary
@@ -1654,11 +1777,11 @@ static int setup_net_device(struct net_device *dev)
 
 /* --------------------------------------------------------------------------*/
 /**
- * @brief  probe_init 
+ * @brief  probe_init
  *
  * @param  ndev
  *
- * @return 
+ * @return
  */
 /* --------------------------------------------------------------------------*/
 static int probe_init(struct net_device *ndev)
@@ -1700,7 +1823,7 @@ static int probe_init(struct net_device *ndev)
 	return 0;
 
 out_unregister:
-	unregister_netdev(ndev);	
+	unregister_netdev(ndev);
 error0:
 	return res;
 }
@@ -1708,9 +1831,46 @@ error0:
 /*
  * Ethernet debug
  */
+
+static void initTSTMODE(void)
+{
+	struct am_net_private *np = netdev_priv(my_ndev);
+	mdio_write(np->mii, np->phy_addr, 20, 0x0400);
+	mdio_write(np->mii, np->phy_addr, 20, 0x0000);
+	mdio_write(np->mii, np->phy_addr, 20, 0x0400);
+
+}
+
+static void closeTSTMODE(void)
+{
+	struct am_net_private *np = netdev_priv(my_ndev);
+	mdio_write(np->mii, np->phy_addr, 20, 0x0000);
+}
+
+static void tstcntl_dump_phyreg(void)
+{
+	int rd_addr = 0;
+	int rd_data = 0;
+	int rd_data_hi =0;
+	struct am_net_private *np = netdev_priv(my_ndev);
+
+	if ((np == NULL) || (np->dev == NULL))
+		return;
+
+	printk("========== ETH TST PHY regs ==========\n");
+	for (rd_addr = 0; rd_addr < 32; rd_addr++) {
+		mdio_write(np->mii, np->phy_addr,20,((1 << 15) | (1 << 10) | ((rd_addr & 0x1f) << 5)));
+		rd_data = mdio_read(np->mii, np->phy_addr, 21);
+		rd_data_hi = mdio_read(np->mii, np->phy_addr, 22);
+		rd_data = ((rd_data_hi & 0xffff) << 16) | rd_data;
+		printk("tstcntl phy [reg_%d] 0x%x\n", rd_addr, rd_data);
+	}
+}
+
+
 /* --------------------------------------------------------------------------*/
 /**
- * @brief  am_net_dump_phyreg 
+ * @brief  am_net_dump_phyreg
  */
 /* --------------------------------------------------------------------------*/
 static void am_net_dump_phyreg(void)
@@ -1731,12 +1891,12 @@ static void am_net_dump_phyreg(void)
 
 /* --------------------------------------------------------------------------*/
 /**
- * @brief  am_net_read_phyreg 
+ * @brief  am_net_read_phyreg
  *
  * @param  argc
  * @param  argv
  *
- * @return 
+ * @return
  */
 /* --------------------------------------------------------------------------*/
 static int am_net_read_phyreg(int argc, char **argv)
@@ -1765,12 +1925,12 @@ static int am_net_read_phyreg(int argc, char **argv)
 
 /* --------------------------------------------------------------------------*/
 /**
- * @brief  am_net_write_phyreg 
+ * @brief  am_net_write_phyreg
  *
  * @param  argc
  * @param  argv
  *
- * @return 
+ * @return
  */
 /* --------------------------------------------------------------------------*/
 static int am_net_write_phyreg(int argc, char **argv)
@@ -1799,6 +1959,72 @@ static int am_net_write_phyreg(int argc, char **argv)
 	return 0;
 }
 
+
+static int readTSTCNTLRegister( int argc, char **argv){
+	int rd_data =0;
+	int rd_data_hi = 0;
+	int rd_addr;
+	struct am_net_private *np = netdev_priv(my_ndev);
+
+	if ((np == NULL) || (np->dev == NULL))
+		return -1;
+
+	if (argc < 2 || (argv == NULL) || (argv[0] == NULL) || (argv[1] == NULL)) {
+		printk("Invalid syntax\n");
+		return -1;
+	}
+	rd_addr = simple_strtol(argv[1], NULL, 16);
+	if (rd_addr >= 0 && rd_addr <= 31) {
+		mdio_write(np->mii, np->phy_addr,20,((1 << 15) | (1 << 10) | ((rd_addr & 0x1f) << 5)));
+		rd_data = mdio_read(np->mii, np->phy_addr, 21);
+		rd_data_hi = mdio_read(np->mii, np->phy_addr, 22);
+		rd_data = ((rd_data_hi & 0xffff) << 16) | rd_data;
+		printk("read tstcntl phy [reg_%d] 0x%x\n", rd_addr, rd_data);
+	} else {
+		printk("Invalid parameter\n");
+	}
+	return rd_data;
+}
+int returnwriteval(int rd_addr)
+{
+	int rd_data =0;
+	int rd_data_hi = 0;
+	struct am_net_private *np = netdev_priv(my_ndev);
+	mdio_write(np->mii, np->phy_addr,20,((1 << 15) | (1 << 10) | ((rd_addr & 0x1f) << 5)));
+	rd_data = mdio_read(np->mii, np->phy_addr, 21);
+	rd_data_hi = mdio_read(np->mii, np->phy_addr, 22);
+	rd_data = ((rd_data_hi & 0xffff) << 16) | rd_data;
+	return rd_data;
+}
+
+int writeTSTCNTLRegister( int argc, char **argv) {
+	int wr_addr = 0;
+	int wr_data = 0;
+	struct am_net_private *np = netdev_priv(my_ndev);
+	if ((np == NULL) || (np->dev == NULL))
+		return -1;
+
+	if (argc < 3 || (argv == NULL) || (argv[0] == NULL)
+			|| (argv[1] == NULL) || (argv[2] == NULL)) {
+		printk("Invalid syntax\n");
+		return -1;
+	}
+	wr_addr = simple_strtol(argv[1], NULL, 16);
+	wr_data = simple_strtol(argv[2], NULL, 16);
+	if (wr_addr >=0 && wr_addr <=31) {
+		mdio_write(np->mii, np->phy_addr, 23, (wr_data & 0xffff));
+		mdio_write(np->mii, np->phy_addr, 20, ((1 << 14) | (1 << 10) | ((wr_addr << 0) & 0x1f)));
+		printk("write phy tstcntl [reg_%d] 0x%x, 0x%x\n", wr_addr, wr_data, returnwriteval( wr_addr));
+	} else {
+		printk("Invalid parameter\n");
+	}
+
+	return 0;
+}
+
+
+
+
 static const char *g_phyreg_help = {
 	"Usage:\n"
 	"    echo d > phyreg;            //dump ethernet phy reg\n"
@@ -1808,13 +2034,13 @@ static const char *g_phyreg_help = {
 
 /* --------------------------------------------------------------------------*/
 /**
- * @brief  eth_phyreg_help 
+ * @brief  eth_phyreg_help
  *
  * @param  class
  * @param  attr
  * @param  buf
  *
- * @return 
+ * @return
  */
 /* --------------------------------------------------------------------------*/
 static ssize_t eth_phyreg_help(struct class *class, struct class_attribute *attr, char *buf)
@@ -1822,16 +2048,59 @@ static ssize_t eth_phyreg_help(struct class *class, struct class_attribute *attr
 	return sprintf(buf, "%s\n", g_phyreg_help);
 }
 
+unsigned char adc_data[32*32];
+unsigned char adc_freq[64];
+
+static void adc_show(void)
+{
+	int rd_data =0;
+	int rd_data_hi = 0;
+	int i,j;
+	struct am_net_private *np = netdev_priv(my_ndev);
+	initTSTMODE();
+	for (i=0;i<32*32;i++){
+		mdio_write(np->mii, np->phy_addr,20,((1 << 15) | (1 << 10) | ((16 & 0x1f) << 5)));
+		rd_data = mdio_read(np->mii, np->phy_addr, 21);
+		rd_data_hi = mdio_read(np->mii, np->phy_addr, 22);
+		adc_data[i] = rd_data & 0x3f;
+	}
+	closeTSTMODE();
+	for (i=0;i<32;i++){
+		for (j=0;j<32;j++){
+			printk("%02x ", adc_data[i*32+j]);
+		}
+		printk("\n");
+	}
+	for (i=0;i<64;i++)
+		adc_freq[i]=0;
+	for (i=0;i<32;i++){
+		for (j=0;j<32;j++){
+			if (adc_data[i*32+j]>31) adc_freq[adc_data[i*32+j]-32]++;
+			else adc_freq[32+adc_data[i*32+j]]++;
+			printk("%02x ", adc_data[i*32+j]);
+		}
+		printk("\n");
+	}
+	for (i=0;i<64;i++){
+		printk("%d:\t",i-32);
+		if (adc_freq[i]>128) adc_freq[i]=128;
+		for (j=0;j<adc_freq[i];j++)
+			printk("#");
+		printk("\n");
+	}
+}
+
+
 /* --------------------------------------------------------------------------*/
 /**
- * @brief  eth_phyreg_func 
+ * @brief  eth_phyreg_func
  *
  * @param  class
  * @param  attr
  * @param  buf
  * @param  count
  *
- * @return 
+ * @return
  */
 /* --------------------------------------------------------------------------*/
 static ssize_t eth_phyreg_func(struct class *class, struct class_attribute *attr,
@@ -1867,6 +2136,25 @@ static ssize_t eth_phyreg_func(struct class *class, struct class_attribute *attr
 	case 'D':
 		am_net_dump_phyreg();
 		break;
+		case 't':
+		case 'T':
+			initTSTMODE();
+			if((argv[0][1] == 'w')||(argv[0][1] == 'W'))
+			{
+				writeTSTCNTLRegister(argc, argv);
+			}
+			if((argv[0][1] == 'r')||(argv[0][1] == 'R'))
+			{
+				readTSTCNTLRegister(argc, argv);
+			}
+			if((argv[0][1] == 'd')||(argv[0][1] == 'D'))
+				tstcntl_dump_phyreg();
+			closeTSTMODE();
+			break;
+		case 'c':
+		case 'C':
+			adc_show();
+			break;
 	default:
 		goto end;
 	}
@@ -1880,7 +2168,7 @@ end:
 
 /* --------------------------------------------------------------------------*/
 /**
- * @brief  am_net_dump_macreg 
+ * @brief  am_net_dump_macreg
  */
 /* --------------------------------------------------------------------------*/
 static void am_net_dump_macreg(void)
@@ -1907,12 +2195,12 @@ static void am_net_dump_macreg(void)
 
 /* --------------------------------------------------------------------------*/
 /**
- * @brief  am_net_read_macreg 
+ * @brief  am_net_read_macreg
  *
  * @param  argc
  * @param  argv
  *
- * @return 
+ * @return
  */
 /* --------------------------------------------------------------------------*/
 static int am_net_read_macreg(int argc, char **argv)
@@ -1941,12 +2229,12 @@ static int am_net_read_macreg(int argc, char **argv)
 
 /* --------------------------------------------------------------------------*/
 /**
- * @brief  am_net_write_macreg 
+ * @brief  am_net_write_macreg
  *
  * @param  argc
  * @param  argv
  *
- * @return 
+ * @return
  */
 /* --------------------------------------------------------------------------*/
 static int am_net_write_macreg(int argc, char **argv)
@@ -1984,13 +2272,13 @@ static const char *g_macreg_help = {
 
 /* --------------------------------------------------------------------------*/
 /**
- * @brief  eth_macreg_help 
+ * @brief  eth_macreg_help
  *
  * @param  class
  * @param  attr
  * @param  buf
  *
- * @return 
+ * @return
  */
 /* --------------------------------------------------------------------------*/
 static ssize_t eth_macreg_help(struct class *class, struct class_attribute *attr, char *buf)
@@ -2000,14 +2288,14 @@ static ssize_t eth_macreg_help(struct class *class, struct class_attribute *attr
 
 /* --------------------------------------------------------------------------*/
 /**
- * @brief  eth_macreg_func 
+ * @brief  eth_macreg_func
  *
  * @param  class
  * @param  attr
  * @param  buf
  * @param  count
  *
- * @return 
+ * @return
  */
 /* --------------------------------------------------------------------------*/
 static ssize_t eth_macreg_func(struct class *class, struct class_attribute *attr,
@@ -2064,13 +2352,13 @@ static const char *g_mdcclk_help = {
 };
 /* --------------------------------------------------------------------------*/
 /**
- * @brief  eth_mdcclk_show 
+ * @brief  eth_mdcclk_show
  *
  * @param  class
  * @param  attr
  * @param  buf
  *
- * @return 
+ * @return
  */
 /* --------------------------------------------------------------------------*/
 static ssize_t eth_mdcclk_show(struct class *class, struct class_attribute *attr, char *buf)
@@ -2083,14 +2371,14 @@ static ssize_t eth_mdcclk_show(struct class *class, struct class_attribute *attr
 }
 /* --------------------------------------------------------------------------*/
 /**
- * @brief  eth_mdcclk_store 
+ * @brief  eth_mdcclk_store
  *
  * @param  class
  * @param  attr
  * @param  buf
  * @param  count
  *
- * @return 
+ * @return
  */
 /* --------------------------------------------------------------------------*/
 static ssize_t eth_mdcclk_store(struct class *class, struct class_attribute *attr, const char *buf, size_t count)
@@ -2112,7 +2400,7 @@ static ssize_t eth_mdcclk_store(struct class *class, struct class_attribute *att
 		case 2:
 		MDCCLK = ETH_MAC_4_GMII_Addr_CR_100_150;
 		break;
-		case 3: 
+		case 3:
 		MDCCLK = ETH_MAC_4_GMII_Addr_CR_20_35;
 		break;
 		case 4:
@@ -2123,9 +2411,9 @@ static ssize_t eth_mdcclk_store(struct class *class, struct class_attribute *att
 		break;
 		case 6:
 		MDCCLK = ETH_MAC_4_GMII_Addr_CR_250_300;
-		break; 
+		break;
 		default:
-		break;	
+		break;
 	}
 
 	return count;
@@ -2143,13 +2431,13 @@ static const char *g_debug_help = {
 
 /* --------------------------------------------------------------------------*/
 /**
- * @brief  eth_debug_show 
+ * @brief  eth_debug_show
  *
  * @param  class
  * @param  attr
  * @param  buf
  *
- * @return 
+ * @return
  */
 /* --------------------------------------------------------------------------*/
 static ssize_t eth_debug_show(struct class *class, struct class_attribute *attr, char *buf)
@@ -2163,14 +2451,14 @@ static ssize_t eth_debug_show(struct class *class, struct class_attribute *attr,
 
 /* --------------------------------------------------------------------------*/
 /**
- * @brief  eth_debug_store 
+ * @brief  eth_debug_store
  *
  * @param  class
  * @param  attr
  * @param  buf
  * @param  count
  *
- * @return 
+ * @return
  */
 /* --------------------------------------------------------------------------*/
 static ssize_t eth_debug_store(struct class *class, struct class_attribute *attr, const char *buf, size_t count)
@@ -2190,33 +2478,33 @@ static ssize_t eth_debug_store(struct class *class, struct class_attribute *attr
 
 /* --------------------------------------------------------------------------*/
 /**
- * @brief  eth_count_show 
+ * @brief  eth_count_show
  *
  * @param  class
  * @param  attr
  * @param  buf
  *
- * @return 
+ * @return
  */
 /* --------------------------------------------------------------------------*/
 static ssize_t eth_count_show(struct class *class, struct class_attribute *attr, char *buf)
 {
-	printk("Ethernet TX count: 0x%08x\n", g_tx_cnt);
-	printk("Ethernet RX count: 0x%08x\n", g_rx_cnt);
+	printk("Ethernet TX count: %08d\n", g_tx_cnt);
+	printk("Ethernet RX count: %08d\n", g_rx_cnt);
 
 	return 0;
 }
 
 /* --------------------------------------------------------------------------*/
 /**
- * @brief  eth_count_store 
+ * @brief  eth_count_store
  *
  * @param  class
  * @param  attr
  * @param  buf
  * @param  count
  *
- * @return 
+ * @return
  */
 /* --------------------------------------------------------------------------*/
 static ssize_t eth_count_store(struct class *class, struct class_attribute *attr, const char *buf, size_t count)
@@ -2301,9 +2589,9 @@ static CLASS_ATTR(linkspeed, S_IWUSR | S_IRUGO, eth_linkspeed_show, NULL);
 
 /* --------------------------------------------------------------------------*/
 /**
- * @brief  am_eth_class_init 
+ * @brief  am_eth_class_init
  *
- * @return 
+ * @return
  */
 /* --------------------------------------------------------------------------*/
 static int __init am_eth_class_init(void)
@@ -2322,7 +2610,14 @@ static int __init am_eth_class_init(void)
 
 	return ret;
 }
-
+#define OWNER_NAME "meson-eth"
+void hardware_reset_phy(void){
+	if(reset_pin_enable){
+		amlogic_gpio_direction_output(reset_pin_num, 0, OWNER_NAME);
+		mdelay(reset_delay);
+		amlogic_gpio_direction_output(reset_pin_num, 1, OWNER_NAME);
+	}
+}
 #ifdef CONFIG_HAS_EARLYSUSPEND
 static int ethernet_early_suspend(struct early_suspend *dev)
 {
@@ -2334,21 +2629,22 @@ static int ethernet_late_resume(struct early_suspend *dev)
 {
 	int res = 0;
 	printk("ethernet_late_resume()\n");
+	hardware_reset_phy();
 	res = netdev_open(my_ndev);
 	if (res != 0) {
 		printk("nono, it can not be true!\n");
 	}
-	
+
 	return 0;
 }
 #endif
 /* --------------------------------------------------------------------------*/
 /**
- * @brief ethernet_probe 
+ * @brief ethernet_probe
  *
  * @param pdev
  *
- * @return 
+ * @return
  */
 /* --------------------------------------------------------------------------*/
 static int ethernet_probe(struct platform_device *pdev)
@@ -2375,6 +2671,21 @@ static int ethernet_probe(struct platform_device *pdev)
 	if (ret) {
 		printk("Please config savepowermode.\n");
 	}
+	ret = of_property_read_u32(pdev->dev.of_node,"reset_pin_enable",&reset_pin_enable);
+	if (ret) {
+		printk("Please config reset_pin_enable.\n");
+	}
+	ret = of_property_read_u32(pdev->dev.of_node,"reset_delay",&reset_delay);
+	if (ret) {
+		printk("Please config reset_delay.\n");
+	}
+	ret = of_property_read_string(pdev->dev.of_node,"reset_pin",&reset_pin);
+	if (ret) {
+		printk("Please config reset_pin.\n");
+	}
+	if(reset_pin_enable)
+		reset_pin_num = amlogic_gpio_name_map_num(reset_pin);
+
 #endif
 	printk(DRV_NAME "init(dbg[%p]=%d)\n", (&g_debug), g_debug);
 	switch_mod_gate_by_name("ethernet",1);
@@ -2390,31 +2701,32 @@ static int ethernet_probe(struct platform_device *pdev)
        register_early_suspend(&early_suspend);
 #endif
 	res = probe_init(my_ndev);
-	if (res != 0) 
+	if (res != 0)
 		free_netdev(my_ndev);
-	else 
+	else
 		res = am_eth_class_init();
 
 	eth_pdata = (struct aml_eth_platdata *)pdev->dev.platform_data;
 	struct am_net_private *np = netdev_priv(my_ndev);
 	if(np->phydev && savepowermode)
 		np->phydev->drv->suspend(np->phydev);
-	switch_mod_gate_by_name("ethernet",0);
-	if (!eth_pdata) {
-		printk("\nethernet pm ops resource undefined.\n");
-		return -EFAULT;
-	}
+	//switch_mod_gate_by_name("ethernet",0);
+
+	//if (!eth_pdata) {
+	//	printk("\nethernet pm ops resource undefined.\n");
+	//	return -EFAULT;
+	//}
 
 	return 0;
 }
 
 /* --------------------------------------------------------------------------*/
 /**
- * @brief ethernet_remove 
+ * @brief ethernet_remove
  *
  * @param pdev
  *
- * @return 
+ * @return
  */
 /* --------------------------------------------------------------------------*/
 static int ethernet_remove(struct platform_device *pdev)
@@ -2429,12 +2741,12 @@ static int ethernet_remove(struct platform_device *pdev)
 
 /* --------------------------------------------------------------------------*/
 /**
- * @brief ethernet_suspend 
+ * @brief ethernet_suspend
  *
  * @param dev
  * @param event
  *
- * @return 
+ * @return
  */
 /* --------------------------------------------------------------------------*/
 static int ethernet_suspend(struct platform_device *dev, pm_message_t event)
@@ -2447,22 +2759,23 @@ static int ethernet_suspend(struct platform_device *dev, pm_message_t event)
 
 /* --------------------------------------------------------------------------*/
 /**
- * @brief ethernet_resume 
+ * @brief ethernet_resume
  *
  * @param dev
  *
- * @return 
+ * @return
  */
 /* --------------------------------------------------------------------------*/
 static int ethernet_resume(struct platform_device *dev)
 {
 	int res = 0;
 	printk("ethernet_resume()\n");
+	hardware_reset_phy();
 	res = netdev_open(my_ndev);
 	if (res != 0) {
 		printk("nono, it can not be true!\n");
 	}
-	
+
 	return 0;
 }
 #ifdef CONFIG_OF
@@ -2477,8 +2790,8 @@ static const struct of_device_id eth_dt_match[]={
 
 static struct platform_driver ethernet_driver = {
 	.probe   = ethernet_probe,
-	.remove  = ethernet_remove, 
-#ifdef  CONFIG_PM      
+	.remove  = ethernet_remove,
+#ifndef  CONFIG_PM
 	.suspend = ethernet_suspend,
 	.resume  = ethernet_resume,
 #endif
@@ -2489,13 +2802,13 @@ static struct platform_driver ethernet_driver = {
 };
 
 
- 
+
 
 /* --------------------------------------------------------------------------*/
 /**
- * @brief  am_net_init 
+ * @brief  am_net_init
  *
- * @return 
+ * @return
  */
 /* --------------------------------------------------------------------------*/
 static int __init am_net_init(void)
@@ -2512,7 +2825,7 @@ static int __init am_net_init(void)
 
 /* --------------------------------------------------------------------------*/
 /**
- * @brief  am_net_free 
+ * @brief  am_net_free
  *
  * @param  ndev
  */
@@ -2525,15 +2838,15 @@ static void am_net_free(struct net_device *ndev)
 
 /* --------------------------------------------------------------------------*/
 /**
- * @brief  am_net_exit 
+ * @brief  am_net_exit
  *
- * @return 
+ * @return
  */
 /* --------------------------------------------------------------------------*/
 static void __exit am_net_exit(void)
 {
 	printk(DRV_NAME "exit\n");
-	
+
 	am_net_free(my_ndev);
 	free_netdev(my_ndev);
 	aml_mdio_unregister(my_ndev);

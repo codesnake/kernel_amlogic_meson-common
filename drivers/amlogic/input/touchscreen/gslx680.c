@@ -13,14 +13,12 @@
 
 #include "linux/amlogic/input/common.h"
 #include <linux/amlogic/input/gslx680.h>
-
+#ifndef LATE_UPGRADE
+#include "linux/amlogic/input/gslx680_fw.h"
+#endif
 //#define GSL_DEBUG
-//#define GSL_TIMER
 #define REPORT_DATA_ANDROID_4_0
-
 //#define HAVE_TOUCH_KEY
-
-#define LATE_UPGRADE
 
 #define GSL_DATA_REG		0x80
 #define GSL_STATUS_REG		0xe0
@@ -105,11 +103,8 @@ struct gsl_ts {
 #if defined(CONFIG_HAS_EARLYSUSPEND)
 	struct early_suspend early_suspend;
 #endif
-#ifdef GSL_TIMER
-	struct timer_list gsl_timer;
-#endif
 	struct work_struct dl_work;
-	struct semaphore fw_sema;
+	struct completion fw_completion;
 	int dl_fw;
 };
 
@@ -137,6 +132,12 @@ static int MAX_FINGERS;
 static struct touch_pdata *g_pdata = NULL;
 extern struct touch_pdata *ts_com;
 static struct i2c_client *this_client;
+#ifdef LATE_UPGRADE
+static struct fw_data *ptr_fw = NULL;
+static u32 fw_len = 0;
+static struct aml_gsl_api *api = NULL;
+#endif
+//extern int aml_get_backlight_status(void);
 
 static int gslX680_shutdown_low(struct touch_pdata *pdata)
 {
@@ -205,27 +206,29 @@ static inline u16 join_bytes(u8 a, u8 b)
 	return ab;
 }
 
-//static u32 gsl_read_interface(struct i2c_client *client, u8 reg, u8 *buf, u32 num)
-//{
-//	struct i2c_msg xfer_msg[2];
-//
-//	xfer_msg[0].addr = client->addr;
-//	xfer_msg[0].len = 1;
-//	xfer_msg[0].flags = client->flags & I2C_M_TEN;
-//	xfer_msg[0].buf = &reg;
-//
-//	xfer_msg[1].addr = client->addr;
-//	xfer_msg[1].len = num;
-//	xfer_msg[1].flags |= I2C_M_RD;
-//	xfer_msg[1].buf = buf;
-//
-//	if (reg < 0x80) {
-//		i2c_transfer(client->adapter, xfer_msg, ARRAY_SIZE(xfer_msg));
-//		msleep(5);
-//	}
-//
-//	return i2c_transfer(client->adapter, xfer_msg, ARRAY_SIZE(xfer_msg)) == ARRAY_SIZE(xfer_msg) ? 0 : -EFAULT;
-//}
+#if 0
+static u32 gsl_read_interface(struct i2c_client *client, u8 reg, u8 *buf, u32 num)
+{
+	struct i2c_msg xfer_msg[2];
+
+	xfer_msg[0].addr = client->addr;
+	xfer_msg[0].len = 1;
+	xfer_msg[0].flags = client->flags & I2C_M_TEN;
+	xfer_msg[0].buf = &reg;
+
+	xfer_msg[1].addr = client->addr;
+	xfer_msg[1].len = num;
+	xfer_msg[1].flags |= I2C_M_RD;
+	xfer_msg[1].buf = buf;
+
+	if (reg < 0x80) {
+		i2c_transfer(client->adapter, xfer_msg, ARRAY_SIZE(xfer_msg));
+		msleep(5);
+	}
+
+	return i2c_transfer(client->adapter, xfer_msg, ARRAY_SIZE(xfer_msg)) == ARRAY_SIZE(xfer_msg) ? 0 : -EFAULT;
+}
+#endif
 
 static u32 gsl_write_interface(struct i2c_client *client, const u8 reg, u8 *buf, u32 num)
 {
@@ -247,71 +250,66 @@ static __inline__ void fw2buf(u8 *buf, const u32 *fw)
 	*u32_buf = *fw;
 }
 
-#define READ_COUNT  18
-struct fw_dat
-{
-    u8 offset;
-    u32 val;
-}fw_dat;
 static void gsl_load_fw(struct i2c_client *client)
 {
-	u32 offset = 0;
-	int file_size;
-	struct fw_dat *fw_d = NULL;
-	u8 send_flag = 0;
 	u8 buf[DMA_TRANS_LEN*4 + 1] = {0};
+	u8 send_flag = 1;
 	u8 *cur = buf + 1;
-	u8 tmp[READ_COUNT] = {0};
-	int ret = 0;
-	file_size = touch_open_fw(g_pdata->fw_file);
-  if(file_size < 0) {
-		printk("%s: no fw file\n", ts_com->owner);
-		return;
-	}	
-	if (fw_d == NULL)
-		fw_d = kzalloc(sizeof(*fw_d), GFP_KERNEL);
-	if (fw_d == NULL) {
-		printk("Insufficient memory in upgrade!\n");
-		return ;
-	}
-
-  //printk("file_size = %d\n",file_size);
+	u32 source_line = 0;
+	u32 source_len = 0;
+	struct gsl_ts *ts = dev_get_drvdata(&(client->dev));
+	u32 state = 0;
+	
+#ifdef LATE_UPGRADE
+	if (!ptr_fw) return;
+	source_len = fw_len;
+#else
+	ptr_fw = GSLX680_FW;
+	source_len = ARRAY_SIZE(GSLX680_FW);
+#endif
+	printk("%s: source_len = %d\n", __func__, source_len);
 	printk("=============gsl_load_fw start==============\n");
-  while (offset < file_size) {
-		while (send_flag < DMA_TRANS_LEN+1) {
-			if (offset >= file_size) break;
-			touch_read_fw(offset, READ_COUNT, &tmp[0]);
-			ret = sscanf(&tmp[0],"{0x%x,0x%lx},",(int *)&(fw_d->offset),(long *)&(fw_d->val));
-			if (ret != 2) {
-				offset ++;
-				continue;
+	for (source_line = 0; source_line < source_len; source_line++) 
+	{
+		/* init page trans, set the page val */
+		if (GSL_PAGE_REG == ptr_fw[source_line].offset)
+		{
+			fw2buf(cur, &ptr_fw[source_line].val);
+			gsl_write_interface(client, GSL_PAGE_REG, buf, 4);
+			send_flag = 1;
+		}
+		else 
+		{
+			if (1 == send_flag % (DMA_TRANS_LEN < 0x20 ? DMA_TRANS_LEN : 0x20))
+	    			buf[0] = (u8)ptr_fw[source_line].offset;
+
+			fw2buf(cur, &ptr_fw[source_line].val);
+			cur += 4;
+
+			if (0 == send_flag % (DMA_TRANS_LEN < 0x20 ? DMA_TRANS_LEN : 0x20)) 
+			{
+	    			gsl_write_interface(client, buf[0], buf, cur - buf - 1);
+	    			cur = buf + 1;
 			}
-		  if (fw_d->offset == GSL_PAGE_REG) {
-				fw2buf(cur, &(fw_d->val));
-				gsl_write_interface(client, GSL_PAGE_REG, buf, 4);
-				send_flag ++;
-		  }
-		  else {
-				if (send_flag == 1) {
-					buf[0] = (u8)fw_d->offset;
-				}
-				fw2buf(cur, &(fw_d->val));
-				cur += 4;
-				send_flag ++;
-			}
-		  offset ++;
-		 }
-		if (offset >= file_size) break;
-		gsl_write_interface(client, buf[0], buf, cur - buf - 1);
-		cur = buf + 1;
-		send_flag = 0;
+
+			send_flag++;
+		}
+		if (ts->dl_fw && !state && (source_line == (source_len>>1) + (source_len>>4))) {
+			//if (!aml_get_backlight_status()) {
+				complete(&ts->fw_completion);
+				state = 1;
+				printk("1111 fw_completion complete\n");
+			//}
+		}
 	}
-	touch_close_fw();
-	if (fw_d != NULL) {
-     kfree(fw_d);
-     fw_d = NULL;
-  }
+#if 0
+	if (ts->dl_fw && !state) {
+		complete(&ts->fw_completion);
+		printk("2222 fw_completion complete\n");
+	}
+#endif
 	printk("=============gsl_load_fw end==============\n");
+
 }
 
 static int gsl_ts_write(struct i2c_client *client, u8 addr, u8 *pdata, int datalen)
@@ -411,6 +409,16 @@ static void startup_chip(struct i2c_client *client)
 {
 	u8 tmp = 0x00;
 	print_info("%s start\n", __func__);
+	if (ts_com->ic_type & 1) {
+#ifndef LATE_UPGRADE
+		gsl_DataInit(gsl_config_data_id);
+#else
+		if (api && api->gsl_DataInit)
+			api->gsl_DataInit(gsl_config_data_id);
+		else
+			printk("%s: api == NULL\n", __func__);
+#endif
+	}
 	gsl_ts_write(client, 0xe0, &tmp, 1);
 	msleep(10);
 	print_info("%s end\n", __func__);
@@ -418,6 +426,7 @@ static void startup_chip(struct i2c_client *client)
 
 static void reset_chip(struct i2c_client *client)
 {
+
 	u8 buf[4] = {0x00};
 	u8 tmp = 0x88;
 	print_info("%s start\n", __func__);
@@ -433,32 +442,54 @@ static void reset_chip(struct i2c_client *client)
 	print_info("%s end\n", __func__);
 }
 
+static void clr_reg(struct i2c_client *client)
+{
+	u8 write_buf[4]	= {0}; 
+	print_info("%s start\n", __func__);
+	write_buf[0] = 0x88;
+	gsl_ts_write(client, 0xe0, &write_buf[0], 1); 	
+	msleep(20);
+		
+	write_buf[0] = 0x03;
+	gsl_ts_write(client, 0x80, &write_buf[0], 1); 	
+	msleep(5);
+	
+	write_buf[0] = 0x04;
+	gsl_ts_write(client, 0xe4, &write_buf[0], 1); 	
+	msleep(5);
+
+	
+	write_buf[0] = 0x00;
+	gsl_ts_write(client, 0xe0, &write_buf[0], 1); 	
+	msleep(20);
+	print_info("%s end\n", __func__);
+}
+
 static void init_chip(struct i2c_client *client)
 {
-	disable_irq_nosync(client->irq);
+	print_info("%s start\n", __func__);
+	//disable_irq_nosync(client->irq);
 	//test_i2c(client);
+	gslX680_shutdown_low(g_pdata);
+	msleep(20);
+	gslX680_shutdown_high(g_pdata);
+	msleep(20);
+	clr_reg(client);
 	reset_chip(client);
 	gsl_load_fw(client);
 	startup_chip(client);
 	reset_chip(client);
-	gslX680_shutdown_low(g_pdata);
-	msleep(50);
-	gslX680_shutdown_high(g_pdata);
-	msleep(30);
-	gslX680_shutdown_low(g_pdata);
-	msleep(5);
-	gslX680_shutdown_high(g_pdata);
-	msleep(20);
-	reset_chip(client);
 	startup_chip(client);
 	msleep(5);
-	enable_irq(client->irq);
+	//enable_irq(client->irq);
+	print_info("%s end\n", __func__);
 }
 
 static void check_mem_data(struct i2c_client *client)
 {
 	char write_buf;
 	char read_buf[4]  = {0};
+	struct gsl_ts *ts = dev_get_drvdata(&(client->dev));
 	
 	msleep(30);
 	write_buf = 0x00;
@@ -469,6 +500,29 @@ static void check_mem_data(struct i2c_client *client)
 	{
 		printk("!!!!!!!!!!!page: %x offset: %x val: %x %x %x %x\n",0x0, 0x0, read_buf[3], read_buf[2], read_buf[1], read_buf[0]);
 		init_chip(client);
+	}
+	else {
+		if (ts->dl_fw)
+			complete(&ts->fw_completion);
+	}
+}
+
+static void check_mem_data_b(struct i2c_client *client)
+{
+	u8 read_buf[4]  = {0};
+	struct gsl_ts *ts = dev_get_drvdata(&(client->dev));
+	
+	msleep(30);
+	gsl_ts_read(client,0xb0, read_buf, sizeof(read_buf));
+	
+	if (read_buf[3] != 0x5a || read_buf[2] != 0x5a || read_buf[1] != 0x5a || read_buf[0] != 0x5a)
+	{
+		printk("#########check mem read 0xb0 = %x %x %x %x #########\n", read_buf[3], read_buf[2], read_buf[1], read_buf[0]);
+		init_chip(client);
+	}
+	else {
+		if (ts->dl_fw)
+			complete(&ts->fw_completion);
 	}
 }
 
@@ -559,7 +613,7 @@ static void stretch_frame(u16 *x, u16 *y)
 }
 #endif
 
-#ifdef FILTER_POINT
+//#ifdef FILTER_POINT
 static void filter_point(u16 x, u16 y , u8 id)
 {
 	u16 x_err =0;
@@ -606,9 +660,9 @@ static void filter_point(u16 x, u16 y , u8 id)
 	x_old[id] = x_new;
 	y_old[id] = y_new;
 }
-#endif
+//#endif
 
-#ifndef FILTER_POINT
+//#ifndef FILTER_POINT
 static void record_point(u16 x, u16 y , u8 id)
 {
 	u16 x_err =0;
@@ -661,7 +715,8 @@ static void record_point(u16 x, u16 y , u8 id)
 	}
 	
 }
-#endif
+//#endif
+
 #ifdef HAVE_TOUCH_KEY
 static void report_key(struct gsl_ts *ts, u16 x, u16 y)
 {
@@ -720,8 +775,52 @@ static void process_gslX680_data(struct gsl_ts *ts)
 	u8 id, touches;
 	u16 x, y;
 	int i = 0;
+	u32 tmp1 = 0;
+	u8 buf[4] = {0};
+struct gsl_touch_info cinfo = {{0},{0},{0},0};
 
 	touches = ts->touch_data[ts->dd->touch_index];
+if (ts_com->ic_type & 1) {
+	cinfo.finger_num = touches;
+	print_info("tp-gsl  finger_num = %d\n",cinfo.finger_num);
+	for(i = 0; i < (touches < MAX_CONTACTS ? touches : MAX_CONTACTS); i ++)
+	{
+		cinfo.x[i] = join_bytes( ( ts->touch_data[ts->dd->x_index  + 4 * i + 1] & 0xf),
+				ts->touch_data[ts->dd->x_index + 4 * i]);
+		cinfo.y[i] = join_bytes(ts->touch_data[ts->dd->y_index + 4 * i + 1],
+				ts->touch_data[ts->dd->y_index + 4 * i ]);
+		print_info("tp-gsl  x = %d y = %d \n",cinfo.x[i],cinfo.y[i]);
+	}
+	cinfo.finger_num=(ts->touch_data[3]<<24)|(ts->touch_data[2]<<16)
+		|(ts->touch_data[1]<<8)|(ts->touch_data[0]);
+#ifndef LATE_UPGRADE
+	gsl_alg_id_main(&cinfo);
+	tmp1=gsl_mask_tiaoping();
+#else
+	if (api && api->gsl_alg_id_main)
+		api->gsl_alg_id_main(&cinfo);
+	else 
+		printk("%s: api == NULL\n", __func__);
+	if (api && api->gsl_mask_tiaoping)
+		tmp1 = api->gsl_mask_tiaoping();
+	else
+		printk("%s: api == NULL\n", __func__);
+#endif
+	print_info("[tp-gsl] tmp1=%x\n",tmp1);
+	if(tmp1>0&&tmp1<0xffffffff)
+	{
+		buf[0]=0xa;buf[1]=0;buf[2]=0;buf[3]=0;
+		gsl_ts_write(ts->client,0xf0,buf,4);
+		buf[0]=(u8)(tmp1 & 0xff);
+		buf[1]=(u8)((tmp1>>8) & 0xff);
+		buf[2]=(u8)((tmp1>>16) & 0xff);
+		buf[3]=(u8)((tmp1>>24) & 0xff);
+		print_info("tmp1=%08x,buf[0]=%02x,buf[1]=%02x,buf[2]=%02x,buf[3]=%02x\n",
+			tmp1,buf[0],buf[1],buf[2],buf[3]);
+		gsl_ts_write(ts->client,0x8,buf,4);
+	}
+	touches = cinfo.finger_num;
+}
 	for(i=1;i<=MAX_CONTACTS;i++)
 	{
 		if(touches == 0)
@@ -730,29 +829,42 @@ static void process_gslX680_data(struct gsl_ts *ts)
 	}
 	for(i= 0;i < (touches > MAX_FINGERS ? MAX_FINGERS : touches);i ++)
 	{
+	if (ts_com->ic_type & 1) {
+		id = cinfo.id[i];
+		x =  cinfo.x[i];
+		y =  cinfo.y[i];
+	}	
+	else {
 		x = join_bytes( ( ts->touch_data[ts->dd->x_index  + 4 * i + 1] & 0xf),
 				ts->touch_data[ts->dd->x_index + 4 * i]);
 		y = join_bytes(ts->touch_data[ts->dd->y_index + 4 * i + 1],
 				ts->touch_data[ts->dd->y_index + 4 * i ]);
 		id = ts->touch_data[ts->dd->id_index + 4 * i] >> 4;
+	}
 
 		if(1 <=id && id <= MAX_CONTACTS)
 		{
 		#ifdef STRETCH_FRAME
+		if (!(ts_com->ic_type & 0x800))
 			stretch_frame(&x, &y);
 		#endif
-    #ifdef FILTER_POINT
-      filter_point(x, y , id);
-    #else
-			record_point(x, y , id);
-    #endif
-    
+    //#ifdef FILTER_POINT
+	if (!(ts_com->ic_type & 0x800))
+		filter_point(x, y , id);
+    //#else
+	else
+		record_point(x, y , id);
+    //#endif
+	
     if(g_pdata->pol & 0x1)
     	x_new = SCREEN_MAX_X - x_new;
+	if (x_new < 0) x_new = 0;
     if(g_pdata->pol & 0x2)
     	y_new = SCREEN_MAX_Y - y_new;
-    if(g_pdata->pol & 0x4)
-			swap(x_new, y_new);
+	if (y_new < 0) y_new = 0;
+	if(g_pdata->pol & 0x4)
+		swap(x_new, y_new);
+
 			if ((((x_new>0 && x_new<X_SUB) && (y_new>0 && y_new<Y_SUB))
 				||((x_new>SCREEN_MAX_X-X_SUB && x_new<SCREEN_MAX_X) && (y_new>0 && y_new<Y_SUB))
 				||((x_new>0 && x_new<X_SUB) && (y_new>SCREEN_MAX_Y-Y_SUB && y_new<SCREEN_MAX_Y))
@@ -884,28 +996,13 @@ static irqreturn_t gsl_ts_irq(int irq, void *dev_id)
 
 }
 
-#ifdef GSL_TIMER
-static void gsl_timer_handle(unsigned long data)
-{
-	struct gsl_ts *ts = (struct gsl_ts *)data;
-
-#ifdef GSL_DEBUG	
-	printk("----------------gsl_timer_handle-----------------\n");	
-#endif
-
-	disable_irq_nosync(ts->irq);	
-	check_mem_data(ts->client);
-	ts->gsl_timer.expires = jiffies + 3 * HZ;
-	add_timer(&ts->gsl_timer);
-	enable_irq(ts->irq);
-	
-}
-#endif
-
 static int gsl_ts_init_ts(struct i2c_client *client, struct gsl_ts *ts)
 {
 	struct input_dev *input_device;
 	int rc = 0;
+#ifdef HAVE_TOUCH_KEY
+	int i = 0;
+#endif
 	
 	printk("[GSLX680] Enter %s\n", __func__);
 
@@ -996,29 +1093,40 @@ error_alloc_dev:
 static void do_download(struct work_struct *work)
 {
 	struct gsl_ts *ts = container_of(work, struct gsl_ts, dl_work);
-	printk("gsl1680 call func start%s\n", __func__);
+	int need_delay = 0;
+
+	print_info("gsl1680 call func start%s\n", __func__);
 
 	gslX680_shutdown_high(g_pdata);
 	msleep(20); 	
 	reset_chip(ts->client);
-	startup_chip(ts->client);	
-	check_mem_data(ts->client);
-	printk("gsl1680 0000\n");
-	up(&ts->fw_sema);
+	startup_chip(ts->client);
+	if (ts_com->ic_type & 1)
+		check_mem_data_b(ts->client);
+	else	
+		check_mem_data(ts->client);
+	print_info("gsl1680 0000\n");
+
+	if (ts->is_suspended == true) {
+		enable_irq(ts->irq);
+		ts->is_suspended = false;
+	}
+	if (need_delay)
+		msleep(200);
 	
-	printk("gsl1680 call func end%s\n", __func__);
+	print_info("gsl1680 call func end%s\n", __func__);
 }
 
 static int gsl_ts_suspend(struct i2c_client *client, pm_message_t mesg)
 {
-//	struct gsl_ts *ts = dev_get_drvdata(&(client->dev));
+	//struct gsl_ts *ts = dev_get_drvdata(&(client->dev));
 //	int rc = 0;
 
-	//printk("gsl1680 call func start%s\n", __func__);
+	print_info("gsl1680 call func start%s\n", __func__);
 		   
 	//reset_chip(ts->client);
-	gslX680_shutdown_low(g_pdata);
-	msleep(10); 		
+	//gslX680_shutdown_low(g_pdata);
+	//msleep(10); 		
 
 	return 0;
 }
@@ -1026,13 +1134,14 @@ static int gsl_ts_suspend(struct i2c_client *client, pm_message_t mesg)
 static int gsl_ts_resume(struct i2c_client *client)
 {
 	struct gsl_ts *ts = dev_get_drvdata(&(client->dev));
-//	int rc = 0;
+	//int rc = 0;
 
-  	//printk("gsl1680 call func start%s\n", __func__);
+  	print_info("gsl1680 call func start%s\n", __func__);
 	
+	INIT_COMPLETION(ts->fw_completion);
 	schedule_work(&(ts->dl_work));
 	ts->dl_fw = 1;
-	//printk("gsl1680 call func end%s\n", __func__);
+	print_info("gsl1680 call func end%s\n", __func__);
 	return 0;
 }
 
@@ -1040,70 +1149,64 @@ static int gsl_ts_resume(struct i2c_client *client)
 static void gsl_ts_early_suspend(struct early_suspend *h)
 {
 	struct gsl_ts *ts = container_of(h, struct gsl_ts, early_suspend);
-	//printk("gsl1680 call func start%s\n", __func__);
+	print_info("gsl1680 call func start%s\n", __func__);
 	
 	ts->is_suspended = true;	
 	
-#ifdef GSL_TIMER
-	del_timer(&ts->gsl_timer);
-#endif
 	disable_irq_nosync(ts->irq);	
 		   
-	reset_chip(ts->client);
 	gslX680_shutdown_low(g_pdata);
-	msleep(10); 		
+	msleep(15); 		
+	print_info("gsl1680 call func end %s\n", __func__);
 }
 
 static void gsl_ts_late_resume(struct early_suspend *h)
 {
 	struct gsl_ts *ts = container_of(h, struct gsl_ts, early_suspend);
-	int need_delay = 0;
-	printk("gsl1680 call func start%s\n", __func__);
+	print_info("gsl1680 call func start %s\n", __func__);
 	if (ts->dl_fw) {
-		if (down_interruptible(&ts->fw_sema))
-		{
-			printk("fail get fw_sema!\n");
-		}
+		if (wait_for_completion_interruptible(&ts->fw_completion))
+			printk("%s: wait_for_completion_interruptible fw_completion fail\n",__func__);
 		ts->dl_fw = 0;
-		need_delay = 1;
+		//need_delay = 1;
 	} else {
 		gslX680_shutdown_high(g_pdata);
 		msleep(20); 	
 		reset_chip(ts->client);
 		startup_chip(ts->client);
+		enable_irq(ts->irq);
+		ts->is_suspended = false;
 	}	
-	
 
-#ifdef GSL_TIMER
-
-	init_timer(&ts->gsl_timer);
-	ts->gsl_timer.expires = jiffies + 3 * HZ;
-	ts->gsl_timer.function = &gsl_timer_handle;
-	ts->gsl_timer.data = (unsigned long)ts;
-	add_timer(&ts->gsl_timer);
-#endif
-
-	enable_irq(ts->irq);
-	ts->is_suspended = false;
-
-	if (need_delay)
-		msleep(200);
-	printk("gsl1680 4444\n");
+	print_info("gsl1680 call func end %s\n", __func__);
 }
 #endif
 
 static void gslx680_upgrade_touch(void)
 {
-		init_chip(this_client);
+	init_chip(this_client);
+	if (ts_com->ic_type & 1)
+		check_mem_data_b(this_client);
+	else	
 		check_mem_data(this_client);
 }
 
 #ifdef LATE_UPGRADE
-static int gslx680_late_upgrade(void *p)
+#define READ_COUNT  20
+static int gslx680_late_upgrade(void *data)
 {
-	int file_size;
+	u32 offset = 0, i = 5;
+	int file_size = -1;
+	u8 tmp[READ_COUNT] = {0};
+	int ret = 0;
+	u32 fw_tmp[2] = {0};
 //static int count;
 	while(1) {
+		if (ts_com->ic_type & 1) {
+			while (aml_gsl_get_api() == NULL)
+				schedule_timeout(1);
+			api = aml_gsl_get_api();
+		}
 		file_size = touch_open_fw(g_pdata->fw_file);
 		if(file_size < 0) {
 //			printk("%s: %d\n", __func__, count++);
@@ -1111,9 +1214,42 @@ static int gslx680_late_upgrade(void *p)
 		}
 		else break;
 	}
+	printk("%s: file_size = %d\n", __func__, file_size);
+	ptr_fw = kzalloc(sizeof(struct fw_data)*8192, GFP_KERNEL);
+	if (ptr_fw == NULL) {
+		printk("%s: Insufficient memory in upgrade!\n",ts_com->owner);
+		return -1;
+	}
+
+	while (offset < file_size) {
+		if (offset >= file_size) break;
+			touch_read_fw(offset, READ_COUNT, &tmp[0]);
+			if (!strncmp("/*", tmp, 2)) {
+				do {
+					offset += 2;
+					touch_read_fw(offset, READ_COUNT, &tmp[0]);
+				}while(strncmp("*/", tmp, 2));
+			}
+			
+			touch_read_fw(offset, READ_COUNT, &tmp[0]);
+			ret = sscanf(&tmp[0],"{0x%x,0x%lx},",&fw_tmp[0],(long unsigned int*)&fw_tmp[1]);
+			offset ++;
+			if (ret != 2) {
+				continue;
+			}
+			(ptr_fw+fw_len)->offset = fw_tmp[0];
+			(ptr_fw+fw_len)->val = fw_tmp[1];
+			if (fw_len < 5)
+			{
+				printk("%d %s: {0x%x,0x%lx},\n", fw_len, __func__, (ptr_fw+fw_len)->offset, (long)(ptr_fw+fw_len)->val);
+			}
+			fw_len ++;
+	}
+	for (i=5; i>0; i--)
+		printk("%d %s: {0x%x,0x%lx},\n",5-i, __func__, (ptr_fw+fw_len-i)->offset, (long)(ptr_fw+fw_len-i)->val);
 	touch_close_fw();
 	gslx680_upgrade_touch();
-	printk("%s first load firmware\n", g_pdata->owner);
+	printk("%s load firmware: fw_len = %d\n", g_pdata->owner, fw_len);
 	enable_irq(this_client->irq);
 	//do_exit(0);
 	return 0;
@@ -1129,8 +1265,8 @@ static void gslx680_test_i2c(char *ver)
 static int gsl_ts_probe(struct i2c_client *client,
 			const struct i2c_device_id *id)
 {
-	struct gsl_ts *ts;
-	int rc = 0;
+	struct gsl_ts *ts = NULL;
+	int rc = -1;
 
 	printk("GSLX680 Enter %s\n", __func__);
 	if (!i2c_check_functionality(client->adapter, I2C_FUNC_I2C)) {
@@ -1161,7 +1297,7 @@ static int gsl_ts_probe(struct i2c_client *client,
 	}
 	printk("===== gslx680 TP test ok=======\n");
 
-	ts = kzalloc(sizeof(*ts), GFP_KERNEL);
+	ts = kzalloc(sizeof(struct gsl_ts), GFP_KERNEL);
 	if (!ts)
 		return -ENOMEM;
 	printk("==kzalloc success=\n");
@@ -1177,7 +1313,7 @@ static int gsl_ts_probe(struct i2c_client *client,
 	
 	INIT_WORK(&(ts->dl_work), do_download);
 	
-	sema_init(&ts->fw_sema,0);
+	init_completion(&ts->fw_completion);
 	
 	rc = gsl_ts_init_ts(client, ts);
 	if (rc < 0) {
@@ -1186,14 +1322,17 @@ static int gsl_ts_probe(struct i2c_client *client,
 	}
 
 #ifdef LATE_UPGRADE
-	g_pdata->upgrade_task = kthread_run(gslx680_late_upgrade, NULL, "gslx680_late_upgrade");
+	g_pdata->upgrade_task = kthread_run(gslx680_late_upgrade, (void *)NULL, "gslx680_late_upgrade");
 	if (!g_pdata->upgrade_task)
 		printk("%s creat upgrade process failed\n", __func__);
 	else
 		printk("%s creat upgrade process sucessful\n", __func__);
 #else
 	init_chip(ts->client);
-	check_mem_data(ts->client);
+	if (ts_com->ic_type & 1)
+		check_mem_data_b(ts->client);
+	else
+		check_mem_data(ts->client);
 #endif
 	rc = request_irq(client->irq, gsl_ts_irq, IRQF_DISABLED, client->name, ts);
 	if (rc < 0) {
@@ -1204,27 +1343,18 @@ static int gsl_ts_probe(struct i2c_client *client,
 		disable_irq(client->irq);
 #endif
 
-#ifdef GSL_TIMER
-	printk( "gsl_ts_probe () : add gsl_timer\n");
-
-	init_timer(&ts->gsl_timer);
-	ts->gsl_timer.expires = jiffies + 3 * HZ;	//¶¨Ê±3  ÃëÖÓ
-	ts->gsl_timer.function = &gsl_timer_handle;
-	ts->gsl_timer.data = (unsigned long)ts;
-	add_timer(&ts->gsl_timer);
-#endif
-
 	/* create debug attribute */
 	//rc = device_create_file(&ts->input->dev, &dev_attr_debug_enable);
 
 #ifdef CONFIG_HAS_EARLYSUSPEND
-	ts->early_suspend.level = EARLY_SUSPEND_LEVEL_DISABLE_FB + 1;
+	ts->early_suspend.level = EARLY_SUSPEND_LEVEL_BLANK_SCREEN;
 	ts->early_suspend.suspend = gsl_ts_early_suspend;
 	ts->early_suspend.resume = gsl_ts_late_resume;
 	register_early_suspend(&ts->early_suspend);
 #endif
 
 	create_init(client->dev, g_pdata);
+
 	printk("[GSLX680] End %s\n", __func__);
 
 	return 0;
@@ -1263,6 +1393,10 @@ static int gsl_ts_remove(struct i2c_client *client)
 	
 	kfree(ts->touch_data);
 	kfree(ts);
+#ifdef LATE_UPGRADE
+	if (ptr_fw != NULL)
+		kfree(ptr_fw);
+#endif
 
 	return 0;
 }

@@ -53,10 +53,12 @@ typedef struct {
 static DEFINE_MUTEX(osd_antiflicker_mutex);
 static osd_antiflicker_t ge2d_osd_antiflicker;
 
+#ifdef OSD_GE2D_ANTIFLICKER_SUPPORT
 void osd_antiflicker_enable(u32 enable)
 {
 	ge2d_antiflicker_enable(ge2d_osd_antiflicker.ge2d_context, enable);
 }
+#endif
 
 #if 0
 static void osd_antiflicker_process(void)
@@ -257,6 +259,7 @@ static void osd_antiflicker_process(void)
 	stretchblt(context, x0, y0, cs.width/4, (cs.height/yres), x0, y1, cd.width/4, (cd.height/yres));
 }
 
+#ifdef OSD_GE2D_ANTIFLICKER_SUPPORT
 void osd_antiflicker_update_pan(u32 yoffset, u32 yres)
 {
 	if (!ge2d_osd_antiflicker.inited)
@@ -311,4 +314,5 @@ void osd_antiflicker_task_stop(void)
 	}
 	ge2d_osd_antiflicker.inited = false;
 }
+#endif
 

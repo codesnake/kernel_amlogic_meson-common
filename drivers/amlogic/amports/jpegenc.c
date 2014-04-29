@@ -16,39 +16,46 @@
 #include <linux/slab.h>
 #include <linux/dma-mapping.h>
 #include <linux/platform_device.h>
+#include <linux/spinlock.h>
 #include <mach/am_regs.h>
+#include <mach/power_gate.h>
+#include <mach/mod_gate.h>
 #include <plat/io.h>
 #include <linux/ctype.h>
-#include <linux/amports/ptsserv.h>
-#include <linux/amports/amstream.h>
-#include <linux/amports/canvas.h>
-#include <linux/amports/vframe.h>
-#include <linux/amports/vframe_provider.h>
-#include <linux/amports/vframe_receiver.h>
+#include <linux/amlogic/amports/ptsserv.h>
+#include <linux/amlogic/amports/amstream.h>
+#include <linux/amlogic/amports/canvas.h>
+#include <linux/amlogic/amports/vframe.h>
+#include <linux/amlogic/amports/vframe_provider.h>
+#include <linux/amlogic/amports/vframe_receiver.h>
+#include <linux/amlogic/amports/vformat.h>
 #include "vdec_reg.h"
+#include "vdec.h"
 #include <linux/delay.h>
+#include <linux/poll.h>
+#include <linux/of.h>
+#include <linux/of_fdt.h>
 
 #define ENC_CANVAS_OFFSET  AMVENC_CANVAS_INDEX
 
-#define LOG_LEVEL_VAR 2
-
-#define PUT_INTERVAL        (HZ/100)
-#ifdef CONFIG_AM_VDEC_MJPEG_LOG
-#define AMLOG
-#define LOG_LEVEL_VAR       debug_level_avc
-#define LOG_MASK_VAR        amlog_mask_avc
-#define 2     0
-#define 1      1
-#define LOG_LEVEL_DESC  "0:ERROR, 1:INFO"
-#endif
+#define LOG_LEVEL_VAR 1
 #define debug_level(level, x...) \
 	do { \
 		if (level >= LOG_LEVEL_VAR) \
 			printk(x); \
 	} while (0);
 
-#include <linux/amlog.h>
-MODULE_AMLOG(2, 0, LOG_LEVEL_DESC, LOG_DEFAULT_MASK_DESC);
+#define PUT_INTERVAL        (HZ/100)
+#ifdef CONFIG_AM_VDEC_MJPEG_LOG
+#define AMLOG
+#define LOG_LEVEL_VAR       amlog_level_jpeg
+#define LOG_MASK_VAR        amlog_mask_jpeg
+#define LOG_LEVEL_ERROR     0
+#define LOG_LEVEL_INFO      1
+#define LOG_LEVEL_DESC  "0:ERROR, 1:INFO"
+#endif
+#include <linux/amlogic/amlog.h>
+MODULE_AMLOG(LOG_LEVEL_ERROR, 0, LOG_LEVEL_DESC, LOG_DEFAULT_MASK_DESC);
 
 #include "jpegenc.h"
 #include "amvdec.h"
@@ -75,26 +82,56 @@ static unsigned* BitstreamStartVirtAddr;
 static unsigned dct_buff_start_addr;  
 static unsigned dct_buff_end_addr;
 
-
 static u32 stat;
 
 static u32 encoder_width = 1280;
 static u32 encoder_height = 720;
-static jpegenc_frame_fmt encoder_input_format;
 static jpegenc_frame_fmt input_format;
 static jpegenc_frame_fmt output_format;
+static int jpeg_quality = 90;
+static unsigned short gQuantTable[2][DCTSIZE2];
+static unsigned int gQuantTable_id  = 0;
+static unsigned short* gExternalQuantTablePtr = NULL;
+static bool external_quant_table_available = false;
 
+#ifdef CONFIG_AM_ENCODER
+extern bool amvenc_avc_on(void);
+#endif
 
 static s32 jpegenc_poweron(void);
-static void dma_flush(unsigned buf_start , unsigned buf_size );
+static void dma_flush(unsigned buf_start , unsigned buf_size);
 
+static u32 process_irq = 0;
 
 static int encode_inited = 0;
 static int encode_opened = 0;
+static int encoder_status = 0;
+
+static wait_queue_head_t jpegenc_wait;
+atomic_t jpegenc_ready = ATOMIC_INIT(0);
+static struct tasklet_struct jpegenc_tasklet;
+
+static DEFINE_SPINLOCK(lock);
 
 static const char jpeg_enc_id[] = "jpegenc-dev";
 
+#define JPEGENC_BUFFER_LEVEL_VGA   0
+#define JPEGENC_BUFFER_LEVEL_2M     1
+#define JPEGENC_BUFFER_LEVEL_3M     2
+#define JPEGENC_BUFFER_LEVEL_5M     3
+#define JPEGENC_BUFFER_LEVEL_8M     4
+#define JPEGENC_BUFFER_LEVEL_13M   5
+#define JPEGENC_BUFFER_LEVEL_HD     6
 
+const char* glevel_str[] = {
+    "VGA",
+    "2M",
+    "3M",
+    "5M",
+    "8M",
+    "13M",
+    "HD",
+};
 
 typedef struct
 {
@@ -107,58 +144,149 @@ typedef struct
     u32 lev_id;
     u32 max_width;
     u32 max_height;
-    u32 dec0_y;
-    u32 dec0_uv;
-    u32 bitstream;
+    u32 min_buffsize;
+    Buff_t input;
+    Buff_t bitstream;
 } BuffInfo_t;
 
-const static BuffInfo_t jpegenc_buffspec={0,10000,10000,0,0,0};
-
+const static BuffInfo_t jpegenc_buffspec[]={
+    {
+        .lev_id = JPEGENC_BUFFER_LEVEL_VGA,
+        .max_width = 640,
+        .max_height = 640,
+        .min_buffsize = 0x330000,
+        .input = {
+            .buf_start = 0,
+            .buf_size = 0x12c000,
+        },
+        .bitstream = {
+            .buf_start = 0x130000,
+            .buf_size = 0x200000,
+        }
+    },{
+        .lev_id = JPEGENC_BUFFER_LEVEL_2M,
+        .max_width = 1600,
+        .max_height = 1600,
+        .min_buffsize = 0x960000,
+        .input = {
+            .buf_start = 0,
+            .buf_size = 0x753000,
+        },
+        .bitstream = {
+            .buf_start = 0x760000,
+            .buf_size = 0x200000,
+        }
+    },{
+        .lev_id = JPEGENC_BUFFER_LEVEL_3M,
+        .max_width = 2048,
+        .max_height = 2048,
+        .min_buffsize = 0xe10000,
+        .input = {
+            .buf_start = 0,
+            .buf_size = 0xc00000,
+        },
+        .bitstream = {
+            .buf_start = 0xc10000,
+            .buf_size = 0x200000,
+        }
+    },{
+        .lev_id = JPEGENC_BUFFER_LEVEL_5M,
+        .max_width = 2624,
+        .max_height = 2624,
+        .min_buffsize = 0x1800000,
+        .input = {
+            .buf_start = 0,
+            .buf_size = 0x13B3000,
+        },
+        .bitstream = {
+            .buf_start = 0x1400000,
+            .buf_size = 0x400000,
+        }
+    },{
+        .lev_id = JPEGENC_BUFFER_LEVEL_8M,
+        .max_width = 3264,
+        .max_height = 3264,
+        .min_buffsize = 0x2300000,
+        .input = {
+            .buf_start = 0,
+            .buf_size = 0x1e7b000,
+        },
+        .bitstream = {
+            .buf_start = 0x1f00000,
+            .buf_size = 0x4000000,
+        }
+    },{
+        .lev_id = JPEGENC_BUFFER_LEVEL_13M,
+        .max_width = 8192,
+        .max_height = 8192,
+        .min_buffsize = 0xc400000,
+        .input = {
+            .buf_start = 0,
+            .buf_size = 0xc000000,
+        },
+        .bitstream = {
+            .buf_start = 0xc000000,
+            .buf_size = 0x4000000,
+        }
+    },{
+        .lev_id = JPEGENC_BUFFER_LEVEL_HD,
+        .max_width = 8192,
+        .max_height = 8192,
+        .min_buffsize = 0xc400000,
+        .input = {
+            .buf_start = 0,
+            .buf_size = 0xc000000,
+        },
+        .bitstream = {
+            .buf_start = 0xc000000,
+            .buf_size = 0x4000000,
+        }
+    }
+};
 
 typedef struct
 {
     u32 buf_start;
     u32 buf_size;
-    u8 cur_buf_lev; 
+    u8 cur_buf_lev;
     BuffInfo_t* bufspec;
 } EncBuffer_t;
 
 static EncBuffer_t gJpegEncBuff = {0,0,0,NULL};
 
 static void jpegenc_canvas_init(void);
+//static void jpegenc_reset(void);
+static void init_jpeg_encoder(void);
+static int jpeg_quality_scaling (int quality);
+static void convert_quant_table(unsigned short* qtable, unsigned short *basic_table, int scale_factor);
+static void write_jpeg_quant_lut(int table_num);
+static void write_jpeg_huffman_lut_dc(int table_num);
+static void write_jpeg_huffman_lut_ac(int table_num);
+static int  zigzag(int i);
 
-void jpegenc_reset(void);
-void init_jpeg_encoder(void);
-void write_jpeg_quant_lut(int table_num);
-void write_jpeg_huffman_lut_dc(int table_num);
-void write_jpeg_huffman_lut_ac(int table_num);
-int  zigzag(int i);
-
-
-void push_word(int* offset , unsigned word)
+static void push_word(int* offset , unsigned word)
 {
-	unsigned char* ptr;
-	int i;
-	int bytes = (word >> 24)&0xff;
-	for(i = bytes-1 ;i >= 0;i--){
-		ptr = (unsigned char*)(BitstreamStartVirtAddr ) + *offset;
-		(*offset)++;	
-		if(i ==0){
-			*ptr = word&0xff;		
-		}else if(i ==1){
-			*ptr = (word >>8)&0xff;
-		}else if(i == 2 ){
-			*ptr = (word >>16)&0xff;
-		}
-	}	
+    unsigned char* ptr;
+    int i;
+    int bytes = (word >> 24)&0xff;
+    for(i = bytes-1 ;i >= 0;i--){
+        ptr = (unsigned char*)(BitstreamStartVirtAddr ) + *offset;
+        (*offset)++;	
+        if(i ==0){
+            *ptr = word&0xff;		
+        }else if(i ==1){
+            *ptr = (word >>8)&0xff;
+        }else if(i == 2 ){
+            *ptr = (word >>16)&0xff;
+        }
+    }	
 }
 
-
-void prepare_jpeg_header(void)
+static void prepare_jpeg_header(void)
 {
-	int pic_format; 
-	int pic_width, pic_height;
-	int q_sel_comp0, q_sel_comp1, q_sel_comp2;
+    int pic_format; 
+    int pic_width, pic_height;
+    int q_sel_comp0, q_sel_comp1, q_sel_comp2;
     int dc_huff_sel_comp0, dc_huff_sel_comp1, dc_huff_sel_comp2;
     int ac_huff_sel_comp0, ac_huff_sel_comp1, ac_huff_sel_comp2;
     int lastcoeff_sel;
@@ -170,47 +298,46 @@ void prepare_jpeg_header(void)
     int tq[2];
     int dc_huff_num, ac_huff_num;
     int dc_th[2], ac_th[2];
-	int header_bytes = 0 ;
-	int bak_header_bytes = 0;
-	int i ,j ;
+    int header_bytes = 0 ;
+    int bak_header_bytes = 0;
+    int i ,j ;
 	
-	if(output_format >= MAX_FRAME_FMT){
-		debug_level(0,"Input format is wrong!!!!\n");
-	}
-	switch(output_format){
-		case FMT_NV21:
-		case FMT_NV12:
-		case FMT_YUV420:
-			pic_format = 3;
-			break;
-		case FMT_YUV422_SINGLE:
-			pic_format = 2;
-			break;
-		case FMT_YUV444_SINGLE:
-		case FMT_YUV444_PLANE:
-			pic_format = 1;
-			break;
-		default:
-			pic_format = 0;
-			break;
-	}
+    if(output_format >= MAX_FRAME_FMT){
+        debug_level(0,"Input format is wrong!!!!\n");
+    }
+    switch(output_format){
+        case FMT_NV21:
+        case FMT_NV12:
+        case FMT_YUV420:
+            pic_format = 3;
+            break;
+        case FMT_YUV422_SINGLE:
+            pic_format = 2;
+            break;
+        case FMT_YUV444_SINGLE:
+        case FMT_YUV444_PLANE:
+            pic_format = 1;
+            break;
+        default:
+            pic_format = 0;
+            break;
+    }
 
-
-    pic_width           = encoder_width;
-    pic_height          = encoder_height;
+    pic_width = encoder_width;
+    pic_height = encoder_height;
         
-    q_sel_comp0         = QUANT_SEL_COMP0;
-    q_sel_comp1         = QUANT_SEL_COMP1;
-    q_sel_comp2         = QUANT_SEL_COMP2;
+    q_sel_comp0 = QUANT_SEL_COMP0;
+    q_sel_comp1 = QUANT_SEL_COMP1;
+    q_sel_comp2 = QUANT_SEL_COMP2;
        
-    dc_huff_sel_comp0   = DC_HUFF_SEL_COMP0;
-    dc_huff_sel_comp1   = DC_HUFF_SEL_COMP1;
-    dc_huff_sel_comp2   = DC_HUFF_SEL_COMP2;
-    ac_huff_sel_comp0   = AC_HUFF_SEL_COMP0;
-    ac_huff_sel_comp1   = AC_HUFF_SEL_COMP1;
-    ac_huff_sel_comp2   = AC_HUFF_SEL_COMP2;
-    lastcoeff_sel       =  JDCT_LASTCOEFF_SEL;
-    jdct_intr_sel       =  JDCT_INTR_SEL;
+    dc_huff_sel_comp0 = DC_HUFF_SEL_COMP0;
+    dc_huff_sel_comp1 = DC_HUFF_SEL_COMP1;
+    dc_huff_sel_comp2 = DC_HUFF_SEL_COMP2;
+    ac_huff_sel_comp0 = AC_HUFF_SEL_COMP0;
+    ac_huff_sel_comp1 = AC_HUFF_SEL_COMP1;
+    ac_huff_sel_comp2 = AC_HUFF_SEL_COMP2;
+    lastcoeff_sel = JDCT_LASTCOEFF_SEL;
+    jdct_intr_sel = JDCT_INTR_SEL;
 
     if (pic_format == 2) { // YUV422
         h_factor_comp0 = 1; v_factor_comp0 = 0;
@@ -226,33 +353,33 @@ void prepare_jpeg_header(void)
         h_factor_comp2 = 0; v_factor_comp2 = 0;
     }	
 	
-    // SOI marker
-    
-    push_word(&header_bytes , (2       << 24)  |   // Number of bytes
+    // SOI marke
+    push_word(&header_bytes , (2<< 24)|   // Number of bytes
                        (0xffd8  << 0));     // data: SOI marker
     //header_bytes += 2;  // Add SOI bytes
     
     // Define quantization tables
-    
     q_num   = 1;
     if ((q_sel_comp0 != q_sel_comp1) || (q_sel_comp0 != q_sel_comp2) || (q_sel_comp1 != q_sel_comp2)) {
         q_num ++;
     }
-    tq[0]   = q_sel_comp0;
-    tq[1]   = (q_sel_comp0 != q_sel_comp1)? q_sel_comp1 :
-              (q_sel_comp0 != q_sel_comp2)? q_sel_comp2 :
-                                            q_sel_comp0;
-    
-    push_word(&header_bytes , (2           << 24)  |
-                       (0xffdb      << 0));     // data: DQT marker
-    push_word(&header_bytes , (2           << 24)  |
+    //tq[0] = q_sel_comp0;
+    //tq[1] = (q_sel_comp0 != q_sel_comp1)? q_sel_comp1 :
+    //           (q_sel_comp0 != q_sel_comp2)? q_sel_comp2 :
+    //            q_sel_comp0;
+    tq[0] = 0;
+    tq[1] = q_num-1;
+
+    push_word(&header_bytes , (2<< 24)  |
+                       (0xffdb<< 0));     // data: DQT marker
+    push_word(&header_bytes , (2<< 24)  |
                        ((2+65*q_num)<< 0));     // data: Lq
     for (i = 0; i < q_num; i ++) {
-        push_word(&header_bytes  , (1   << 24)  |
-                           (i   << 0));     // data: {Pq,Tq}
-        for (j = 0; j < 64; j ++) {
-            push_word(&header_bytes  , (1                               << 24)  |
-                               ((jpeg_quant[tq[i]][zigzag(j)])  << 0));     // data: Qk
+        push_word(&header_bytes  , (1<< 24)  |
+                        (i<< 0));     // data: {Pq,Tq}
+        for (j = 0; j < DCTSIZE2; j ++) {
+            push_word(&header_bytes , (1<< 24)  |
+                               ((gQuantTable[tq[i]][zigzag(j)])  << 0));     // data: Qk
         }
     }
     
@@ -268,33 +395,33 @@ void prepare_jpeg_header(void)
     if ((ac_huff_sel_comp0 != ac_huff_sel_comp1) || (ac_huff_sel_comp0 != ac_huff_sel_comp2) || (ac_huff_sel_comp1 != ac_huff_sel_comp2)) {
         ac_huff_num ++;
     }
-    dc_th[0]    = dc_huff_sel_comp0;
-    dc_th[1]    = (dc_huff_sel_comp0 != dc_huff_sel_comp1)? dc_huff_sel_comp1 :
+    dc_th[0] = dc_huff_sel_comp0;
+    dc_th[1] = (dc_huff_sel_comp0 != dc_huff_sel_comp1)? dc_huff_sel_comp1 :
                   (dc_huff_sel_comp0 != dc_huff_sel_comp2)? dc_huff_sel_comp2 :
-                                                            dc_huff_sel_comp0;
-    ac_th[0]    = ac_huff_sel_comp0;
-    ac_th[1]    = (ac_huff_sel_comp0 != ac_huff_sel_comp1)? ac_huff_sel_comp1 :
+                  dc_huff_sel_comp0;
+    ac_th[0] = ac_huff_sel_comp0;
+    ac_th[1] = (ac_huff_sel_comp0 != ac_huff_sel_comp1)? ac_huff_sel_comp1 :
                   (ac_huff_sel_comp0 != ac_huff_sel_comp2)? ac_huff_sel_comp2 :
-                                                            ac_huff_sel_comp0;
+                  ac_huff_sel_comp0;
     
-    push_word(&header_bytes  , (2                                               << 24)  |
-                       (0xffc4                                          << 0));     // data: DHT marker
-    push_word(&header_bytes  , (2                                               << 24)  |
+    push_word(&header_bytes  , (2<< 24)  |
+                       (0xffc4<< 0));     // data: DHT marker
+    push_word(&header_bytes  , (2<< 24)  |
                        ((2+(1+16+12)*dc_huff_num+(1+16+162)*ac_huff_num)<< 0));     // data: Lh
     for (i = 0; i < dc_huff_num; i ++) {
-        push_word(&header_bytes , (1   << 24)  |
-                           (i   << 0));     // data: {Tc,Th}
+        push_word(&header_bytes , (1 << 24)  |
+                           (i << 0));     // data: {Tc,Th}
         for (j = 0; j < 16+12; j ++) {
-            push_word(&header_bytes  , (1                               << 24)  |
+            push_word(&header_bytes  , (1<< 24)  |
                                ((jpeg_huffman_dc[dc_th[i]][j])  << 0));     // data: Li then Vi,j
         }
     }
     for (i = 0; i < ac_huff_num; i ++) {
-        push_word(&header_bytes  , (1   << 24)  |
-                           (1   << 4)   |   // data: Tc
-                           (i   << 0));     // data: Th
+        push_word(&header_bytes  , (1<< 24) |
+                           (1<< 4) |   // data: Tc
+                           (i<< 0));     // data: Th
         for (j = 0; j < 16+162; j ++) {
-            push_word(&header_bytes  , (1                               << 24)  |
+            push_word(&header_bytes , (1<< 24)  |
                                ((jpeg_huffman_ac[ac_th[i]][j])  << 0));     // data: Li then Vi,j
         }
     }
@@ -302,90 +429,86 @@ void prepare_jpeg_header(void)
     //header_bytes += (2 + (2+(1+16+12)*dc_huff_num+(1+16+162)*ac_huff_num)); // Add Huffman table bytes
     
     // Frame header
-    push_word(&header_bytes , (2                                       << 24)  |   // Number of bytes
-                       (0xffc0                                  << 0));     // data: SOF_0 marker
-    push_word(&header_bytes  , (2                                       << 24)  |
-                       ((8+3*3)                                 << 0));     // data: Lf
-    push_word(&header_bytes  , (1                                       << 24)  |
-                       (8                                       << 0));     // data: P -- Sample precision
-    push_word(&header_bytes  , (2                                       << 24)  |
-                       (pic_height                              << 0));     // data: Y -- Number of lines
-    push_word(&header_bytes  , (2                                       << 24)  |
-                       (pic_width                               << 0));      // data: X -- Number of samples per line
-    push_word(&header_bytes , (1                                       << 24)  |
-                       (3                                       << 0));     // data: Nf -- Number of components in a frame
-    push_word(&header_bytes  , (1                                       << 24)  |
-                       (0                                       << 0));     // data: C0 -- Comp0 identifier
-    push_word(&header_bytes  , (1                                       << 24)  |
-                       ((h_factor_comp0+1)                      << 4)   |   // data: H0 -- Comp0 horizontal sampling factor
-                       ((v_factor_comp0+1)                      << 0));     // data: V0 -- Comp0 vertical sampling factor
-    push_word(&header_bytes  , (1                                       << 24)  |
-                       (0                                       << 0));     // data: Tq0 -- Comp0 quantization table seletor
-    push_word(&header_bytes  , (1                                       << 24)  |
-                       (1                                       << 0));     // data: C1 -- Comp1 identifier
-    push_word(&header_bytes  , (1                                       << 24)  |
-                       ((h_factor_comp1+1)                      << 4)   |   // data: H1 -- Comp1 horizontal sampling factor
-                       ((v_factor_comp1+1)                      << 0));     // data: V1 -- Comp1 vertical sampling factor
-    push_word(&header_bytes  , (1                                       << 24)  |
-                       (((q_sel_comp0 != q_sel_comp1)? 1 : 0)   << 0));     // data: Tq1 -- Comp1 quantization table seletor
-    push_word(&header_bytes  , (1                                       << 24)  |
-                       (2                                       << 0));     // data: C2 -- Comp2 identifier
-    push_word(&header_bytes  , (1                                       << 24)  |
-                       ((h_factor_comp2+1)                      << 4)   |   // data: H2 -- Comp2 horizontal sampling factor
-                       ((v_factor_comp2+1)                      << 0));     // data: V2 -- Comp2 vertical sampling factor
-    push_word(&header_bytes  , (1                                       << 24)  |
-                       (((q_sel_comp0 != q_sel_comp2)? 1 : 0)   << 0));     // data: Tq2 -- Comp2 quantization table seletor
+    push_word(&header_bytes , (2<< 24)  |   // Number of bytes
+                       (0xffc0<< 0));     // data: SOF_0 marker
+    push_word(&header_bytes  , (2<< 24)  |
+                       ((8+3*3)<< 0));     // data: Lf
+    push_word(&header_bytes  , (1<< 24)  |
+                       (8<< 0));     // data: P -- Sample precision
+    push_word(&header_bytes  , (2<< 24)  |
+                       (pic_height<< 0));     // data: Y -- Number of lines
+    push_word(&header_bytes  , (2<< 24)  |
+                       (pic_width<< 0));      // data: X -- Number of samples per line
+    push_word(&header_bytes , (1<< 24)  |
+                       (3<< 0));     // data: Nf -- Number of components in a frame
+    push_word(&header_bytes  , (1<< 24)  |
+                       (0<< 0));     // data: C0 -- Comp0 identifier
+    push_word(&header_bytes  , (1<< 24)  |
+                       ((h_factor_comp0+1)<< 4)   |   // data: H0 -- Comp0 horizontal sampling factor
+                       ((v_factor_comp0+1)<< 0));     // data: V0 -- Comp0 vertical sampling factor
+    push_word(&header_bytes  , (1<< 24)  |
+                       (0<< 0));     // data: Tq0 -- Comp0 quantization table seletor
+    push_word(&header_bytes  , (1<< 24)  |
+                       (1<< 0));     // data: C1 -- Comp1 identifier
+    push_word(&header_bytes  , (1<< 24)  |
+                       ((h_factor_comp1+1)<< 4)   |   // data: H1 -- Comp1 horizontal sampling factor
+                       ((v_factor_comp1+1)<< 0));     // data: V1 -- Comp1 vertical sampling factor
+    push_word(&header_bytes  , (1<< 24)  |
+                       (((q_sel_comp0 != q_sel_comp1)? 1 : 0)<< 0));     // data: Tq1 -- Comp1 quantization table seletor
+    push_word(&header_bytes  , (1<< 24)  |
+                       (2<< 0));     // data: C2 -- Comp2 identifier
+    push_word(&header_bytes  , (1<< 24)  |
+                       ((h_factor_comp2+1)<< 4)   |   // data: H2 -- Comp2 horizontal sampling factor
+                       ((v_factor_comp2+1)<< 0));     // data: V2 -- Comp2 vertical sampling factor
+    push_word(&header_bytes  , (1<< 24)  |
+                       (((q_sel_comp0 != q_sel_comp2)? 1 : 0)<< 0));     // data: Tq2 -- Comp2 quantization table seletor
     
     //header_bytes += (2 + (8+3*3));  // Add Frame header bytes
     
     // Scan header
-    
     bak_header_bytes  = header_bytes + (2 + (6+2*3));
     
     //header_bytes += (2 + (6+2*3));  // Add Scan header bytes
     // If total header bytes is not multiple of 8, then fill 0xff byte between Frame header segment and the Scan header segment.
     for (i = 0; i < ((bak_header_bytes + 7)/8)*8 - bak_header_bytes; i ++) {
-        push_word(&header_bytes  , (1       << 24)  |
-                           (0xff    << 0)); // 0xff filler
+        push_word(&header_bytes  , (1<< 24)  |
+                           (0xff<< 0)); // 0xff filler
     }
-   // header_bytes = ((header_bytes + 7)/8)*8;
+    // header_bytes = ((header_bytes + 7)/8)*8;
     
-    
-    
-    push_word(&header_bytes  , (2                                               << 24)  |   // Number of bytes
-                       (0xffda                                          << 0));     // data: SOS marker
-    push_word(&header_bytes  , (2                                               << 24)  |
-                       ((6+2*3)                                         << 0));     // data: Ls
-    push_word(&header_bytes  , (1                                               << 24)  |
-                       (3                                               << 0));     // data: Ns -- Number of components in a scan
-    push_word(&header_bytes  , (1                                               << 24)  |
-                       (0                                               << 0));     // data: Cs0 -- Comp0 identifier
-    push_word(&header_bytes  , (1                                               << 24)  |
-                       (0                                               << 4)   |   // data: Td0 -- Comp0 DC Huffman table selector
-                       (0                                               << 0));     // data: Ta0 -- Comp0 AC Huffman table selector
-    push_word(&header_bytes  , (1                                               << 24)  |
-                       (1                                               << 0));     // data: Cs1 -- Comp1 identifier
-    push_word(&header_bytes  , (1                                               << 24)  |
+    push_word(&header_bytes  , (2<< 24)  |   // Number of bytes
+                       (0xffda<< 0));     // data: SOS marker
+    push_word(&header_bytes  , (2<< 24)  |
+                       ((6+2*3)<< 0));     // data: Ls
+    push_word(&header_bytes  , (1<< 24)  |
+                       (3<< 0));     // data: Ns -- Number of components in a scan
+    push_word(&header_bytes  , (1<< 24)  |
+                       (0<< 0));     // data: Cs0 -- Comp0 identifier
+    push_word(&header_bytes  , (1<< 24)  |
+                       (0<< 4)   |   // data: Td0 -- Comp0 DC Huffman table selector
+                       (0<< 0));     // data: Ta0 -- Comp0 AC Huffman table selector
+    push_word(&header_bytes  , (1<< 24)  |
+                       (1<< 0));     // data: Cs1 -- Comp1 identifier
+    push_word(&header_bytes  , (1<< 24)  |
                        (((dc_huff_sel_comp0 != dc_huff_sel_comp1)? 1:0) << 4)   |   // data: Td1 -- Comp1 DC Huffman table selector
                        (((ac_huff_sel_comp0 != ac_huff_sel_comp1)? 1:0) << 0));     // data: Ta1 -- Comp1 AC Huffman table selector
-    push_word(&header_bytes  , (1                                               << 24)  |
-                       (2                                               << 0));     // data: Cs2 -- Comp2 identifier
-    push_word(&header_bytes  , (1                                               << 24)  |
+    push_word(&header_bytes  , (1<< 24)  |
+                       (2<< 0));     // data: Cs2 -- Comp2 identifier
+    push_word(&header_bytes  , (1<< 24)  |
                        (((dc_huff_sel_comp0 != dc_huff_sel_comp2)? 1:0) << 4)   |   // data: Td2 -- Comp2 DC Huffman table selector
                        (((ac_huff_sel_comp0 != ac_huff_sel_comp2)? 1:0) << 0));     // data: Ta2 -- Comp2 AC Huffman table selector
-    push_word(&header_bytes  , (3                                               << 24)  |
-                       (0                                               << 16)  |   // data: Ss = 0
-                       (63                                              << 8)   |   // data: Se = 63
-                       (0                                               << 4)   |   // data: Ah = 0
-                       (0                                               << 0));     // data: Al = 0
-   debug_level(0,"jpeg header bytes is %d \n",header_bytes);  
-   WRITE_HREG(HCODEC_HENC_SCRATCH_1 , header_bytes); // Send MEM_OFFSET
-
+    push_word(&header_bytes  , (3<< 24)  |
+                       (0<< 16)  |   // data: Ss = 0
+                       (63<< 8)   |   // data: Se = 63
+                       (0<< 4)   |   // data: Ah = 0
+                       (0<< 0));     // data: Al = 0
+    debug_level(0,"jpeg header bytes is %d \n",header_bytes);  
+    WRITE_HREG(HCODEC_HENC_SCRATCH_1 , header_bytes); // Send MEM_OFFSET
 }
-void init_jpeg_encoder()
+
+static void init_jpeg_encoder(void)
 {
-	unsigned long data32 ;
-    int i;
+    unsigned long data32 ;
     int pic_format;             // 0=RGB; 1=YUV; 2=YUV422; 3=YUV420
     int pic_x_start, pic_x_end, pic_y_start, pic_y_end;
 
@@ -398,55 +521,50 @@ void init_jpeg_encoder()
     int h_factor_comp0, v_factor_comp0;
     int h_factor_comp1, v_factor_comp1;
     int h_factor_comp2, v_factor_comp2;
-
-    int q_num;
-    int tq[2];
-    int dc_huff_num, ac_huff_num;
-    int dc_th[2], ac_th[2];
-    
+   
     int header_bytes;
     
     debug_level(0,"Initialize JPEG Encoder ....\n");   
-	if(output_format >= MAX_FRAME_FMT){
-		debug_level(0,"Input format is wrong!!!!\n");
-	}
-	switch(output_format){
-		case FMT_NV21:
-		case FMT_NV12:
-		case FMT_YUV420:
-			pic_format = 3;
-			break;
-		case FMT_YUV422_SINGLE:
-			pic_format = 2;
-			break;
-		case FMT_YUV444_SINGLE:
-		case FMT_YUV444_PLANE:
-			pic_format = 1;
-			break;
-		default:
-			pic_format = 0;
-			break;
-	}
+    if(output_format >= MAX_FRAME_FMT){
+        debug_level(0,"Input format is wrong!!!!\n");
+    }
+    switch(output_format){
+        case FMT_NV21:
+        case FMT_NV12:
+        case FMT_YUV420:
+            pic_format = 3;
+            break;
+        case FMT_YUV422_SINGLE:
+            pic_format = 2;
+            break;
+        case FMT_YUV444_SINGLE:
+        case FMT_YUV444_PLANE:
+            pic_format = 1;
+            break;
+        default:
+            pic_format = 0;
+            break;
+    }
 
-    pic_x_start         = 0;
-    pic_x_end           = encoder_width -1;
-    pic_y_start         = 0;
-    pic_y_end           = encoder_height - 1;
-    pic_width           = encoder_width;
-    pic_height          = encoder_height;
+    pic_x_start = 0;
+    pic_x_end = encoder_width -1;
+    pic_y_start = 0;
+    pic_y_end = encoder_height - 1;
+    pic_width = encoder_width;
+    pic_height = encoder_height;
         
-    q_sel_comp0         = QUANT_SEL_COMP0;
-    q_sel_comp1         = QUANT_SEL_COMP1;
-    q_sel_comp2         = QUANT_SEL_COMP2;
+    q_sel_comp0 = gQuantTable_id*2;
+    q_sel_comp1 = q_sel_comp0+1;
+    q_sel_comp2 = q_sel_comp1;
        
-    dc_huff_sel_comp0   = DC_HUFF_SEL_COMP0;
-    dc_huff_sel_comp1   = DC_HUFF_SEL_COMP1;
-    dc_huff_sel_comp2   = DC_HUFF_SEL_COMP2;
-    ac_huff_sel_comp0   = AC_HUFF_SEL_COMP0;
-    ac_huff_sel_comp1   = AC_HUFF_SEL_COMP1;
-    ac_huff_sel_comp2   = AC_HUFF_SEL_COMP2;
-    lastcoeff_sel       =  JDCT_LASTCOEFF_SEL;
-    jdct_intr_sel       =  JDCT_INTR_SEL;
+    dc_huff_sel_comp0 = DC_HUFF_SEL_COMP0;
+    dc_huff_sel_comp1 = DC_HUFF_SEL_COMP1;
+    dc_huff_sel_comp2 = DC_HUFF_SEL_COMP2;
+    ac_huff_sel_comp0 = AC_HUFF_SEL_COMP0;
+    ac_huff_sel_comp1 = AC_HUFF_SEL_COMP1;
+    ac_huff_sel_comp2 = AC_HUFF_SEL_COMP2;
+    lastcoeff_sel =  JDCT_LASTCOEFF_SEL;
+    jdct_intr_sel =  JDCT_INTR_SEL;
 
     if (pic_format == 2) { // YUV422
         h_factor_comp0 = 1; v_factor_comp0 = 0;
@@ -466,16 +584,33 @@ void init_jpeg_encoder()
     // Configure picture size and format  
     //--------------------------------------------------------------------------
 
-	WRITE_HREG(HCODEC_VLC_PIC_SIZE ,pic_width | (pic_height<<16));
-	WRITE_HREG(HCODEC_VLC_PIC_POSITION ,pic_format | (lastcoeff_sel <<4));
+    WRITE_HREG(HCODEC_VLC_PIC_SIZE ,pic_width | (pic_height<<16));
+    WRITE_HREG(HCODEC_VLC_PIC_POSITION ,pic_format | (lastcoeff_sel <<4));
 
-	WRITE_HREG(HCODEC_QDCT_JPEG_X_START_END , ((pic_x_end<<16) | (pic_x_start<<0)));
-	WRITE_HREG(HCODEC_QDCT_JPEG_Y_START_END ,((pic_y_end<<16) | (pic_y_start<<0)));
+    WRITE_HREG(HCODEC_QDCT_JPEG_X_START_END , ((pic_x_end<<16) | (pic_x_start<<0)));
+    WRITE_HREG(HCODEC_QDCT_JPEG_Y_START_END ,((pic_y_end<<16) | (pic_y_start<<0)));
 
     //--------------------------------------------------------------------------
     // Configure quantization tables
     //--------------------------------------------------------------------------
-    
+    if(external_quant_table_available){
+        convert_quant_table(&gQuantTable[0][0], &gExternalQuantTablePtr[0], jpeg_quality);
+        convert_quant_table(&gQuantTable[1][0], &gExternalQuantTablePtr[DCTSIZE2], jpeg_quality);
+        q_sel_comp0 = 0;
+        q_sel_comp1 = 1;
+        q_sel_comp2 = 1;
+    }else{
+        int tq[2];
+        tq[0] = q_sel_comp0;
+        tq[1] = (q_sel_comp0 != q_sel_comp1)? q_sel_comp1 : (q_sel_comp0 != q_sel_comp2)? q_sel_comp2:q_sel_comp0;
+        convert_quant_table(&gQuantTable[0][0], (unsigned short*)&jpeg_quant[tq[0]], jpeg_quality);
+        if(tq[0]!=tq[1])
+            convert_quant_table(&gQuantTable[1][0], (unsigned short*)&jpeg_quant[tq[1]], jpeg_quality);
+        q_sel_comp0 = tq[0];
+        q_sel_comp1 = tq[1];
+        q_sel_comp2 = tq[1];
+    }
+
     // Set Quantization LUT start address
     data32  = 0;
     data32 |= 0 << 8;   // [    8] 0=Write LUT, 1=Read
@@ -483,8 +618,11 @@ void init_jpeg_encoder()
    
     WRITE_HREG(HCODEC_QDCT_JPEG_QUANT_ADDR ,data32);
     
-
     // Burst-write Quantization LUT data
+    write_jpeg_quant_lut(0);
+    if(q_sel_comp0!=q_sel_comp1)
+        write_jpeg_quant_lut(1);
+#if 0
     write_jpeg_quant_lut(q_sel_comp0);
     if (q_sel_comp1 != q_sel_comp0) {
         write_jpeg_quant_lut(q_sel_comp1);
@@ -492,7 +630,8 @@ void init_jpeg_encoder()
     if ((q_sel_comp2 != q_sel_comp0) && (q_sel_comp2 != q_sel_comp1)) {
         write_jpeg_quant_lut(q_sel_comp2);
     }
-    
+#endif
+
     //--------------------------------------------------------------------------
     // Configure Huffman tables
     //--------------------------------------------------------------------------
@@ -502,7 +641,6 @@ void init_jpeg_encoder()
     data32 |= 0 << 16;  // [   16] 0=Write LUT, 1=Read
     data32 |= 0 << 0;   // [ 8: 0] Start addr = 0
     WRITE_HREG(HCODEC_VLC_HUFFMAN_ADDR ,data32);
-
 
     // Burst-write DC Huffman LUT data
     write_jpeg_huffman_lut_dc(dc_huff_sel_comp0);
@@ -533,54 +671,54 @@ void init_jpeg_encoder()
     //--------------------------------------------------------------------------
 
     data32  = 0;
-    data32 |= 0                                     << 18;  // [19:18] dct_inflow_ctrl: 0=No halt;
-                                                            //                          1=DCT halts request at end of each 8x8 block;
-                                                            //                          2=DCT halts request at end of each MCU.
-    data32 |= lastcoeff_sel                         << 16;  // [17:16] jpeg_coeff_last_sel: 0=Mark last coeff at the end of an 8x8 block,
-                                                            //                              1=Mark last coeff at the end of an MCU
-                                                            //                              2=Mark last coeff at the end of a scan
+    data32 |= 0<< 18;  // [19:18] dct_inflow_ctrl: 0=No halt;
+                                 //                          1=DCT halts request at end of each 8x8 block;
+                                 //                          2=DCT halts request at end of each MCU.
+    data32 |= lastcoeff_sel<< 16;  // [17:16] jpeg_coeff_last_sel: 0=Mark last coeff at the end of an 8x8 block,
+                                                 //                              1=Mark last coeff at the end of an MCU
+                                                 //                              2=Mark last coeff at the end of a scan
     data32 |= ((q_sel_comp2==q_sel_comp0)? 0 : 1)   << 15;  // [   15] jpeg_quant_sel_comp2
-    data32 |= v_factor_comp2                        << 14;  // [   14] jpeg_v_factor_comp2
-    data32 |= h_factor_comp2                        << 13;  // [   13] jpeg_h_factor_comp2
-    data32 |= 1                                     << 12;  // [   12] jpeg_comp2_en
-    data32 |= ((q_sel_comp1==q_sel_comp0)? 0 : 1)   << 11;  // [   11] jpeg_quant_sel_comp1
-    data32 |= v_factor_comp1                        << 10;  // [   10] jpeg_v_factor_comp1
-    data32 |= h_factor_comp1                        << 9;   // [    9] jpeg_h_factor_comp1
-    data32 |= 1                                     << 8;   // [    8] jpeg_comp1_en
-    data32 |= 0                                     << 7;   // [    7] jpeg_quant_sel_comp0
-    data32 |= v_factor_comp0                        << 6;   // [    6] jpeg_v_factor_comp0
-    data32 |= h_factor_comp0                        << 5;   // [    5] jpeg_h_factor_comp0
-    data32 |= 1                                     << 4;   // [    4] jpeg_comp0_en
-    data32 |= jdct_intr_sel                         << 1;   // [ 3: 1] jdct_intr_sel:0=Disable intr;
-                                                            //                       1=Intr at end of each 8x8 block of DCT input;
-                                                            //                       2=Intr at end of each MCU of DCT input;
-                                                            //                       3=Intr at end of a scan of DCT input;
-                                                            //                       4=Intr at end of each 8x8 block of DCT output;
-                                                            //                       5=Intr at end of each MCU of DCT output;
-                                                            //                       6=Intr at end of a scan of DCT output.
-    data32 |= 1                                     << 0;   // [    0] jpeg_en
+    data32 |= v_factor_comp2<< 14;  // [   14] jpeg_v_factor_comp2
+    data32 |= h_factor_comp2<< 13;  // [   13] jpeg_h_factor_comp2
+    data32 |= 1<< 12;  // [   12] jpeg_comp2_en
+    data32 |= ((q_sel_comp1==q_sel_comp0)? 0 : 1)<< 11;  // [   11] jpeg_quant_sel_comp1
+    data32 |= v_factor_comp1<< 10;  // [   10] jpeg_v_factor_comp1
+    data32 |= h_factor_comp1<< 9;   // [    9] jpeg_h_factor_comp1
+    data32 |= 1<< 8;   // [    8] jpeg_comp1_en
+    data32 |= 0<< 7;   // [    7] jpeg_quant_sel_comp0
+    data32 |= v_factor_comp0<< 6;   // [    6] jpeg_v_factor_comp0
+    data32 |= h_factor_comp0<< 5;   // [    5] jpeg_h_factor_comp0
+    data32 |= 1<< 4;   // [    4] jpeg_comp0_en
+    data32 |= jdct_intr_sel<< 1;   // [ 3: 1] jdct_intr_sel:0=Disable intr;
+                                                //                       1=Intr at end of each 8x8 block of DCT input;
+                                                //                       2=Intr at end of each MCU of DCT input;
+                                                //                       3=Intr at end of a scan of DCT input;
+                                                //                       4=Intr at end of each 8x8 block of DCT output;
+                                                //                       5=Intr at end of each MCU of DCT output;
+                                                //                       6=Intr at end of a scan of DCT output.
+    data32 |= 1<< 0;   // [    0] jpeg_en
     WRITE_HREG(HCODEC_QDCT_JPEG_CTRL ,data32);
 
     data32  = 0;
     data32 |= ((ac_huff_sel_comp2 == ac_huff_sel_comp0)? 0 : 1) << 29;  // [   29] jpeg_comp2_ac_table_sel
     data32 |= ((dc_huff_sel_comp2 == dc_huff_sel_comp0)? 0 : 1) << 28;  // [   28] jpeg_comp2_dc_table_sel
-    data32 |= ((h_factor_comp2+1)*(v_factor_comp2+1)-1)         << 25;  // [26:25] jpeg_comp2_cnt_max
-    data32 |= 1                                                 << 24;  // [   24] jpeg_comp2_en
+    data32 |= ((h_factor_comp2+1)*(v_factor_comp2+1)-1)<< 25;  // [26:25] jpeg_comp2_cnt_max
+    data32 |= 1<< 24;  // [   24] jpeg_comp2_en
     data32 |= ((ac_huff_sel_comp1 == ac_huff_sel_comp0)? 0 : 1) << 21;  // [   21] jpeg_comp1_ac_table_sel
     data32 |= ((dc_huff_sel_comp1 == dc_huff_sel_comp0)? 0 : 1) << 20;  // [   20] jpeg_comp1_dc_table_sel
     data32 |= ((h_factor_comp1+1)*(v_factor_comp1+1)-1)         << 17;  // [18:17] jpeg_comp1_cnt_max
-    data32 |= 1                                                 << 16;  // [   16] jpeg_comp1_en
-    data32 |= 0                                                 << 13;  // [   13] jpeg_comp0_ac_table_sel
-    data32 |= 0                                                 << 12;  // [   12] jpeg_comp0_dc_table_sel
+    data32 |= 1<< 16;  // [   16] jpeg_comp1_en
+    data32 |= 0<< 13;  // [   13] jpeg_comp0_ac_table_sel
+    data32 |= 0<< 12;  // [   12] jpeg_comp0_dc_table_sel
     data32 |= ((h_factor_comp0+1)*(v_factor_comp0+1)-1)         << 9;   // [10: 9] jpeg_comp0_cnt_max
-    data32 |= 1                                                 << 8;   // [    8] jpeg_comp0_en
-    data32 |= 0                                                 << 0;   // [    0] jpeg_en, will be enbled by amrisc
-	WRITE_HREG(HCODEC_VLC_JPEG_CTRL ,data32);
+    data32 |= 1<< 8;   // [    8] jpeg_comp0_en
+    data32 |= 0<< 0;   // [    0] jpeg_en, will be enbled by amrisc
+    WRITE_HREG(HCODEC_VLC_JPEG_CTRL ,data32);
 
     WRITE_HREG(HCODEC_QDCT_MB_CONTROL, 
                 (1<<9) | // mb_info_soft_reset
-                (1<<0))  // mb read buffer soft reset
-              ;
+                (1<<0));  // mb read buffer soft reset
+
     WRITE_HREG(HCODEC_QDCT_MB_CONTROL ,
               (0<<28) | // ignore_t_p8x8
               (0<<27) | // zero_mc_out_null_non_skipped_mb
@@ -599,32 +737,62 @@ void init_jpeg_encoder()
               (0<<10) | // mb_info_en
               (0<<3) | // endian
               (0<<1) | // mb_read_en
-              (0<<0))   // soft reset
-            ; // soft reset
-
+              (0<<0));   // soft reset
     //--------------------------------------------------------------------------
     // Assember JPEG file header
     //--------------------------------------------------------------------------
     //need check
-    header_bytes    = READ_HREG(HCODEC_HENC_SCRATCH_1);
-	prepare_jpeg_header();
+    header_bytes = READ_HREG(HCODEC_HENC_SCRATCH_1);
+    prepare_jpeg_header();
 }
 
-void write_jpeg_quant_lut(int table_num)
+static int jpeg_quality_scaling (int quality)
 {
-    int             i;
-    unsigned long   data32;
+    if (quality <= 0) quality = 1;
+    if (quality > 100) quality = 100;
+
+    if (quality < 50)
+        quality = 5000 / quality;
+    else
+        quality = 200 - quality*2;
+
+    return quality;
+}
+
+static void _convert_quant_table(unsigned short* qtable, unsigned short *basic_table, int scale_factor, bool force_baseline)
+{
+    int i = 0;
+    int temp;
+    for (i = 0; i < DCTSIZE2; i++) {
+        temp = ((int) basic_table[i] * scale_factor + 50) / 100;
+        /* limit the values to the valid range */
+        if (temp <= 0) temp = 1;
+        if (temp > 32767) temp = 32767; /* max quantizer needed for 12 bits */
+        if (force_baseline && temp > 255)
+            temp = 255;		/* limit to baseline range if requested */
+        qtable[i] = (unsigned short) temp;
+    }
+}
+
+static void convert_quant_table(unsigned short* qtable, unsigned short *basic_table, int scale_factor)
+{
+    _convert_quant_table(qtable, basic_table, scale_factor, true);
+}
+
+static void write_jpeg_quant_lut(int table_num)
+{
+    int i;
+    unsigned long data32;
     
-    for (i = 0; i < 64; i += 2) {
-        data32  = reciprocal(jpeg_quant[table_num][i]);
-        data32 |= reciprocal(jpeg_quant[table_num][i+1])    << 16;
+    for (i = 0; i < DCTSIZE2; i += 2) {
+        data32  = reciprocal(gQuantTable[table_num][i]);
+        data32 |= reciprocal(gQuantTable[table_num][i+1])    << 16;
         WRITE_HREG(HCODEC_QDCT_JPEG_QUANT_DATA,data32);
     }
-    
 }   /* write_jpeg_quant_lut */
 
 
-void write_jpeg_huffman_lut_dc(int table_num)
+static void write_jpeg_huffman_lut_dc(int table_num)
 {
     unsigned int    code_len, code_word, pos, addr;
     unsigned int    num_code_len;
@@ -644,9 +812,9 @@ void write_jpeg_huffman_lut_dc(int table_num)
                 code_word   <<= (i+1-code_len);
                 code_len    = i + 1;
             }
-            addr        = jpeg_huffman_dc[table_num][pos];
-            lut[addr]   = ((code_len-1)<<16) | (code_word);
-            pos         ++;
+            addr = jpeg_huffman_dc[table_num][pos];
+            lut[addr] = ((code_len-1)<<16) | (code_word);
+            pos++;
         }
     }
 
@@ -656,47 +824,45 @@ void write_jpeg_huffman_lut_dc(int table_num)
     }
 }   /* write_jpeg_huffman_lut_dc */
 
-void write_jpeg_huffman_lut_ac(int table_num)
+static void write_jpeg_huffman_lut_ac(int table_num)
 {
-    unsigned int    code_len, code_word, pos;
-    unsigned int    num_code_len;
-    unsigned int    run, size;
-    unsigned int    data, addr;
-    unsigned int    lut[162];
-    unsigned int    i, j;
-    
-    code_len    = 1;
-    code_word   = 1;
-    pos         = 16;
+    unsigned int code_len, code_word, pos;
+    unsigned int num_code_len;
+    unsigned int run, size;
+    unsigned int data, addr = 0;
+    unsigned int lut[162];
+    unsigned int i, j;
+    code_len = 1;
+    code_word = 1;
+    pos = 16;
     
     // Construct AC Huffman table
     for (i = 0; i < 16; i ++) {
-        num_code_len    = jpeg_huffman_ac[table_num][i];
+        num_code_len = jpeg_huffman_ac[table_num][i];
         for (j = 0; j < num_code_len; j ++) {
-            code_word   = (code_word + 1) & ((1<<code_len)-1);
+            code_word = (code_word + 1) & ((1<<code_len)-1);
             if (code_len < i + 1) {
-                code_word   <<= (i+1-code_len);
-                code_len    = i + 1;
+                code_word <<= (i+1-code_len);
+                code_len = i + 1;
             }
-            run         = jpeg_huffman_ac[table_num][pos] >> 4;
-            size        = jpeg_huffman_ac[table_num][pos] & 0xf;
-            data        = ((code_len-1)<<16) | (code_word);
+            run = jpeg_huffman_ac[table_num][pos] >> 4;
+            size = jpeg_huffman_ac[table_num][pos] & 0xf;
+            data = ((code_len-1)<<16) | (code_word);
             if (size == 0) {
                 if (run == 0) {
-                    addr    = 0;        // EOB
+                    addr = 0;        // EOB
                 } else if (run == 0xf) {
-                    addr    = 161;      // ZRL
+                    addr = 161;      // ZRL
                 } else {                	
-                	debug_level(0,"[TEST.C] Error: Illegal AC Huffman table format!\n");
-
+                    debug_level(0,"[TEST.C] Error: Illegal AC Huffman table format!\n");
                 }
             } else if (size <= 0xa) {
-                addr    = 1 + 16*(size-1) + run;
+                addr = 1 + 16*(size-1) + run;
             } else {
                 debug_level(0,"[TEST.C] Error: Illegal AC Huffman table format!\n");
             }
-            lut[addr]   = data;
-            pos         ++;
+            lut[addr] = data;
+            pos++;
         }
     }
 
@@ -706,10 +872,9 @@ void write_jpeg_huffman_lut_ac(int table_num)
     }
 }   /* write_jpeg_huffman_lut_ac */
 
-int  zigzag(int i)
+static int  zigzag(int i)
 {
     int zigzag_i;
-    
     switch (i) {
         case 0   : zigzag_i = 0;    break;
         case 1   : zigzag_i = 1;    break;
@@ -778,90 +943,40 @@ int  zigzag(int i)
     }
     return zigzag_i;
 }   /* zigzag */
-
        
-static void jpegenc_init_output_buffer()
+static void jpegenc_init_output_buffer(void)
 {
-	unsigned mem_offset;
-	mem_offset    = READ_HREG(HCODEC_HENC_SCRATCH_1);
+    unsigned mem_offset;
+    mem_offset = READ_HREG(HCODEC_HENC_SCRATCH_1);
 	
-	WRITE_HREG(VLC_VB_MEM_CTL ,((1<<31)|(0x3f<<24)|(0x20<<16)|(2<<0)) );
-	WRITE_HREG(VLC_VB_START_PTR, BitstreamStart+mem_offset);
-	WRITE_HREG(VLC_VB_WR_PTR, BitstreamStart+mem_offset);
-	WRITE_HREG(VLC_VB_SW_RD_PTR, BitstreamStart+mem_offset);	
-	WRITE_HREG(VLC_VB_END_PTR, BitstreamEnd);
-	WRITE_HREG(VLC_VB_CONTROL, 1);
-	WRITE_HREG(VLC_VB_CONTROL, ((0<<14)|(7<<3)|(1<<1)|(0<<0)));
+    WRITE_HREG(VLC_VB_MEM_CTL ,((1<<31)|(0x3f<<24)|(0x20<<16)|(2<<0)) );
+    WRITE_HREG(VLC_VB_START_PTR, BitstreamStart+mem_offset);
+    WRITE_HREG(VLC_VB_WR_PTR, BitstreamStart+mem_offset);
+    WRITE_HREG(VLC_VB_SW_RD_PTR, BitstreamStart+mem_offset);	
+    WRITE_HREG(VLC_VB_END_PTR, BitstreamEnd);
+    WRITE_HREG(VLC_VB_CONTROL, 1);
+    WRITE_HREG(VLC_VB_CONTROL, ((0<<14)|(7<<3)|(1<<1)|(0<<0)));
 }
 /****************************************/
 
 static void jpegenc_canvas_init(void)
 {
-    u32 canvas_width, canvas_height;
-    int start_addr = gJpegEncBuff.buf_start;
-	int y_size , uv_size;
-	int offset;
-	int bpp;
-
-
-    canvas_width = ((encoder_width+15)>>4)<<4;
-    canvas_height = ((encoder_height+15)>>4)<<4;
-	switch(encoder_input_format){
-		case FMT_NV21:
-		case FMT_NV12:	
-		bpp = 12;
-		break;
-		case FMT_RGB888:
-		bpp = 24;
-		break;
-		case FMT_YUV422_SINGLE:
-		bpp = 16;
-		break;
-		default:
-		bpp = 12;
-		
-	}
-    y_size = canvas_width*canvas_height;
-    uv_size = canvas_width*canvas_height/2 ;
-        
-	gJpegEncBuff.bufspec = (BuffInfo_t*)&jpegenc_buffspec;
-	offset = canvas_width*canvas_height*bpp/8;
-	gJpegEncBuff.bufspec->bitstream= start_addr + offset;
-
-	/*input dct buffer config */ 
-    dct_buff_start_addr = start_addr;   //(w>>4)*(h>>4)*864
-    dct_buff_end_addr = dct_buff_start_addr + offset -1 ;
+    /*input dct buffer config */ 
+    dct_buff_start_addr = gJpegEncBuff.buf_start+gJpegEncBuff.bufspec->input.buf_start;
+    dct_buff_end_addr = dct_buff_start_addr + gJpegEncBuff.bufspec->input.buf_size -1 ;
     debug_level(0,"dct_buff_start_addr is %x \n",dct_buff_start_addr);
-#if 0
 
-    canvas_config(ENC_CANVAS_OFFSET,
-        gJpegEncBuff.bufspec->dec0_y,
-        canvas_width, canvas_height,
-        CANVAS_ADDR_NOWRAP, CANVAS_BLKMODE_LINEAR);
-    canvas_config(1 + ENC_CANVAS_OFFSET,
-        gJpegEncBuff.bufspec->dec0_uv,
-        canvas_width , canvas_height/2,
-        CANVAS_ADDR_NOWRAP, CANVAS_BLKMODE_LINEAR);
-    /*here the third plane use the same address as the second plane*/                      
-    canvas_config(2 + ENC_CANVAS_OFFSET,
-        gJpegEncBuff.bufspec->dec0_uv,
-        canvas_width , canvas_height/2,
-        CANVAS_ADDR_NOWRAP, CANVAS_BLKMODE_LINEAR);
-    
-#endif
-
-	/*output stream buffer config*/
-    BitstreamStart  = gJpegEncBuff.bufspec->bitstream;
-    BitstreamEnd  =  BitstreamStart + 0x200000 -1;
+    /*output stream buffer config*/
+    BitstreamStart  = gJpegEncBuff.buf_start+gJpegEncBuff.bufspec->bitstream.buf_start;
+    BitstreamEnd  =  BitstreamStart + gJpegEncBuff.bufspec->bitstream.buf_size-1;
     debug_level(0,"BitstreamStart is %x \n",BitstreamStart);   
     
-    BitstreamStartVirtAddr  = ioremap_nocache(BitstreamStart, 0x200000); 
-    debug_level(0,"BitstreamStartVirtAddr is %x \n",BitstreamStartVirtAddr);  
+    BitstreamStartVirtAddr  = ioremap_nocache(BitstreamStart,  gJpegEncBuff.bufspec->bitstream.buf_size); 
+    debug_level(0,"BitstreamStartVirtAddr is 0x%x \n",(unsigned)BitstreamStartVirtAddr);  
 
 }
 
 #if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8
-#if 1
 static void mfdin_basic_jpeg (unsigned input, unsigned char iformat, unsigned char oformat, unsigned picsize_x, unsigned picsize_y, unsigned char r2y_en)
 {
     unsigned char dsample_en; // Downsample Enable
@@ -915,7 +1030,6 @@ static void mfdin_basic_jpeg (unsigned input, unsigned char iformat, unsigned ch
                                          (2 <<29) | // 0:H264_I_PIC_ALL_4x4, 1:H264_P_PIC_Y_16x16_C_8x8, 2:JPEG_ALL_8x8, 3:Reserved
                                          (0 <<31));  // 0:YC interleaved 1:YC non-interleaved(for JPEG)
 
-
     if(linear_enable == false){
         WRITE_HREG(HCODEC_MFDIN_REG3_CANV,
             (input & 0xffffff)|
@@ -938,76 +1052,34 @@ static void mfdin_basic_jpeg (unsigned input, unsigned char iformat, unsigned ch
     WRITE_HREG(HCODEC_MFDIN_REG8_DMBL,(picsize_x << 12) |(picsize_y << 0));
     WRITE_HREG(HCODEC_MFDIN_REG9_ENDN,(7<<0)| (6<<3)|( 5<<6)|(4<<9) |(3<<12) |(2<<15) |( 1<<18) |(0<<21));
 }
-#else
-void mfdin_basic_jpeg (unsigned iformat, unsigned oformat, unsigned picsize_x, unsigned picsize_y, unsigned r2y_en)
-{    
-	unsigned dsample_en; // Downsample Enable
-    unsigned interp_en;  // Interpolation Enable
-    unsigned y_size;     // 0:16 Pixels for y direction pickup; 1:8 pixels
-    unsigned r2y_mode;   // RGB2YUV Mode, range(0~3)
-    unsigned canv_idx0_bppx; // mfdin_reg3_canv[25:24];  // bytes per pixel in x direction for index0, 0:half 1:1 2:2 3:3
-    unsigned canv_idx1_bppx; // mfdin_reg3_canv[27:26];  // bytes per pixel in x direction for index1-2, 0:half 1:1 2:2 3:3
-    unsigned canv_idx0_bppy; // mfdin_reg3_canv[29:28];  // bytes per pixel in y direction for index0, 0:half 1:1 2:2 3:3
-    unsigned canv_idx1_bppy; // mfdin_reg3_canv[31:30];  // bytes per pixel in y direction for index1-2, 0:half 1:1 2:2 3:3
-
-    unsigned ifmt444,ifmt422,ifmt420;
-    ifmt444 = ((iformat==1) || (iformat==5) || (iformat==8) || (iformat==9) || (iformat==12)) ? 1 : 0;
-    ifmt422 = ((iformat==0) || (iformat==10)) ? 1 : 0;
-    ifmt420 = ((iformat==2) || (iformat==3) || (iformat==4) || (iformat==11)) ? 1 : 0;
-    dsample_en = ((ifmt444 && (oformat!=2)) || (ifmt422 && (oformat==0))) ? 1 : 0;
-    interp_en = ((ifmt422 && (oformat==2)) || (ifmt420 && (oformat!=0))) ? 1 : 0;
-    y_size = (oformat!=0) ? 1 : 0;
-    r2y_mode = 1; // Fixed to 1 (TODO)
-    canv_idx0_bppx = (iformat==1) ? 3 : (iformat==0) ? 2 : 1; 
-    canv_idx1_bppx = (iformat==4) ? 0 : 1; 
-    canv_idx0_bppy = 1; 
-    canv_idx1_bppy = (iformat==5) ? 1 : 0; 
-
-    WRITE_HREG(HCODEC_MFDIN_REG1_CTRL , (iformat << 0) |
-                                         (oformat << 4) |
-                                         (dsample_en <<6) |
-                                         (y_size <<8) |
-                                         (interp_en <<9) |
-                                         (r2y_en <<12) |
-                                         (r2y_mode <<13) |
-                                         (2 <<29) | // 0:H264_I_PIC_ALL_4x4, 1:H264_P_PIC_Y_16x16_C_8x8, 2:JPEG_ALL_8x8, 3:Reserved
-                                         (0 <<31));  // 0:YC interleaved 1:YC non-interleaved(for JPEG)
-    WRITE_HREG(HCODEC_MFDIN_REG3_CANV , (canv_idx1_bppy <<30) |
-                                         (canv_idx0_bppy <<28) |
-                                         (canv_idx1_bppx <<26) |
-                                         (canv_idx0_bppx <<24));
-                                         
-    WRITE_HREG(HCODEC_MFDIN_REG8_DMBL,(picsize_x << 12) |(picsize_y << 0));
-    WRITE_HREG(HCODEC_MFDIN_REG9_ENDN,(7<<0)| (6<<3)|( 5<<6)|(4<<9) |(3<<12) |(2<<15) |( 1<<18) |(0<<21));                                         
-}
-
-#endif
 
 static int  set_jpeg_input_format (jpegenc_mem_type type, jpegenc_frame_fmt input_fmt,jpegenc_frame_fmt output_fmt , unsigned input, unsigned offset, unsigned size, unsigned char need_flush)
 {
     int ret = 0;
     unsigned char iformat = MAX_FRAME_FMT, oformat = MAX_FRAME_FMT, r2y_en = 0;
     unsigned picsize_x, picsize_y;
+    unsigned canvas_w = 0;
     debug_level(0,"************begin set input format**************\n");
-	debug_level(0,"type is %d\n",type);
-	debug_level(0,"fmt is %d\n",input_fmt);
-	debug_level(0,"input is %d\n",input);
-	debug_level(0,"offset is %d\n",offset);
-	debug_level(0,"size is %d\n",size);
-	debug_level(0,"need_flush is %d\n",need_flush);
-	debug_level(0,"************end set input format**************\n");
+    debug_level(0,"type is %d\n",type);
+    debug_level(0,"fmt is %d\n",input_fmt);
+    debug_level(0,"input is %d\n",input);
+    debug_level(0,"offset is %d\n",offset);
+    debug_level(0,"size is %d\n",size);
+    debug_level(0,"need_flush is %d\n",need_flush);
+    debug_level(0,"************end set input format**************\n");
 
     if((input_fmt == FMT_RGB565)||(input_fmt>=MAX_FRAME_FMT))
         return -1;
+
     input_format = input_fmt;
     output_format = output_fmt;
     picsize_x = ((encoder_width+15)>>4)<<4;
     picsize_y = ((encoder_height+15)>>4)<<4;
     if(output_fmt == FMT_YUV422_SINGLE){
-    	oformat = 1;
-	}else{
-		oformat = 0;	
-	}
+        oformat = 1;
+    }else{
+        oformat = 0;	
+    }
     if((type == LOCAL_BUFF)||(type == PHYSICAL_BUFF)){
         if(type == LOCAL_BUFF){
             if(need_flush)
@@ -1021,63 +1093,70 @@ static int  set_jpeg_input_format (jpegenc_mem_type type, jpegenc_frame_fmt inpu
 
         if(input_fmt == FMT_YUV422_SINGLE){
             iformat = 0;
+            canvas_w =  picsize_x*2;
+            canvas_w =  ((canvas_w+31)>>5)<<5;
             canvas_config(ENC_CANVAS_OFFSET+6,
                 input, 
-                picsize_x*2, picsize_y, 
+                canvas_w, picsize_y,
                 CANVAS_ADDR_NOWRAP, CANVAS_BLKMODE_LINEAR);
-           input = ENC_CANVAS_OFFSET+6;            
-        }else if(input_fmt == FMT_YUV444_SINGLE){
+            input = ENC_CANVAS_OFFSET+6;            
+        }else if((input_fmt == FMT_YUV444_SINGLE)||(input_fmt == FMT_RGB888)){
             iformat = 1;
+            if(input_fmt == FMT_RGB888)
+                r2y_en = 1;
+            canvas_w =  picsize_x*3;
+            canvas_w =  ((canvas_w+31)>>5)<<5;
             canvas_config(ENC_CANVAS_OFFSET+6,
-                input, 
-                picsize_x*3, picsize_y, 
+                input,
+                canvas_w, picsize_y,
                 CANVAS_ADDR_NOWRAP, CANVAS_BLKMODE_LINEAR);
-           input = ENC_CANVAS_OFFSET+6;
+            input = ENC_CANVAS_OFFSET+6;
         }else if((input_fmt == FMT_NV21)||(input_fmt == FMT_NV12)){
+            canvas_w =  ((encoder_width+31)>>5)<<5;
             iformat = (input_fmt == FMT_NV21)?2:3;
             canvas_config(ENC_CANVAS_OFFSET+6,
-                input, 
-                picsize_x, picsize_y, 
+                input,
+                canvas_w, picsize_y,
                 CANVAS_ADDR_NOWRAP, CANVAS_BLKMODE_LINEAR);
             canvas_config(ENC_CANVAS_OFFSET+7,
-                input + picsize_x*picsize_y,
-                picsize_x , picsize_y/2,
+                input + canvas_w*picsize_y,
+                canvas_w , picsize_y/2,
                 CANVAS_ADDR_NOWRAP, CANVAS_BLKMODE_LINEAR);
             input = ((ENC_CANVAS_OFFSET+7)<<8)|(ENC_CANVAS_OFFSET+6);
         }else if(input_fmt == FMT_YUV420){
             iformat = 4;
+            canvas_w =  ((encoder_width+63)>>6)<<6;
             canvas_config(ENC_CANVAS_OFFSET+6,
-                input, 
-                picsize_x, picsize_y, 
+                input,
+                canvas_w, picsize_y,
                 CANVAS_ADDR_NOWRAP, CANVAS_BLKMODE_LINEAR);
             canvas_config(ENC_CANVAS_OFFSET+7,
-                input + picsize_x*picsize_y,
-                picsize_x/2, picsize_y/2,
+                input + canvas_w*picsize_y,
+                canvas_w/2, picsize_y/2,
                 CANVAS_ADDR_NOWRAP, CANVAS_BLKMODE_LINEAR);
             canvas_config(ENC_CANVAS_OFFSET+8,
-                input + picsize_x*picsize_y*5/4,
-                picsize_x/2 , picsize_y/2,
+                input + canvas_w*picsize_y*5/4,
+                canvas_w/2 , picsize_y/2,
                 CANVAS_ADDR_NOWRAP, CANVAS_BLKMODE_LINEAR);
             input = ((ENC_CANVAS_OFFSET+8)<<16)|((ENC_CANVAS_OFFSET+7)<<8)|(ENC_CANVAS_OFFSET+6);
-        }else if(input_fmt == FMT_YUV444_PLANE){
+        }else if((input_fmt == FMT_YUV444_PLANE)||(input_fmt == FMT_RGB888_PLANE)){
             iformat = 5;
+            if(input_fmt == FMT_RGB888_PLANE)
+                r2y_en = 1;
+            canvas_w =  ((encoder_width+31)>>5)<<5;
             canvas_config(ENC_CANVAS_OFFSET+6,
-                input, 
-                picsize_x, picsize_y, 
+                input,
+                canvas_w, picsize_y,
                 CANVAS_ADDR_NOWRAP, CANVAS_BLKMODE_LINEAR);
             canvas_config(ENC_CANVAS_OFFSET+7,
-                input + picsize_x*picsize_y,
-                picsize_x, picsize_y,
+                input + canvas_w*picsize_y,
+                canvas_w, picsize_y,
                 CANVAS_ADDR_NOWRAP, CANVAS_BLKMODE_LINEAR);
             canvas_config(ENC_CANVAS_OFFSET+8,
-                input + picsize_x*picsize_y*2,
-                picsize_x, picsize_y,
+                input + canvas_w*picsize_y*2,
+                canvas_w, picsize_y,
                 CANVAS_ADDR_NOWRAP, CANVAS_BLKMODE_LINEAR);
             input = ((ENC_CANVAS_OFFSET+8)<<16)|((ENC_CANVAS_OFFSET+7)<<8)|(ENC_CANVAS_OFFSET+6);
-        }else if(input_fmt == FMT_RGB888){
-            iformat = 8;
-        }else if(input_fmt == FMT_RGB565){
-            iformat = 9;
         }else if(input_fmt == FMT_RGBA8888){
             iformat = 12;
         }
@@ -1095,10 +1174,12 @@ static int  set_jpeg_input_format (jpegenc_mem_type type, jpegenc_frame_fmt inpu
             input = input&0xffff;
         }else if(input_fmt == FMT_YUV420){
             iformat = 4;
-            input = input&0xfffff;
-        }else if(input_fmt == FMT_YUV444_PLANE){
+            input = input&0xffffff;
+        }else if((input_fmt == FMT_YUV444_PLANE)||(input_fmt == FMT_RGB888_PLANE)){
+            if(input_fmt == FMT_RGB888_PLANE)
+                r2y_en = 1;
             iformat = 5;
-            input = input&0xfffff;
+            input = input&0xffffff;
         }else{
             ret = -1;
         }
@@ -1109,19 +1190,28 @@ static int  set_jpeg_input_format (jpegenc_mem_type type, jpegenc_frame_fmt inpu
 }
 #endif
 
-static int encoder_status;
-static irqreturn_t jpegenc_isr(int irq, void *dev_id)
+static void jpegenc_isr_tasklet(ulong data)
 {
-	int temp_canvas;
-	WRITE_HREG(HCODEC_ASSIST_MBOX2_CLR_REG, 1);
-	encoder_status  = READ_HREG(ENCODER_STATUS);
-	if(encoder_status == ENCODER_DONE){
-		debug_level(0,"encoder  is finished %d\n",encoder_status);
-	}	
-	return IRQ_HANDLED;
+    debug_level(0,"encoder  is finished %d\n",encoder_status);
+    if((encoder_status == ENCODER_DONE)&&(process_irq)){
+        atomic_inc(&jpegenc_ready);
+        wake_up_interruptible(&jpegenc_wait);
+    }
 }
 
-void jpegenc_reset(void)
+static irqreturn_t jpegenc_isr(int irq, void *dev_id)
+{
+    WRITE_HREG(HCODEC_ASSIST_MBOX2_CLR_REG, 1);
+    encoder_status  = READ_HREG(ENCODER_STATUS);
+    if(encoder_status == ENCODER_DONE){
+        process_irq = 1;
+        tasklet_schedule(&jpegenc_tasklet);
+    }
+    return IRQ_HANDLED;
+}
+
+#if 0
+static void jpegenc_reset(void)
 {
     READ_VREG(DOS_SW_RESET1);
     READ_VREG(DOS_SW_RESET1);
@@ -1133,8 +1223,9 @@ void jpegenc_reset(void)
     READ_VREG(DOS_SW_RESET1);
 
 }
+#endif
 
-void jpegenc_start(void)
+static void jpegenc_start(void)
 {
     READ_VREG(DOS_SW_RESET1);
     READ_VREG(DOS_SW_RESET1);
@@ -1149,7 +1240,7 @@ void jpegenc_start(void)
     WRITE_HREG(HCODEC_MPSR, 0x0001);
 }
 
-void _jpegenc_stop(void)
+static void _jpegenc_stop(void)
 {
     ulong timeout = jiffies + HZ;
 
@@ -1209,83 +1300,126 @@ s32 jpegenc_loadmc(const u32 *p)
         if (time_before(jiffies, timeout)) {
             schedule();
         } else {
-            printk("vdec load mc error\n");
+            debug_level(1,"hcodec load mc error\n");
             ret = -EBUSY;
             break;
         }
     }
 
     dma_unmap_single(NULL, mc_addr_map, MC_SIZE, DMA_TO_DEVICE);
-
-
     kfree(mc_addr);
     mc_addr = NULL;
-
     return ret;
 }
 
 
 
+#if MESON_CPU_TYPE == MESON_CPU_TYPE_MESON6TV
 #define  DMC_SEC_PORT8_RANGE0  0x840
 #define  DMC_SEC_CTRL  0x829
+#endif
+
 static void enable_hcoder_ddr_access(void)
 {
-	WRITE_SEC_REG(DMC_SEC_PORT8_RANGE0 , 0xffff);
-	WRITE_SEC_REG(DMC_SEC_CTRL , 0x80000000);
+#if MESON_CPU_TYPE == MESON_CPU_TYPE_MESON6TV
+    WRITE_SEC_REG(DMC_SEC_PORT8_RANGE0 , 0xffff);
+    WRITE_SEC_REG(DMC_SEC_CTRL , 0x80000000);
+#endif
+}
+
+bool jpegenc_on(void)
+{
+    bool hcodec_on;
+    unsigned long flags;
+
+    spin_lock_irqsave(&lock, flags);
+
+    hcodec_on = vdec_on(VDEC_HCODEC);
+    hcodec_on |=(encode_opened>0);
+
+    spin_unlock_irqrestore(&lock, flags);
+    return hcodec_on;
 }
 
 static s32 jpegenc_poweron(void)
 {
-	u32 data32 = 0;
-	data32 = 0;
-	enable_hcoder_ddr_access();
+    unsigned long flags;
+    u32 data32 = 0;
+    data32 = 0;
+    enable_hcoder_ddr_access();
+
 #if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8
-	data32 = READ_AOREG(AO_RTI_PWR_CNTL_REG0);
-	data32 = data32 & (~(0x18));
-	WRITE_AOREG(AO_RTI_PWR_CNTL_REG0, data32);
-	udelay(10);
-	// Powerup HCODEC
-	data32 = READ_AOREG(AO_RTI_GEN_PWR_SLEEP0); // [1:0] HCODEC
-	data32 = data32 & (~0x3); 
-	WRITE_AOREG(AO_RTI_GEN_PWR_SLEEP0, data32);
-	udelay(10);
+    //CLK_GATE_ON(DOS);
+    switch_mod_gate_by_name("vdec", 1);
+
+    spin_lock_irqsave(&lock, flags);
+
+    data32 = READ_AOREG(AO_RTI_PWR_CNTL_REG0);
+    data32 = data32 & (~(0x18));
+    WRITE_AOREG(AO_RTI_PWR_CNTL_REG0, data32);
+    udelay(10);
+    // Powerup HCODEC
+    data32 = READ_AOREG(AO_RTI_GEN_PWR_SLEEP0); // [1:0] HCODEC
+    data32 = data32 & (~0x3); 
+    WRITE_AOREG(AO_RTI_GEN_PWR_SLEEP0, data32);
+    udelay(10);
 #endif
-	// Enable Dos internal clock gating
-	jpegenc_clock_enable();
+
+    WRITE_VREG(DOS_SW_RESET1, 0xffffffff);
+    WRITE_VREG(DOS_SW_RESET1, 0);
+
+    // Enable Dos internal clock gating
+    jpegenc_clock_enable();
 #if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8
-	// Remove HCODEC ISO
-	data32 = READ_AOREG(AO_RTI_GEN_PWR_ISO0); 
-	data32 = data32 & (~(0x30));
-	WRITE_AOREG(AO_RTI_GEN_PWR_ISO0, data32);
-	udelay(10);
-	//Powerup HCODEC memories
-	WRITE_VREG(DOS_MEM_PD_HCODEC, 0x0);
-	// Disable auto-clock gate
-	data32 = READ_VREG(DOS_GEN_CTRL0);
-	data32 = data32 | 0x1;
-	WRITE_VREG(DOS_GEN_CTRL0, data32);
-	data32 = READ_VREG(DOS_GEN_CTRL0);
-	data32 = data32 & 0xFFFFFFFE;
-	WRITE_VREG(DOS_GEN_CTRL0, data32);
+    //Powerup HCODEC memories
+    WRITE_VREG(DOS_MEM_PD_HCODEC, 0x0);
+
+    // Remove HCODEC ISO
+    data32 = READ_AOREG(AO_RTI_GEN_PWR_ISO0); 
+    data32 = data32 & (~(0x30));
+    WRITE_AOREG(AO_RTI_GEN_PWR_ISO0, data32);
+    udelay(10);
+
+    // Disable auto-clock gate
+    data32 = READ_VREG(DOS_GEN_CTRL0);
+    data32 = data32 | 0x1;
+    WRITE_VREG(DOS_GEN_CTRL0, data32);
+    data32 = READ_VREG(DOS_GEN_CTRL0);
+    data32 = data32 & 0xFFFFFFFE;
+    WRITE_VREG(DOS_GEN_CTRL0, data32);
+
+    spin_unlock_irqrestore(&lock, flags);
 #endif
-	return 0;
+
+    mdelay(10);
+    return 0;
 }
 
 static s32 jpegenc_poweroff(void)
 {
 #if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8
-	// enable HCODEC isolation
-	WRITE_AOREG(AO_RTI_GEN_PWR_ISO0, READ_AOREG(AO_RTI_GEN_PWR_ISO0) | 0x30);
-	// power off HCODEC memories
-	WRITE_VREG(DOS_MEM_PD_HCODEC, 0xffffffffUL);
-	// disable HCODEC clock
-	jpegenc_clock_disable();
-	// HCODEC power off
-	WRITE_AOREG(AO_RTI_GEN_PWR_SLEEP0, READ_AOREG(AO_RTI_GEN_PWR_SLEEP0) | 0x3);
+    unsigned long flags;
+
+    spin_lock_irqsave(&lock, flags);
+
+    // enable HCODEC isolation
+    WRITE_AOREG(AO_RTI_GEN_PWR_ISO0, READ_AOREG(AO_RTI_GEN_PWR_ISO0) | 0x30);
+    // power off HCODEC memories
+    WRITE_VREG(DOS_MEM_PD_HCODEC, 0xffffffffUL);
+    // disable HCODEC clock
+    jpegenc_clock_disable();
+    // HCODEC power off
+    WRITE_AOREG(AO_RTI_GEN_PWR_SLEEP0, READ_AOREG(AO_RTI_GEN_PWR_SLEEP0) | 0x3);
+
+    spin_unlock_irqrestore(&lock, flags);
+
+    // release DOS clk81 clock gating
+    //CLK_GATE_OFF(DOS);
+    switch_mod_gate_by_name("vdec", 0);
 #else
-	jpegenc_clock_disable();
+    jpegenc_clock_disable();
 #endif
-	return 0;
+    return 0;
 }
 
 static s32 jpegenc_init(void)
@@ -1300,76 +1434,84 @@ static s32 jpegenc_init(void)
         return -EBUSY;
     }	
     debug_level(1,"succeed to load microcode\n");
+    process_irq = 0;
 
     r = request_irq(INT_JPEG_ENCODER, jpegenc_isr, IRQF_SHARED, "jpegenc-irq", (void *)jpeg_enc_id);//INT_MAILBOX_1A
+    WRITE_HREG(ENCODER_STATUS , ENCODER_IDLE);
     encode_inited = 1;
     return 0;
 }
 
-void jpegenc_start_cmd(int cmd, unsigned* input_info)
+static void jpegenc_start_cmd(unsigned* input_info)
 {
     set_jpeg_input_format((jpegenc_mem_type)input_info[0], (jpegenc_frame_fmt)input_info[1], (jpegenc_frame_fmt)input_info[2], input_info[3], input_info[4],input_info[5],(unsigned char)input_info[6]);
 	
-	//prepare_jpeg_header();
-	init_jpeg_encoder();
-	jpegenc_init_output_buffer();
-
-	
-	        /* clear mailbox interrupt */
+    //prepare_jpeg_header();
+    init_jpeg_encoder();
+    jpegenc_init_output_buffer();
+    /* clear mailbox interrupt */
     WRITE_HREG(HCODEC_ASSIST_MBOX2_CLR_REG, 1);
 
     /* enable mailbox interrupt */
     WRITE_HREG(HCODEC_ASSIST_MBOX2_MASK, 1);
-	encoder_status = cmd;
-	WRITE_HREG(ENCODER_STATUS , cmd);
-	jpegenc_start();
-	debug_level(0,"jpegenc_start\n");
+    encoder_status = ENCODER_IDLE;
+    WRITE_HREG(ENCODER_STATUS , ENCODER_IDLE);
+    process_irq = 0;
+    jpegenc_start();
+    debug_level(0,"jpegenc_start\n");
 }
 
-void jpegenc_stop(void)
+static void jpegenc_stop(void)
 {
 #if 0	
-//register dump 
-	int i;
-		/*MFDIN*/
-	for( i = 0x1010 ;i < 0x101b ; i++){
-		debug_level(0,"MFDIN register 0x%x :  0x%x \n",i, READ_HREG(i)); 	
-	}	
-	/*VLC*/
-	for( i = 0x1d00 ;i < 0x1d5d ; i++){
-		debug_level(0,"VLC register 0x%x :  0x%x \n",i, READ_HREG(i)); 	
-	}		
-	/*QDCT*/
-	for( i = 0x1f00 ;i < 0x1f5f ; i++){
-		debug_level(0,"QDCT register 0x%x :  0x%x \n",i, READ_HREG(i)); 	
-	}
+    //register dump 
+    int i;
+    /*MFDIN*/
+    for( i = 0x1010 ;i < 0x101b ; i++){
+        debug_level(0,"MFDIN register 0x%x :  0x%x \n",i, READ_HREG(i)); 	
+    }	
+    /*VLC*/
+    for( i = 0x1d00 ;i < 0x1d5d ; i++){
+        debug_level(0,"VLC register 0x%x :  0x%x \n",i, READ_HREG(i)); 	
+    }		
+    /*QDCT*/
+    for( i = 0x1f00 ;i < 0x1f5f ; i++){
+        debug_level(0,"QDCT register 0x%x :  0x%x \n",i, READ_HREG(i)); 	
+    }
 
-	for( i = 0x1001 ;i < 0x1f5f ; i++){
-		debug_level(0,"register 0x%x :  0x%x \n",i, READ_HREG(i)); 	
-	}	
+    for( i = 0x1001 ;i < 0x1f5f ; i++){
+        debug_level(0,"register 0x%x :  0x%x \n",i, READ_HREG(i)); 	
+    }	
 #endif 		
-	//WRITE_HREG(HCODEC_MPSR, 0);	
-	_jpegenc_stop();
-	jpegenc_poweroff();
-	debug_level(1,"jpegenc_stop\n");
+    //WRITE_HREG(HCODEC_MPSR, 0);	
+    _jpegenc_stop();
+    jpegenc_poweroff();
+    debug_level(1,"jpegenc_stop\n");
 }
+
 static int jpegenc_open(struct inode *inode, struct file *file)
 {
     int r = 0;
     debug_level(1,"jpegenc open\n");
-    if(encode_opened>0){
-        debug_level(2, "jpegenc open busy.\n");
+#ifdef CONFIG_AM_ENCODER
+    if(amvenc_avc_on() == true){
+        debug_level(1,"hcodec in use for AVC Encode now.\n");
         return -EBUSY;
     }
-    encode_opened++;
-#if 0
-    if (jpegenc_poweron() < 0) {
-        debug_level(2, "jpegenc init failed.\n");
-        encode_opened--;
-        return -ENODEV;
-    }
 #endif
-	BitstreamStartVirtAddr = NULL;
+    if(encode_opened>0){
+        debug_level(1, "jpegenc open busy.\n");
+        return -EBUSY;
+    }
+    init_waitqueue_head(&jpegenc_wait);
+    atomic_set(&jpegenc_ready, 0);
+    tasklet_init(&jpegenc_tasklet, jpegenc_isr_tasklet, 0);
+    encode_opened++;
+    BitstreamStartVirtAddr = NULL;
+    memset(gQuantTable, 0 ,sizeof(gQuantTable));
+    gQuantTable_id = 0;
+    gExternalQuantTablePtr = NULL;
+    external_quant_table_available = false;
     return r;
 }
 
@@ -1381,113 +1523,156 @@ static int jpegenc_release(struct inode *inode, struct file *file)
         jpegenc_stop();
         encode_inited = 0;
     }
+    memset(gQuantTable, 0 ,sizeof(gQuantTable));
+    gQuantTable_id = 0;
+    if(gExternalQuantTablePtr)
+        kfree(gExternalQuantTablePtr);
+    gExternalQuantTablePtr = NULL;
+    external_quant_table_available = false;
+    if(BitstreamStartVirtAddr){
+        iounmap(BitstreamStartVirtAddr);
+        BitstreamStartVirtAddr = NULL;
+    }
     if(encode_opened>0)
         encode_opened--;
     debug_level(1,"jpegenc release\n");
-    if(BitstreamStartVirtAddr){
-		iounmap(BitstreamStartVirtAddr);
-		BitstreamStartVirtAddr = NULL;
-    }
     return 0;
 }
+
 static void dma_flush(unsigned buf_start , unsigned buf_size )
 {
     //dma_sync_single_for_cpu(jpegenc_dev,buf_start, buf_size, DMA_TO_DEVICE);
-	dma_sync_single_for_device(jpegenc_dev,buf_start ,buf_size, DMA_TO_DEVICE);
+    dma_sync_single_for_device(jpegenc_dev,buf_start ,buf_size, DMA_TO_DEVICE);
 }
 
 static void cache_flush(unsigned buf_start , unsigned buf_size )
 {
-	dma_sync_single_for_cpu(jpegenc_dev , buf_start, buf_size, DMA_FROM_DEVICE);
-	//dma_sync_single_for_device(jpegenc_dev ,buf_start , buf_size, DMA_FROM_DEVICE);
+    dma_sync_single_for_cpu(jpegenc_dev , buf_start, buf_size, DMA_FROM_DEVICE);
+    //dma_sync_single_for_device(jpegenc_dev ,buf_start , buf_size, DMA_FROM_DEVICE);
 }
 
 static long jpegenc_ioctl(struct file *file,
                            unsigned int cmd, ulong arg)
 {
     int r = 0;
-    int amrisc_cmd = 0;
-    unsigned* offset;
     unsigned* addr_info;
     unsigned buf_start;
+    int quality = 0;
     switch (cmd) {
-    	debug_level(0,"jpegenc cmd is %d , \n" , cmd);
-	case JPEGENC_IOC_GET_ADDR:
-	    *((unsigned*)arg)  = 1;
-		break;
-  
-	case JPEGENC_IOC_NEW_CMD:
-		amrisc_cmd = *((unsigned*)arg) ;
-#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8
-		addr_info = (unsigned*)arg;
-		jpegenc_start_cmd(amrisc_cmd, &addr_info[1]);
-#else
-		jpegenc_start_cmd(amrisc_cmd, NULL);
-#endif
-		break;
-	case JPEGENC_IOC_GET_STAGE:
-		*((unsigned*)arg)  = encoder_status;
-		break; 
-	case JPEGENC_IOC_GET_OUTPUT_SIZE:	
-		*((unsigned*)arg) = READ_HREG(VLC_TOTAL_BYTES);
-		break;
-	case JPEGENC_IOC_SET_ENCODER_WIDTH:
-
-		encoder_width = *((unsigned*)arg) ;
-		break;
-	case JPEGENC_IOC_SET_ENCODER_HEIGHT:
-		encoder_height = *((unsigned*)arg) ;
-		break;	
-	case JPEGENC_IOC_INPUT_FORMAT	:
-		encoder_input_format = *((unsigned*)arg) ;
-		break;	
-	case JPEGENC_IOC_CONFIG_INIT:
-		jpegenc_init();
-		break;		
-	case JPEGENC_IOC_FLUSH_CACHE:
-		addr_info  = (unsigned*)arg ;
-		switch(addr_info[0]){
-			case 0:
-			buf_start = dct_buff_start_addr;
-			break;
-			case 1:
-			buf_start = BitstreamStart ;
-			break;
-			default:
-			buf_start = dct_buff_start_addr;
-			break;
-		}
-		dma_flush(buf_start + addr_info[1] ,addr_info[2] - addr_info[1]);
-		break;
-	case JPEGENC_IOC_FLUSH_DMA:
-		addr_info  = (unsigned*)arg ;
-		switch(addr_info[0]){
-			case 0:
-			buf_start = dct_buff_start_addr;
-			break;
-			case 1:
-			buf_start = BitstreamStart ;
-			break;
-			default:
-			buf_start = dct_buff_start_addr;
-			break;
-		}	    
-		cache_flush(buf_start + addr_info[1] ,addr_info[2] - addr_info[1]);
-		break;
-	case JPEGENC_IOC_GET_BUFFINFO:
-		addr_info  = (unsigned*)arg;
-		break;
-	case JPEGENC_IOC_GET_DEVINFO:
-		strncpy((char *)arg,JPEGENC_DEV_VERSION,strlen(JPEGENC_DEV_VERSION));
-		break;
-	default:
-		r= -1;
-		break;
+        case JPEGENC_IOC_GET_ADDR:
+            *((unsigned*)arg)  = 1;
+            break;
+        case JPEGENC_IOC_NEW_CMD:
+            addr_info = (unsigned*)arg;
+            jpegenc_start_cmd(&addr_info[0]);
+            break;
+        case JPEGENC_IOC_GET_STAGE:
+            *((unsigned*)arg)  = encoder_status;
+            break; 
+        case JPEGENC_IOC_GET_OUTPUT_SIZE:	
+            *((unsigned*)arg) = READ_HREG(VLC_TOTAL_BYTES);
+            break;
+        case JPEGENC_IOC_SET_ENCODER_WIDTH:
+            if(*((unsigned*)arg)>gJpegEncBuff.bufspec->max_width)
+                *((unsigned*)arg) = gJpegEncBuff.bufspec->max_width;
+            else
+                encoder_width = *((unsigned*)arg) ;
+            break;
+        case JPEGENC_IOC_SET_ENCODER_HEIGHT:
+            if(*((unsigned*)arg)>gJpegEncBuff.bufspec->max_height)
+                *((unsigned*)arg) = gJpegEncBuff.bufspec->max_height;
+            else
+                encoder_height = *((unsigned*)arg) ;
+            break;	
+        case JPEGENC_IOC_INPUT_FORMAT	:
+            break;	
+        case JPEGENC_IOC_CONFIG_INIT:
+            jpegenc_init();
+            break;		
+        case JPEGENC_IOC_FLUSH_CACHE:
+            addr_info  = (unsigned*)arg ;
+            switch(addr_info[0]){
+                case 0:
+                    buf_start = dct_buff_start_addr;
+                    break;
+                case 1:
+                    buf_start = BitstreamStart ;
+                    break;
+                default:
+                    buf_start = dct_buff_start_addr;
+                    break;
+            }
+            dma_flush(buf_start + addr_info[1] ,addr_info[2] - addr_info[1]);
+            break;
+        case JPEGENC_IOC_FLUSH_DMA:
+            addr_info  = (unsigned*)arg ;
+            switch(addr_info[0]){
+                case 0:
+                    buf_start = dct_buff_start_addr;
+                    break;
+                case 1:
+                    buf_start = BitstreamStart ;
+                    break;
+                default:
+                    buf_start = dct_buff_start_addr;
+                    break;
+            }	    
+            cache_flush(buf_start + addr_info[1] ,addr_info[2] - addr_info[1]);
+            break;
+        case JPEGENC_IOC_GET_BUFFINFO:
+            addr_info  = (unsigned*)arg;
+            addr_info[0] = gJpegEncBuff.buf_size;
+            addr_info[1] = gJpegEncBuff.bufspec->input.buf_start;
+            addr_info[2] = gJpegEncBuff.bufspec->input.buf_size;
+            addr_info[3] = gJpegEncBuff.bufspec->bitstream.buf_start;
+            addr_info[4] = gJpegEncBuff.bufspec->bitstream.buf_size;
+            break;
+        case JPEGENC_IOC_GET_DEVINFO:
+            strncpy((char *)arg,JPEGENC_DEV_VERSION,strlen(JPEGENC_DEV_VERSION));
+            break;
+        case JPEGENC_IOC_SET_QUALTIY:
+            quality = *((int *)arg) ;
+            jpeg_quality = jpeg_quality_scaling(quality);
+            debug_level(0,"target quality : %d,  jpeg_quality value: %d. \n", quality,jpeg_quality);
+            break;
+        case JPEGENC_IOC_SEL_QUANT_TABLE:
+            quality = *((int *)arg);
+            if(quality<4){
+                gQuantTable_id = quality;
+                debug_level(0,"JPEGENC_IOC_SEL_QUANT_TABLE : %d. \n", quality);
+            }else{
+                gQuantTable_id = 0;
+                debug_level(1,"JPEGENC_IOC_SEL_QUANT_TABLE invaild. target value: %d. \n", quality);
+            }
+            break;
+        case JPEGENC_IOC_SET_EXT_QUANT_TABLE:
+            if(arg == 0){
+                if(gExternalQuantTablePtr)
+                    kfree(gExternalQuantTablePtr);
+                gExternalQuantTablePtr = NULL;
+                external_quant_table_available  = false;
+            }else{
+                void  __user* argp =(void __user*)arg;
+                gExternalQuantTablePtr = kmalloc(sizeof(unsigned short)*DCTSIZE2*2, GFP_KERNEL);
+                if(gExternalQuantTablePtr){
+                    if(copy_from_user(gExternalQuantTablePtr,argp,sizeof(unsigned short)*DCTSIZE2*2)){
+                        r=-1;
+                        break;
+                    }
+                    external_quant_table_available = true;
+                    r = 0;
+                }else{
+                    debug_level(1,"gExternalQuantTablePtr malloc fail \n");
+                    r= -1;
+                }
+            }
+            break;
+        default:
+            r= -1;
+            break;
     }
     return r;
 }
-
-
 
 static int jpegenc_mmap(struct file *filp, struct vm_area_struct *vma)
 {
@@ -1501,15 +1686,27 @@ static int jpegenc_mmap(struct file *filp, struct vm_area_struct *vma)
     off += gJpegEncBuff.buf_start;
     debug_level(0,"vma_size is %d , off is %ld \n" , vma_size ,off);
     vma->vm_flags |= VM_RESERVED | VM_IO;
-    vma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);
+    //vma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);
     if (remap_pfn_range(vma, vma->vm_start, off >> PAGE_SHIFT,
                         vma->vm_end - vma->vm_start, vma->vm_page_prot)) {
         debug_level(1,"set_cached: failed remap_pfn_range\n");
         return -EAGAIN;
     }
-    debug_level(1,"jpegenc_mmap finished\n");
     return 0;
 
+}
+
+static unsigned int jpegenc_poll(struct file *file, poll_table *wait_table)
+{
+    if((encoder_status != ENCODER_DONE)||(process_irq!=1))
+        poll_wait(file, &jpegenc_wait, wait_table);
+
+    if (atomic_read(&jpegenc_ready)) {
+        atomic_dec(&jpegenc_ready);
+        return POLLIN | POLLRDNORM;
+    }
+
+    return 0;
 }
 
 const static struct file_operations jpegenc_fops = {
@@ -1518,6 +1715,7 @@ const static struct file_operations jpegenc_fops = {
     .mmap     = jpegenc_mmap,
     .release  = jpegenc_release,
     .unlocked_ioctl    = jpegenc_ioctl,
+    .poll     = jpegenc_poll,
 };
 
 int  init_jpegenc_device(void)
@@ -1548,21 +1746,59 @@ int uninit_jpegenc_device(void)
     return 0;
 }
 
+static struct resource memobj;
 static int jpegenc_probe(struct platform_device *pdev)
 {
     struct resource *mem;
+    int idx;
 
     debug_level(1, "jpegenc probe start.\n");
 
+#if 0
     if (!(mem = platform_get_resource(pdev, IORESOURCE_MEM, 0))) {
-        debug_level(2, "jpegenc memory resource undefined.\n");
+        debug_level(1, "jpegenc memory resource undefined.\n");
         return -EFAULT;
     }
-
+#else
+    mem = &memobj;
+    idx = find_reserve_block(pdev->dev.of_node->name,0);
+    if(idx < 0){
+        debug_level(1, "jpegenc memory resource undefined.\n");
+        return -EFAULT;
+    }
+    mem->start = (phys_addr_t)get_reserve_block_addr(idx);
+    mem->end = mem->start+ (phys_addr_t)get_reserve_block_size(idx)-1;
+#endif
     gJpegEncBuff.buf_start = mem->start;
     gJpegEncBuff.buf_size = mem->end - mem->start + 1;
-
-    debug_level(1,"jpegenc  memory config sucess, buff size is 0x%x, level is %s\n",gJpegEncBuff.buf_size,(gJpegEncBuff.cur_buf_lev == 0)?"480P":(gJpegEncBuff.cur_buf_lev == 1)?"720P":"1080P");
+    if(gJpegEncBuff.buf_size>=jpegenc_buffspec[JPEGENC_BUFFER_LEVEL_HD].min_buffsize){
+        gJpegEncBuff.cur_buf_lev = JPEGENC_BUFFER_LEVEL_HD;
+        gJpegEncBuff.bufspec = (BuffInfo_t*)&jpegenc_buffspec[JPEGENC_BUFFER_LEVEL_HD];
+    }else if(gJpegEncBuff.buf_size>=jpegenc_buffspec[JPEGENC_BUFFER_LEVEL_13M].min_buffsize){
+        gJpegEncBuff.cur_buf_lev = JPEGENC_BUFFER_LEVEL_13M;
+        gJpegEncBuff.bufspec= (BuffInfo_t*)&jpegenc_buffspec[JPEGENC_BUFFER_LEVEL_13M];
+    }else if(gJpegEncBuff.buf_size>=jpegenc_buffspec[JPEGENC_BUFFER_LEVEL_8M].min_buffsize){
+        gJpegEncBuff.cur_buf_lev = JPEGENC_BUFFER_LEVEL_8M;
+        gJpegEncBuff.bufspec= (BuffInfo_t*)&jpegenc_buffspec[JPEGENC_BUFFER_LEVEL_8M];
+    }else if(gJpegEncBuff.buf_size>=jpegenc_buffspec[JPEGENC_BUFFER_LEVEL_5M].min_buffsize){
+        gJpegEncBuff.cur_buf_lev = JPEGENC_BUFFER_LEVEL_5M;
+        gJpegEncBuff.bufspec= (BuffInfo_t*)&jpegenc_buffspec[JPEGENC_BUFFER_LEVEL_5M];
+    }else if(gJpegEncBuff.buf_size>=jpegenc_buffspec[JPEGENC_BUFFER_LEVEL_3M].min_buffsize){
+        gJpegEncBuff.cur_buf_lev = JPEGENC_BUFFER_LEVEL_3M;
+        gJpegEncBuff.bufspec= (BuffInfo_t*)&jpegenc_buffspec[JPEGENC_BUFFER_LEVEL_3M];
+    }else if(gJpegEncBuff.buf_size>=jpegenc_buffspec[JPEGENC_BUFFER_LEVEL_2M].min_buffsize){
+        gJpegEncBuff.cur_buf_lev = JPEGENC_BUFFER_LEVEL_2M;
+        gJpegEncBuff.bufspec= (BuffInfo_t*)&jpegenc_buffspec[JPEGENC_BUFFER_LEVEL_2M];
+    }else if(gJpegEncBuff.buf_size>=jpegenc_buffspec[JPEGENC_BUFFER_LEVEL_VGA].min_buffsize){
+        gJpegEncBuff.cur_buf_lev = JPEGENC_BUFFER_LEVEL_VGA;
+        gJpegEncBuff.bufspec= (BuffInfo_t*)&jpegenc_buffspec[JPEGENC_BUFFER_LEVEL_VGA];
+    }else{
+        gJpegEncBuff.buf_start = 0;
+        gJpegEncBuff.buf_size = 0;
+        debug_level(1, "jpegenc memory resource too small, size is %d.\n",gJpegEncBuff.buf_size);
+        return -EFAULT;
+    }
+    debug_level(1,"jpegenc  memory config sucess, buff start: 0x%x, buff size is 0x%x, select level: %s \n",gJpegEncBuff.buf_start,gJpegEncBuff.buf_size, glevel_str[gJpegEncBuff.cur_buf_lev]);
     init_jpegenc_device();
     debug_level(1, "jpegenc probe end.\n");
     return 0;
@@ -1604,7 +1840,7 @@ static int __init jpegenc_driver_init_module(void)
     debug_level(1, "jpegenc module init\n");
 
     if (platform_driver_register(&jpegenc_driver)) {
-        debug_level(2, "failed to register jpegenc driver\n");
+        debug_level(1, "failed to register jpegenc driver\n");
         return -ENODEV;
     }
     vcodec_profile_register(&jpegenc_profile);

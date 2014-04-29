@@ -106,6 +106,10 @@ EXPORT_SYMBOL(aml_i2s_playback_start_addr);
 EXPORT_SYMBOL(aml_i2s_capture_start_addr);
 EXPORT_SYMBOL(aml_pcm_playback_off);
 EXPORT_SYMBOL(aml_i2s_playback_enable);
+EXPORT_SYMBOL(aml_pcm_playback_phy_start_addr);
+EXPORT_SYMBOL(aml_pcm_playback_phy_end_addr);
+EXPORT_SYMBOL(aml_pcm_capture_phy_start_addr);
+EXPORT_SYMBOL(aml_pcm_capture_phy_end_addr);
 
 static void aml_codec_power_switch_queue(struct work_struct* work)
 {

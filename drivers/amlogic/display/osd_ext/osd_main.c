@@ -1270,7 +1270,7 @@ static struct device_attribute osd_ext_attrs[] = {
 	__ATTR(order, S_IRUGO | S_IWUSR, show_order, store_order),
 	__ATTR(enable_3d, S_IRUGO | S_IWUSR, show_enable_3d, store_enable_3d),
 	__ATTR(preblend_enable, S_IRUGO | S_IWUSR, show_preblend_enable, store_preblend_enable),
-	__ATTR(free_scale, S_IRUGO | S_IWUSR, show_free_scale, store_free_scale),
+	__ATTR(free_scale, S_IRUGO | S_IWUSR | S_IWGRP, show_free_scale, store_free_scale),
 	__ATTR(scale_axis, S_IRUGO|S_IWUSR, show_scale_axis, store_scale_axis),
 	__ATTR(scale_width, S_IRUGO | S_IWUSR, show_scale_width, store_scale_width),
 	__ATTR(scale_height, S_IRUGO | S_IWUSR, show_scale_height, store_scale_height),
@@ -1285,9 +1285,9 @@ static struct device_attribute osd_ext_attrs[] = {
 	__ATTR(video_hole, S_IRUGO | S_IWUSR, show_video_hole, store__video_hole),
 	__ATTR(window_axis, S_IRUGO|S_IWUSR, show_window_axis, store_window_axis),
 	__ATTR(freescale_mode, S_IRUGO|S_IWUSR, show_freescale_mode, store_freescale_mode),
-	__ATTR(clone, S_IRUGO|S_IWUSR, show_clone, store_clone),
+	__ATTR(clone, S_IRUGO|S_IWUSR|S_IWGRP, show_clone, store_clone),
 	__ATTR(angle, S_IRUGO|S_IWUSR, show_angle, store_angle),
-	__ATTR(prot_on, S_IRUGO|S_IWUSR, show_rotate_on, store_rotate_on),
+	__ATTR(prot_on, S_IRUGO|S_IWUSR|S_IWGRP, show_rotate_on, store_rotate_on),
 	__ATTR(prot_angle, S_IRUGO|S_IWUSR, show_rotate_angle, store_rotate_angle),
 	__ATTR(prot_canvas, S_IRUGO|S_IWUSR, show_prot_canvas, store_prot_canvas),
 };
@@ -1367,6 +1367,7 @@ osd_ext_probe(struct platform_device *pdev)
 	logo_object_t  *init_logo_obj = NULL;
 	int  logo_osd_ext_index = 0, i;
 	myfb_dev_t 	*fbdev = NULL;
+	int osd_ext_memory = 0;	//0:don't need osd_ext memory,1:need osd_ext memory
 
 	vout2_register_client(&osd_ext_notifier_nb);
 
@@ -1376,6 +1377,12 @@ osd_ext_probe(struct platform_device *pdev)
 		osddev_ext_init();
 	}
 	vinfo = get_current_vinfo2();
+
+	ret = of_property_read_u32_array(pdev->dev.of_node, "need-memory", &osd_ext_memory, 1);
+	if(ret){
+		printk("don't find need osd_ext memory from mesonfb_ext-dts\n");
+	}
+
 	for (index = 0; index < OSD_COUNT; index++) {
 		//platform resource
 #if 0
@@ -1391,15 +1398,17 @@ osd_ext_probe(struct platform_device *pdev)
 			continue ;
 		}
 #else
-		mem = &memobj;
-		ret = find_reserve_block(pdev->dev.of_node->name,index);
-		if(ret < 0){
-			amlog_level(LOG_LEVEL_HIGH,"can not find %s%d reserve block\n",pdev->dev.of_node->name,index);
-			r = -EFAULT;
-			goto failed2;
+		if(osd_ext_memory){
+			mem = &memobj;
+			ret = find_reserve_block(pdev->dev.of_node->name,index);
+			if(ret < 0){
+				amlog_level(LOG_LEVEL_HIGH,"can not find %s%d reserve block\n",pdev->dev.of_node->name,index);
+				r = -EFAULT;
+				goto failed2;
+			}
+			mem->start = (phys_addr_t)get_reserve_block_addr(ret);
+			mem->end = mem->start+ (phys_addr_t)get_reserve_block_size(ret)-1;
 		}
-		mem->start = (phys_addr_t)get_reserve_block_addr(ret);
-		mem->end = mem->start+ (phys_addr_t)get_reserve_block_size(ret)-1;
 #endif
 		fbi = framebuffer_alloc(sizeof(struct myfb_dev), &pdev->dev);
 		if (!fbi) {
@@ -1417,14 +1426,19 @@ osd_ext_probe(struct platform_device *pdev)
 		fix = &fbi->fix;
 
 		gp_fbdev_list[index] = fbdev;
-		fbdev->fb_mem_paddr = mem->start;
-		fbdev->fb_len = mem->end - mem->start + 1;
-		fbdev->fb_mem_vaddr = ioremap_wc(fbdev->fb_mem_paddr, fbdev->fb_len);
 
-		if (!fbdev->fb_mem_vaddr) {
-			amlog_level(LOG_LEVEL_HIGH, "failed to ioremap framebuffer\n");
-			r = -ENOMEM;
-			goto failed1;
+		if(osd_ext_memory){
+			fbdev->fb_mem_paddr = mem->start;
+			fbdev->fb_len = mem->end - mem->start + 1;
+			fbdev->fb_mem_vaddr = ioremap_wc(fbdev->fb_mem_paddr, fbdev->fb_len);
+
+			if (!fbdev->fb_mem_vaddr) {
+				amlog_level(LOG_LEVEL_HIGH, "failed to ioremap framebuffer\n");
+				r = -ENOMEM;
+				goto failed1;
+			}
+		}else{
+			fbdev->fb_mem_paddr = 0;		//osd_ext don't need memory
 		}
 
 		//clear framebuffer memory
@@ -1477,10 +1491,14 @@ osd_ext_probe(struct platform_device *pdev)
 			r = -ENOENT;
 			goto failed1;
 		}
-		Bpp = (fbdev->color->color_index > 8 ? (fbdev->color->color_index > 16 ? (fbdev->color->color_index > 24 ? 4 : 3) : 2) : 1);
-		fix->line_length = var->xres_virtual * Bpp;
-		fix->smem_start = fbdev->fb_mem_paddr;
-		fix->smem_len = fbdev->fb_len;
+
+		if(osd_ext_memory){
+			Bpp = (fbdev->color->color_index > 8 ? (fbdev->color->color_index > 16 ? (fbdev->color->color_index > 24 ? 4 : 3) : 2) : 1);
+			fix->line_length = var->xres_virtual * Bpp;
+			fix->smem_start = fbdev->fb_mem_paddr;
+			fix->smem_len = fbdev->fb_len;
+		}
+
 		if (fb_alloc_cmap(&fbi->cmap, 16, 0) != 0) {
 			amlog_level(LOG_LEVEL_HIGH, "unable to allocate color map memory\n");
 			r = -ENOMEM;
@@ -1495,8 +1513,12 @@ osd_ext_probe(struct platform_device *pdev)
 		memset(fbi->pseudo_palette, 0, sizeof(u32) * 16);
 
 		fbi->fbops = &osd_ext_ops;
-		fbi->screen_base = (char __iomem *)fbdev->fb_mem_vaddr ;
-		fbi->screen_size = fix->smem_len;
+
+		if(osd_ext_memory){
+			fbi->screen_base = (char __iomem *)fbdev->fb_mem_vaddr ;
+			fbi->screen_size = fix->smem_len;
+		}
+
 		set_default_display_axis(&fbdev->fb_info->var, &fbdev->osd_ext_ctl, vinfo);
 		osd_ext_check_var(var, fbi);
 		register_framebuffer(fbi);

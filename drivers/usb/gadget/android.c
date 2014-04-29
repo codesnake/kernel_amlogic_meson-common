@@ -1522,6 +1522,7 @@ static int __init init(void)
 	err = usb_composite_probe(&android_usb_driver);
 	if (err) {
 		pr_err("%s: failed to probe driver %d", __func__, err);
+		device_destroy(android_class, dev->dev->devt);
 		goto err_create;
 	}
 

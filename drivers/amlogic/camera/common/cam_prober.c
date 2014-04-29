@@ -364,7 +364,17 @@ int sp0a19_v4l2_probe(struct i2c_adapter *adapter)
     return ret;
 }
 #endif
-
+#ifdef CONFIG_VIDEO_AMLOGIC_CAPTURE_SP2518
+int sp2518_v4l2_probe(struct i2c_adapter *adapter)
+{
+    int ret = 0;
+    unsigned char reg;
+    reg = aml_i2c_get_byte_add8(adapter, 0x30, 0x02);
+    if (reg == 0x53)
+        ret = 1;
+    return ret;
+}
+#endif
 #ifdef CONFIG_VIDEO_AMLOGIC_CAPTURE_SP0838
 int sp0838_v4l2_probe(struct i2c_adapter *adapter)
 {
@@ -464,6 +474,19 @@ int __init sp1628_v4l2_probe(struct i2c_adapter *adapter)
 	reg[0] = aml_i2c_get_byte_add8(adapter, 0x3c, 0x02);
 	reg[1] = aml_i2c_get_byte_add8(adapter, 0x3c, 0xa0);
 	if (reg[0] == 0x16 && reg[1] == 0x28)
+		ret = 1;
+    return ret;
+}
+#endif
+
+#ifdef CONFIG_VIDEO_AMLOGIC_CAPTURE_BF3720
+int __init bf3720_v4l2_probe(struct i2c_adapter *adapter)
+{
+    int ret = 0;
+	unsigned char reg[2];   
+	reg[0] = aml_i2c_get_byte_add8(adapter, 0x6e, 0xfc);
+	reg[1] = aml_i2c_get_byte_add8(adapter, 0x6e, 0xfd);
+	if (reg[0] == 0x37 && reg[1] == 0x20)
 		ret = 1;
     return ret;
 }
@@ -635,6 +658,17 @@ static aml_cam_dev_info_t cam_devs[] = {
 		.probe_func = sp0838_v4l2_probe,
 	},
 #endif
+		
+#ifdef CONFIG_VIDEO_AMLOGIC_CAPTURE_SP2518
+	{
+		.addr = 0x30,
+		.name = "sp2518",
+		.pwdn = 1,
+		.max_cap_size = SIZE_1600X1200,
+		.probe_func = sp2518_v4l2_probe,
+	},
+#endif
+
 #ifdef CONFIG_VIDEO_AMLOGIC_CAPTURE_HI253
 	{
 		.addr = 0x20,
@@ -687,6 +721,15 @@ static aml_cam_dev_info_t cam_devs[] = {
 		.pwdn = 1,
 		.max_cap_size = SIZE_1280X960,
 		.probe_func = sp1628_v4l2_probe,
+	},
+#endif
+#ifdef CONFIG_VIDEO_AMLOGIC_CAPTURE_BF3720
+	{
+		.addr = 0x6e,
+		.name = "bf3720",
+		.pwdn = 1,
+		.max_cap_size = SIZE_1600X1200,
+		.probe_func = bf3720_v4l2_probe,
 	},
 #endif
 
@@ -880,8 +923,8 @@ static int fill_csi_dev(struct device_node* p_node, aml_cam_info_t* cam_dev)
 {
 	const char* str;
 	int ret = 0;
-	aml_cam_dev_info_t* cam_info = NULL;
-	struct i2c_adapter *adapter;
+	//aml_cam_dev_info_t* cam_info = NULL;
+	//struct i2c_adapter *adapter;
 
 	ret = of_property_read_string(p_node, "clk_channel", &str);
 	if (ret) {

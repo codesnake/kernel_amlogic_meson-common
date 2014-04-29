@@ -27,6 +27,10 @@
 #if defined(CONFIG_PLAT_MESON)
 #include <mach/cpu.h>
 #endif
+#ifdef CONFIG_MESON_TRUSTZONE
+#include <mach/meson-secure.h>
+#endif
+
 char *of_fdt_get_string(struct boot_param_header *blob, u32 offset)
 {
 	return ((char *)blob) +
@@ -625,6 +629,11 @@ unsigned long long phys_offset=0;
 
 #define FIRMWARE_ADDR 0x9ff00000
 
+#ifdef CONFIG_MESON_TRUSTZONE
+#define EARLY_RESERVED_MEM_SIZE	(DSP_MEM_SIZE+MESON_TRUSTZONE_MEM_SIZE)
+#else
+#define EARLY_RESERVED_MEM_SIZE	(DSP_MEM_SIZE)
+#endif
 #define MEM_BLOCK1_SIZE	0x4000000
 
 struct reserve_mem{
@@ -658,7 +667,7 @@ int init_reserve_mgr(void)
 
 unsigned long long get_reserve_end(void)
 {
-	return pReserve_Manager->current_addr_from_low+aml_reserved_start+DSP_MEM_SIZE-1;
+	return pReserve_Manager->current_addr_from_low+aml_reserved_start+EARLY_RESERVED_MEM_SIZE-1;
 }
 
 unsigned long long get_high_reserve_size(void)
@@ -711,7 +720,7 @@ unsigned long long get_reserve_block_addr(int blockid)
 
 	if(prm->flag)
 	{
-		addr = prm->startaddr+aml_reserved_start+DSP_MEM_SIZE;
+		addr = prm->startaddr+aml_reserved_start+EARLY_RESERVED_MEM_SIZE;
 	}
 	else
 	{
@@ -861,7 +870,7 @@ int __init early_init_dt_scan_memory(unsigned long node, const char *uname,
 
 	set_memory_start_addr(phys_offset);
 	set_memory_total_size(total);
-#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8
+#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6TV
 	early_init_dt_add_memory_arch(aml_reserved_end+1,phys_offset+total-aml_reserved_end-1-high_reserve_size);
 #else
 	if(aml_reserved_end+1 > FIRMWARE_ADDR)
@@ -889,8 +898,8 @@ int __init early_init_dt_scan_memory(unsigned long node, const char *uname,
 		{
 			pr_info("\t%s(low)   \t: 0x%08llx - 0x%08llx (%3ld MiB)\n",
 				prm->name,
-				prm->startaddr + aml_reserved_start+DSP_MEM_SIZE ,
-				prm->startaddr + prm->size + aml_reserved_start+DSP_MEM_SIZE,
+				prm->startaddr + aml_reserved_start+EARLY_RESERVED_MEM_SIZE ,
+				prm->startaddr + prm->size + aml_reserved_start+EARLY_RESERVED_MEM_SIZE,
 				(unsigned long)(prm->size >> 20));
 		}
 		else

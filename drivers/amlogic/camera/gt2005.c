@@ -2177,14 +2177,14 @@ static int vidioc_streamon(struct file *file, void *priv, enum v4l2_buf_type i)
 	para.frame_rate = gt2005_frmintervals_active.denominator;
 	para.h_active = gt2005_h_active;
 	para.v_active = gt2005_v_active;
-    para.hsync_phase = 1;
+	para.hsync_phase = 1;
 	para.vsync_phase = 1;
 	para.hs_bp = 0;
 	para.vs_bp = 2;
 	para.cfmt = TVIN_YUV422;
 	para.scan_mode = TVIN_SCAN_MODE_PROGRESSIVE;
 	para.skip_count =  2; //skip_num
-    printk("gt2005,h=%d, v=%d, frame_rate=%d\n", 
+	printk("gt2005,h=%d, v=%d, frame_rate=%d\n", 
 		gt2005_h_active, gt2005_v_active, gt2005_frmintervals_active.denominator);
 	ret =  videobuf_streamon(&fh->vb_vidq);
 	if(ret == 0){
@@ -2352,6 +2352,11 @@ static int gt2005_open(struct file *file)
 	struct gt2005_device *dev = video_drvdata(file);
 	struct gt2005_fh *fh = NULL;
 	int retval = 0;
+#if CONFIG_CMA
+    retval = vm_init_buf(16*SZ_1M);
+    if(retval <0)
+        return -1;
+#endif
 #if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6
 	switch_mod_gate_by_name("ge2d", 1);
 #endif		
@@ -2488,6 +2493,9 @@ static int gt2005_close(struct file *file)
 	switch_mod_gate_by_name("ge2d", 0);
 #endif		
 	wake_unlock(&(dev->wake_lock));
+#ifdef CONFIG_CMA
+    vm_deinit_buf();
+#endif
 	return 0;
 }
 

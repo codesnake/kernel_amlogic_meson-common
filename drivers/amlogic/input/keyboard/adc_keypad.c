@@ -44,15 +44,16 @@
 #include <linux/amlogic/input/adc_keypad.h>
 #include <linux/of.h>
 
-struct kp {
-        int (*led_control)(void *param);
-	int *led_control_param;
+#define POLL_PERIOD_WHEN_KEY_DOWN 10 /* unit msec */
+#define POLL_PERIOD_WHEN_KEY_UP   50
+#define KEY_JITTER_COUNT  2  /*  2 * POLL_PERIOD_WHEN_KEY_DOWN msec */
 
+struct kp {
 	struct input_dev *input;
 	struct timer_list timer;
-	unsigned int cur_keycode;
-    unsigned int report_code;
-	unsigned int tmp_code;
+	unsigned int report_code;
+	unsigned int code;
+	unsigned int poll_period;
 	int count;	
 	int config_major;
 	char config_name[20];
@@ -101,110 +102,55 @@ static void kp_work(struct kp *kp)
 {
 	int code = kp_search_key(kp);
 
-	if ((!code) && (!kp->cur_keycode)) {
+  if (code) {
+    kp->poll_period = POLL_PERIOD_WHEN_KEY_DOWN;
+  }
+	if ((!code) && (!kp->report_code)) {
+	  if (kp->poll_period < POLL_PERIOD_WHEN_KEY_UP) kp->poll_period++;
 		return;
 	}
-	else if (code != kp->tmp_code) {
-		kp->tmp_code = code;
+	else if (code != kp->code) {
+		kp->code = code;
 		kp->count = 0;
 	}
-	else if(++kp->count == 2) {
-		if (kp->cur_keycode != code) {
-			if (!code) {
+	else if (kp->count < KEY_JITTER_COUNT) {
+	  kp->count++;
+  }
+	else {
+		if (kp->report_code != code) {
+			if (!code) { /* key up */
 				printk("key %d up\n", kp->report_code);
 				input_report_key(kp->input, kp->report_code, 0);
 				input_sync(kp->input);
 			}
-			else if (!kp->cur_keycode) {
+			else if (!kp->report_code) { /* key down */
 				printk("key %d down\n", code);
 				input_report_key(kp->input, code, 1);
-				kp->report_code = code;
 				input_sync(kp->input);
-	//				if (kp->led_control && (code!=KEY_PAGEUP) && (code!=KEY_PAGEDOWN)){
-	//					kp->led_control_param[0] = 1;
-	//					kp->led_control_param[1] = code;
-	//		    			timer_count = kp->led_control(kp->led_control_param);
-	//				}
 				}
-				else {
-	//				if (kp->led_control){
-	//					kp->led_control_param[0] = 2;
-	//					kp->led_control_param[1] = code;
-	//		    			timer_count = kp->led_control(kp->led_control_param);
-	//				}
+			else { /* another key down when 1st key still pressing */
+				printk("key %d up(f)\n", kp->report_code);
+				input_report_key(kp->input, kp->report_code, 0);
+				printk("key %d down(f)\n", code);
+				input_report_key(kp->input, code, 1);		
+				input_sync(kp->input);
 				}
-			kp->cur_keycode = code;
+			kp->report_code = code;
 		}
 	}
 }
 
 static void update_work_func(struct work_struct *work)
 {
-    struct kp *kp_data = container_of(work, struct kp, work_update);
-
-#if 1
-    kp_work(kp_data);
-
-    if (kp_data->led_control ){
-	if (timer_count>0)
-	{
-		timer_count++;
-	}
-	if (50 == timer_count){
-		kp_data->led_control_param[0] = 0;
-		timer_count = kp_data->led_control(kp_data->led_control_param);
-	}
-    }
-#else
-    unsigned int result;
-    result = get_adc_sample();
-    if (result>=0x3e0){
-        if (kp_data->cur_keycode != 0){
-            input_report_key(kp_data->input,kp_data->cur_keycode, 0);	
-            kp_data->cur_keycode = 0;
-		        printk("adc ch4 sample = %x, keypad released.\n", result);
-        }
-    }
-	else if (result>=0x0 && result<0x60 ) {
-		if (kp_data->cur_keycode!=KEY_HOME){
-    	  kp_data->cur_keycode = KEY_HOME;
-    	  input_report_key(kp_data->input,kp_data->cur_keycode, 1);	
-    	  printk("adc ch4 sample = %x, keypad pressed.\n", result);
-		}
-    }
-	else if (result>=0x110 && result<0x170 ) {
-		if (kp_data->cur_keycode!=KEY_ENTER){
-    	  kp_data->cur_keycode = KEY_ENTER;
-    	  input_report_key(kp_data->input,kp_data->cur_keycode, 1);	
-    	  printk("adc ch4 sample = %x, keypad pressed.\n", result);
-		}
-    }
-	else if (result>=0x240 && result<0x290 ) {
-		if (kp_data->cur_keycode!= KEY_LEFTMETA ){
-    	  kp_data->cur_keycode = KEY_LEFTMETA;
-    	  input_report_key(kp_data->input,kp_data->cur_keycode, 1);	
-    	  printk("adc ch4 sample = %x, keypad pressed.\n", result);
-		}
-    }
-	else if (result>=0x290 && result<0x380 ) {
-		if (kp_data->cur_keycode!= KEY_TAB ){
-    	  kp_data->cur_keycode = KEY_TAB;
-    	  input_report_key(kp_data->input,kp_data->cur_keycode, 1);	
-    	  printk("adc ch4 sample = %x, keypad pressed.\n", result);
-    }
-    }
-    else{
-		printk("adc ch4 sample = unknown key %x, pressed.\n", result);
-    }
-#endif
-
+    struct kp *kp = container_of(work, struct kp, work_update);
+    kp_work(kp);
 }
 
 static void kp_timer_sr(unsigned long data)
 {
-    struct kp *kp_data=(struct kp *)data;
-    schedule_work(&(kp_data->work_update));
-    mod_timer(&kp_data->timer,jiffies+msecs_to_jiffies(25));
+    struct kp *kp=(struct kp *)data;
+    schedule_work(&(kp->work_update));
+    mod_timer(&kp->timer,jiffies+msecs_to_jiffies(kp->poll_period));
 }
 
 static int
@@ -334,10 +280,8 @@ static int kp_probe(struct platform_device *pdev)
 		pdata = pdev->dev.platform_data;
 #endif
     kp = kzalloc(sizeof(struct kp), GFP_KERNEL);
-    kp->led_control_param = kzalloc((sizeof(int)*pdata->led_control_param_num), GFP_KERNEL);
     input_dev = input_allocate_device();
-    if (!kp ||!kp->led_control_param || !input_dev) {
-        kfree(kp->led_control_param);
+    if (!kp || !input_dev) {
         kfree(kp);
         input_free_device(input_dev);
         state = -ENOMEM;
@@ -347,8 +291,9 @@ static int kp_probe(struct platform_device *pdev)
 
     platform_set_drvdata(pdev, pdata);
     kp->input = input_dev;
-    kp->cur_keycode = 0;
-		kp->tmp_code = 0;
+    kp->report_code = 0;
+		kp->code = 0;
+		kp->poll_period = POLL_PERIOD_WHEN_KEY_UP;
 		kp->count = 0;
      
     INIT_WORK(&(kp->work_update), update_work_func);
@@ -362,9 +307,6 @@ static int kp_probe(struct platform_device *pdev)
         
     kp->key = pdata->key;
     kp->key_num = pdata->key_num;
-    if (pdata->led_control){
-    	kp->led_control = pdata->led_control;
-    }
 
     key = pdata->key;
     kp->chan_num = 0;
@@ -405,7 +347,6 @@ static int kp_probe(struct platform_device *pdev)
     ret = input_register_device(kp->input);
     if (ret < 0) {
         printk(KERN_ERR "Unable to register keypad input device.\n");
-		    kfree(kp->led_control_param);
 		    kfree(kp);
 		    input_free_device(input_dev);
 		    state = -EINVAL;
@@ -431,14 +372,6 @@ static int kp_remove(struct platform_device *pdev)
     struct adc_kp_platform_data *pdata = platform_get_drvdata(pdev);
     struct kp *kp = gp_kp;
 
-#if 0
-    if (kp->p_led_timer){
-    	del_timer_sync(kp->p_led_timer);
-    	kfree(kp->p_led_timer);
-	kp->p_led_timer = NULL;
-    }
-#endif
-    kp->led_control(0);
     input_unregister_device(kp->input);
     input_free_device(kp->input);
     unregister_chrdev(kp->config_major,kp->config_name);
@@ -448,7 +381,6 @@ static int kp_remove(struct platform_device *pdev)
         device_destroy(kp->config_class,MKDEV(kp->config_major,0));
         class_destroy(kp->config_class);
     }
-    kfree(kp->led_control_param);
     kfree(kp);
 #ifdef CONFIG_OF
 	kfree(pdata->key);

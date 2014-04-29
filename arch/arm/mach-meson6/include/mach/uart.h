@@ -28,5 +28,5 @@
 						((void *)P_UART3_WFIFO)
 #define MESON_UART_IRQS		INT_UART_AO, INT_UART_0, INT_UART_1, INT_UART_2    \
 						, INT_UART_3
-
+#define MESON_UART_CLK_NAME "NULL","uart0","uart1","uart2","uart3"
 #endif

@@ -132,6 +132,7 @@ struct aml_rtc_priv{
 };
 
 static void reset_gpo_work(struct work_struct *work);
+static int get_gpo_flag(void);
 
 static void delay_us(int us)
 {
@@ -334,7 +335,7 @@ static unsigned int _ser_access_read_locked(unsigned long addr)
 	int s_nrdy_cnt = 0;
 	int rst_times = 0;
 	if (get_rtc_status())
-		return;
+		return 0;
 	while(rtc_comm_init()<0){
 		RTC_DBG(RTC_DBG_VAL, "aml_rtc -- rtc_common_init fail\n");
 		if(s_nrdy_cnt>RESET_RETRY_TIMES) {
@@ -384,7 +385,7 @@ static void _ser_access_write_locked(unsigned long addr, unsigned long data)
 	rtc_send_addr_data(1,addr);
 	rtc_set_mode(1); //Write
 out:
-	return 0;
+	return;
 }
 
 static unsigned int ser_access_read(unsigned long addr)
@@ -631,6 +632,17 @@ static int aml_rtc_suspend(struct platform_device *pdev, pm_message_t state)
 #endif /* CONFIG_MESON_SUSPEND_TEST */
 	return 0;
 }
+int aml_rtc_resume(struct platform_device *pdev)
+{	
+#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6	
+		ser_access_write(RTC_GPO_COUNTER_ADDR,0x500000);
+#else		
+		ser_access_write(RTC_GPO_COUNTER_ADDR,0x100000);
+#endif						
+	
+	printk("resume reset gpo !\n");
+	return 0;
+}
 
 static char *rtc_reg[8]={
 	"RTC_COUNTER    ",
@@ -759,6 +771,7 @@ unsigned int aml_read_rtc_mem_reg(unsigned char reg_id)
 		return 0;
 	return  ser_access_read(reg_array[reg_id]);
 }
+EXPORT_SYMBOL(aml_read_rtc_mem_reg);
 
 int aml_write_rtc_mem_reg(unsigned char reg_id, unsigned int data)
 {
@@ -772,6 +785,7 @@ int aml_write_rtc_mem_reg(unsigned char reg_id, unsigned int data)
 		return 0;
 	return  ser_access_write(reg_array[reg_id], data);
 }
+EXPORT_SYMBOL(aml_write_rtc_mem_reg);
 
 unsigned int aml_get_rtc_counter(void)
 {
@@ -779,6 +793,7 @@ unsigned int aml_get_rtc_counter(void)
     val = ser_access_read(RTC_COUNTER_ADDR);
     return val;
 }
+EXPORT_SYMBOL(aml_get_rtc_counter);
 
 static void reset_gpo_work(struct work_struct *work)
 {
@@ -851,6 +866,7 @@ struct platform_driver aml_rtc_driver = {
 //	.remove = __devexit_p(aml_rtc_remove),
 	.remove = (aml_rtc_remove),
 	.suspend = aml_rtc_suspend,
+	.resume=aml_rtc_resume,
 	.shutdown = aml_rtc_shutdown,
 };
 

@@ -440,13 +440,14 @@ struct sp2518_fh {
 	return container_of(dev, struct sp2518_fh, dev);
 }*/
 
-static struct v4l2_frmsize_discrete sp2518_prev_resolution[2]= //should include 352x288 and 640x480, those two size are used for recording
+static struct v4l2_frmsize_discrete sp2518_prev_resolution[]= //should include 352x288 and 640x480, those two size are used for recording
 {
+	{320,240},
 	{352,288},
 	{640,480},
 };
 
-static struct v4l2_frmsize_discrete sp2518_pic_resolution[2]=
+static struct v4l2_frmsize_discrete sp2518_pic_resolution[]=
 {
 	{1600,1200},
 	{800,600}
@@ -2352,7 +2353,7 @@ static int vidioc_enum_framesizes(struct file *file, void *fh,struct v4l2_frmsiz
 	return ret;
 }
 
-static int vidioc_s_std(struct file *file, void *priv, v4l2_std_id *i)
+static int vidioc_s_std(struct file *file, void *priv, v4l2_std_id i)
 {
 	return 0;
 }
@@ -2456,6 +2457,11 @@ static int sp2518_open(struct file *file)
 	struct sp2518_device *dev = video_drvdata(file);
 	struct sp2518_fh *fh = NULL;
 	int retval = 0;
+#if CONFIG_CMA
+    retval = vm_init_buf(16*SZ_1M);
+    if(retval <0)
+        return -1;
+#endif
 #if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6
 	switch_mod_gate_by_name("ge2d", 1);
 #endif		
@@ -2587,6 +2593,9 @@ static int sp2518_close(struct file *file)
 	switch_mod_gate_by_name("ge2d", 0);
 #endif		
 	wake_unlock(&(dev->wake_lock));
+#ifdef CONFIG_CMA
+    vm_deinit_buf();
+#endif
 	return 0;
 }
 

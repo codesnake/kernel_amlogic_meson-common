@@ -22,16 +22,6 @@ enum {
 	MEDIAN_AVG_8,
 };
 
-struct calibration {
-	int ref;
-	int val;
-};
-
-struct saradc_platform_data{
-	struct calibration *cal;
-	int cal_num;
-};
-
 // touchscreen command
 enum {
 	CMD_GET_X = 0,
@@ -46,5 +36,5 @@ enum {
 
 extern int get_adc_sample(int chan);
 extern int saradc_ts_service(int cmd);
-extern int  get_cpu_temp();
+extern int  get_cpu_temp(void);
 #endif

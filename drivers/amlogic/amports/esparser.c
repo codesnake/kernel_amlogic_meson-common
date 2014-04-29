@@ -35,8 +35,7 @@
 #include <asm/atomic.h>
 
 #include <mach/am_regs.h>
-
-
+#include <linux/delay.h>
 
 #include "vdec_reg.h"
 #include "streambuf_reg.h"
@@ -121,7 +120,7 @@ static ssize_t _esparser_write(const char __user *buf,
     } else {
         parser_type = PARSER_SUBPIC;
     }
-
+	
     wp = buf_rp(type);
 
     if (r > 0) {
@@ -427,6 +426,11 @@ void esparser_release(struct stream_buf_s *buf)
         return;
     }
 
+    if (atomic_read(&esparser_use_count) == 0) {
+        printk("[%s:%d]###warning, esparser has been released already\n", __FUNCTION__, __LINE__);
+        return;
+    }
+    
     if (atomic_dec_and_test(&esparser_use_count)) {
         WRITE_MPEG_REG(PARSER_INT_ENABLE, 0);
         free_irq(INT_PARSER, (void *)esparser_id);
@@ -460,9 +464,10 @@ ssize_t drm_write(struct file *file,
 {
     s32 r;
     u32 len ;
-    u32 realcount;
+    u32 realcount,totalcount;
     u32 re_count = count;
     u32 havewritebytes =0;
+    u32 leftcount = 0;
 
     drminfo_t tmpmm;
     drminfo_t *drm=&tmpmm;
@@ -497,21 +502,17 @@ ssize_t drm_write(struct file *file,
 	
     len = realcount ;
     count = realcount;
+    totalcount = realcount;
 
     while (len > 0) {
         if (stbuf->type!=BUF_TYPE_SUBTITLE && stbuf_space(stbuf) < count) {
-            if (file->f_flags & O_NONBLOCK) {/*subtitle have no level to check,*/
-                len = stbuf_space(stbuf) ;	
-                if (len<256) //<1k.do eagain,
+            len = min(stbuf_canusesize(stbuf) / 8, len);
+            if (stbuf_space(stbuf) < len) {
+            r = stbuf_wait_space(stbuf, len);
+            if ((r < leftcount) && (leftcount > 0)) { // write part data , not allow return ;
+                continue;
+            }else if ((r < 0)&&(leftcount==0)){//buf is full;
                     return -EAGAIN;
-        	} else {
-	            len = min(stbuf_canusesize(stbuf) / 8, len);
-	            if (stbuf_space(stbuf) < len) {
-	                r = stbuf_wait_space(stbuf, len);
-	                if (r < 0) {
-                            DRM_PRNT("r<0");
-	                    return r;
-	                }
 	            }
             }
     	}
@@ -520,21 +521,25 @@ ssize_t drm_write(struct file *file,
     	mutex_lock(&esparser_mutex);
 
         r = _esparser_write(buf,len,stbuf->type,isphybuf);
+        if (r < 0){
+            printk("drm_write _esparser_write failed [%d]\n",r);
+            return r;
+        }
         havewritebytes += r;
-	if (havewritebytes == realcount) {
+        leftcount = totalcount - havewritebytes;
+        if (havewritebytes == totalcount){
+
             mutex_unlock(&esparser_mutex);
             break;//write ok;
-        }else if ((havewritebytes==len)&&(len==realcount)){
-            mutex_unlock(&esparser_mutex);
-            break;//write finish;	
-        }else if (havewritebytes < realcount ){
-            DRM_PRNT("writeagain  havewritebytes[%d]  wantwrite[%d] realwrite[%d] totallen[%d]\n",havewritebytes,len,r,realcount);
+        }else if ((len > 0 )&& (havewritebytes < totalcount)){
+            DRM_PRNT("writeagain havewritebytes[%d] wantwrite[%d] totalcount[%d] realcount[%d] \n",
+                              havewritebytes,len,totalcount,realcount);
             len = len-r;//write again;
             buf=buf+r;
         }else{
-            printk("###else  havewritebytes[%d]  wantwrite[%d] realwrite[%d] totallen[%d]\n",havewritebytes,len,r,realcount);
+            printk("###else havewritebytes[%d] wantwrite[%d] totalcount[%d] realcount[%d]\n",
+                havewritebytes,len,totalcount,realcount);
         }
-
         mutex_unlock(&esparser_mutex);
     }
 
@@ -571,6 +576,7 @@ ssize_t esparser_write(struct file *file,
 	        }
 	}
     }
+	stbuf->last_write_jiffies64=jiffies_64;
     len = min(len, count);
     mutex_lock(&esparser_mutex);
 	r = _esparser_write(buf, len, stbuf->type,0);

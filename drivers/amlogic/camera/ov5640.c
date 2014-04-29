@@ -90,7 +90,7 @@ static DECLARE_DELAYED_WORK(dl_work, do_download);
 static struct vdin_v4l2_ops_s *vops;
 
 static bool bDoingAutoFocusMode=false;
-
+static int temp_frame=-1;
 static struct v4l2_fract ov5640_frmintervals_active = {
 	.numerator = 1,
 	.denominator = 15,
@@ -723,7 +723,7 @@ static struct aml_camera_i2c_fig_s OV5640_script[] = {
 	{0x519c, 0x06}, 
 	{0x519d, 0x82}, 
 	{0x519e, 0x38}, 
-	{0x5381, 0x1e}, 
+	/*{0x5381, 0x1e}, 
 	{0x5382, 0x5b}, 
 	{0x5383, 0x12},  
 	{0x5384, 0x07},  
@@ -732,7 +732,19 @@ static struct aml_camera_i2c_fig_s OV5640_script[] = {
 	{0x5387, 0x8a},  
 	{0x5388, 0x75},  
 	{0x5389, 0x15},  
-	{0x538a, 0x01}, 
+	{0x538a, 0x01},*/
+	{0x5381, 0x1e},
+	{0x5382, 0x5b},
+	{0x5383, 0x12},
+	{0x5384, 0x5 },
+	{0x5385, 0x67},
+	{0x5386, 0x6d},
+	{0x5387, 0x70},
+	{0x5388, 0x5e},
+	{0x5389, 0x11},
+	{0x538b, 0x98},
+	{0x538a, 0x1 },
+
 	{0x538b, 0x98}, 
 	{0x5480, 0x01},  
 	{0x5481, 0x06},  
@@ -1185,16 +1197,27 @@ static struct aml_camera_i2c_fig_s OV5640_preview_1080P_script[] = {
 	{0x519c, 0x06},
 	{0x519d, 0x82},
 	{0x519e, 0x38},
+	/*{0x5381, 0x1e}, 
+	{0x5382, 0x5b}, 
+	{0x5383, 0x12},  
+	{0x5384, 0x07},  
+	{0x5385, 0x7f},  
+	{0x5386, 0x86},  
+	{0x5387, 0x8a},  
+	{0x5388, 0x75},  
+	{0x5389, 0x15},  
+	{0x538a, 0x01},*/
 	{0x5381, 0x1e},
 	{0x5382, 0x5b},
-	{0x5383, 0x08},
-	{0x5384, 0x0a},
-	{0x5385, 0x7e},
-	{0x5386, 0x88},
-	{0x5387, 0x7c},
-	{0x5388, 0x6c},
-	{0x5389, 0x10},
-	{0x538a, 0x01},
+	{0x5383, 0x12},
+	{0x5384, 0x5 },
+	{0x5385, 0x67},
+	{0x5386, 0x6d},
+	{0x5387, 0x70},
+	{0x5388, 0x5e},
+	{0x5389, 0x11},
+	{0x538b, 0x98},
+	{0x538a, 0x1 },
 	{0x538b, 0x98},
 	{0x5300, 0x08},
 	{0x5301, 0x30},
@@ -1456,7 +1479,7 @@ static struct aml_camera_i2c_fig_s OV5640_preview_960P_script[] = {
 	{0x519c, 0x06}, 
 	{0x519d, 0x82}, 
 	{0x519e, 0x38}, 
-	{0x5381, 0x1e}, 
+	/*{0x5381, 0x1e}, 
 	{0x5382, 0x5b}, 
 	{0x5383, 0x12},  
 	{0x5384, 0x07},  
@@ -1465,7 +1488,18 @@ static struct aml_camera_i2c_fig_s OV5640_preview_960P_script[] = {
 	{0x5387, 0x8a},  
 	{0x5388, 0x75},  
 	{0x5389, 0x15},  
-	{0x538a, 0x01}, 
+	{0x538a, 0x01},*/
+	{0x5381, 0x1e},
+	{0x5382, 0x5b},
+	{0x5383, 0x12},
+	{0x5384, 0x5 },
+	{0x5385, 0x67},
+	{0x5386, 0x6d},
+	{0x5387, 0x70},
+	{0x5388, 0x5e},
+	{0x5389, 0x11},
+	{0x538b, 0x98},
+	{0x538a, 0x1 }, 
 	{0x538b, 0x98}, 
 	{0x5480, 0x01},  
 	{0x5481, 0x06},  
@@ -1858,7 +1892,7 @@ static struct aml_camera_i2c_fig_s OV5640_preview_960P_30HZ_script[] = {
 	{0x519c, 0x06}, 
 	{0x519d, 0x82}, 
 	{0x519e, 0x38}, 
-	{0x5381, 0x1e}, 
+	/*{0x5381, 0x1e}, 
 	{0x5382, 0x5b}, 
 	{0x5383, 0x12},  
 	{0x5384, 0x07},  
@@ -1867,7 +1901,18 @@ static struct aml_camera_i2c_fig_s OV5640_preview_960P_30HZ_script[] = {
 	{0x5387, 0x8a},  
 	{0x5388, 0x75},  
 	{0x5389, 0x15},  
-	{0x538a, 0x01}, 
+	{0x538a, 0x01},*/
+	{0x5381, 0x1e},
+	{0x5382, 0x5b},
+	{0x5383, 0x12},
+	{0x5384, 0x5 },
+	{0x5385, 0x67},
+	{0x5386, 0x6d},
+	{0x5387, 0x70},
+	{0x5388, 0x5e},
+	{0x5389, 0x11},
+	{0x538b, 0x98},
+	{0x538a, 0x1 }, 
 	{0x538b, 0x98}, 
 	{0x5480, 0x01},  
 	{0x5481, 0x06},  
@@ -2265,7 +2310,7 @@ static struct aml_camera_i2c_fig_s OV5640_preview_SVGA_script[] = { //SVGA: 800*
 };
 #endif
 
-static struct aml_camera_i2c_fig_s OV5640_preview_QVGA_script[] = {
+/*static struct aml_camera_i2c_fig_s OV5640_preview_QVGA_script[] = {
 	{0x3503, 0x00},
 	{0x3035, 0x11},
 	{0x3036, 0x46},
@@ -2311,7 +2356,7 @@ static struct aml_camera_i2c_fig_s OV5640_preview_QVGA_script[] = {
 	{0x3821, 0x07}, // #3 ck. origin: 0x01, 
 	{0x3031, 0x08},  
 	{0xffff, 0xff}
-};
+};*/
 
 static struct aml_camera_i2c_fig_s OV5640_capture_5M_script[] = {
 	#if 1
@@ -2363,7 +2408,7 @@ static struct aml_camera_i2c_fig_s OV5640_capture_5M_script[] = {
 	{0xffff, 0xff}
 };
 
-static struct aml_camera_i2c_fig_s OV5640_capture_3M_script[] = {
+/*static struct aml_camera_i2c_fig_s OV5640_capture_3M_script[] = {
 	{0x3035, 0x31},
 	{0x3036, 0x69},
 	{0x3c07, 0x07},
@@ -2415,9 +2460,9 @@ static struct aml_camera_i2c_fig_s OV5640_capture_3M_script[] = {
 	{0x5584, 0x10}, 
 	{0x5586, 0x15},
 	{0xffff, 0xff}
-};
+};*/
 
-static struct aml_camera_i2c_fig_s OV5640_capture_2M_script[] = {
+/*static struct aml_camera_i2c_fig_s OV5640_capture_2M_script[] = {
 	{0x3035, 0x31},
 	{0x3036, 0x69},
 	{0x3c07, 0x07},
@@ -2469,7 +2514,7 @@ static struct aml_camera_i2c_fig_s OV5640_capture_2M_script[] = {
 	{0x5584, 0x10}, 
 	{0x5586, 0x15},
 	{0xffff, 0xff}
-};
+};*/
 
 static resolution_param_t  prev_resolution_array[] = {
 	{
@@ -3942,6 +3987,7 @@ static int vidioc_s_fmt_vid_cap(struct file *file, void *priv,
 	struct videobuf_queue *q = &fh->vb_vidq;
 	struct ov5640_device *dev = fh->dev;
 	resolution_param_t* res_param = NULL;
+	int ret;
 	//struct i2c_client *client = v4l2_get_subdevdata(&dev->sd);
 	//unsigned char gain = 0, exposurelow = 0, exposuremid = 0, exposurehigh = 0;
 	int cap_fps, pre_fps;
@@ -3951,7 +3997,7 @@ static int vidioc_s_fmt_vid_cap(struct file *file, void *priv,
             (f->fmt.pix.pixelformat==V4L2_PIX_FMT_YUV420)){
                 f->fmt.pix.width = (f->fmt.pix.width + (CANVAS_WIDTH_ALIGN*2-1) ) & (~(CANVAS_WIDTH_ALIGN*2-1));
         }
-	int ret = vidioc_try_fmt_vid_cap(file, fh, f);
+	ret = vidioc_try_fmt_vid_cap(file, fh, f);
 	if (ret < 0)
     	return ret;
 
@@ -4112,11 +4158,17 @@ static int vidioc_streamon(struct file *file, void *priv, enum v4l2_buf_type i)
 
         printk("ov5640: h_active = %d; v_active = %d, frame_rate=%d\n",
                         para.h_active, para.v_active, para.frame_rate);
+        if(temp_frame<0){
+            temp_frame=para.frame_rate;
+            para.skip_count =  2;
+        }else{
+            temp_frame=para.frame_rate;
+            para.skip_count =  5;
+        }
         para.cfmt = TVIN_YUV422;
         para.dfmt = TVIN_NV21;
         para.hsync_phase = 1;
         para.vsync_phase  = 1;    
-        para.skip_count =  2;
         para.bt_path = dev->cam_info.bt_path;
         ret =  videobuf_streamon(&fh->vb_vidq);
         if(ret == 0){
@@ -4186,7 +4238,7 @@ static int vidioc_enum_framesizes(struct file *file, void *fh,struct v4l2_frmsiz
         return ret;
 }
 
-static int vidioc_s_std(struct file *file, void *priv, v4l2_std_id *i)
+static int vidioc_s_std(struct file *file, void *priv, v4l2_std_id i)
 {
 	return 0;
 }
@@ -4354,6 +4406,13 @@ static int ov5640_open(struct file *file)
 	int retval = 0;
 	//int reg_val;
 	//int i = 0;
+#if CONFIG_CMA
+    retval = vm_init_buf(24*SZ_1M);
+    if(retval <0) {
+    	printk("error: no cma memory\n");
+        return -1;
+    }
+#endif
 	mutex_lock(&firmware_mutex);
 	ov5640_have_opened=1;
 	mutex_unlock(&firmware_mutex);
@@ -4490,6 +4549,7 @@ static int ov5640_close(struct file *file)
 	ov5640_qctrl[2].default_value=0;
 	ov5640_qctrl[10].default_value=100;
 	ov5640_qctrl[11].default_value=0;
+	temp_frame=-1;
 	power_down_ov5640(dev);
 #endif
 	ov5640_frmintervals_active.numerator = 1;
@@ -4500,6 +4560,9 @@ static int ov5640_close(struct file *file)
 	switch_mod_gate_by_name("ge2d", 0);
 #endif	
 	wake_unlock(&(dev->wake_lock));
+#ifdef CONFIG_CMA
+    vm_deinit_buf();
+#endif
 	return 0;
 }
 

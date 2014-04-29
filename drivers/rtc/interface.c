@@ -355,7 +355,7 @@ static int __rtc_set_alarm(struct rtc_device *rtc, struct rtc_wkalrm *alarm)
 
 	return err;
 }
-
+#if 0
 static int rtc_disable_alarm(struct rtc_device *rtc, struct rtc_wkalrm *alarm)
 {
 	int err = 0;
@@ -372,16 +372,16 @@ static int rtc_disable_alarm(struct rtc_device *rtc, struct rtc_wkalrm *alarm)
 	printk("exit %s\n", __FUNCTION__);
 	return err;
 }
-
+#endif
 int rtc_set_alarm(struct rtc_device *rtc, struct rtc_wkalrm *alarm)
 {
 	int err;
-
+#if 0
 	if(!alarm->enabled) {
 		err = rtc_disable_alarm(rtc, alarm);
 		return err;
 	}
-
+#endif
 	err = rtc_valid_tm(&alarm->time);
 	if (err != 0)
 		return err;

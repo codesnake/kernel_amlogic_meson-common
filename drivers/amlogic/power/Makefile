@@ -13,21 +13,6 @@ ifneq ($(KBUILD_SRC),)
 TOP_KBUILD_SRC := $(KBUILD_SRC)/
 endif
 
-MAKE_FOR_LIB := n
-ifeq ($(MAKE_FOR_LIB), n)
-$(obj)/aml_pmu_algorithm_lib:
-	@cp $(TOP_KBUILD_SRC)drivers/amlogic/power/aml_pmu_algorithm_lib.z \
-        drivers/amlogic/power/aml_pmu_algorithm_lib.o 
-endif
-
-ifeq ($(MAKE_FOR_LIB), y)
-    aml_pmu_algorithm_lib-y := aml_pmu_algorithm.o
-else 
-    # add FORCE to make compile force copy obj file, so no need to delete obj file
-    # when .z has updated
-    $(obj)/aml_pmu_algorithm_lib.o: $(obj)/aml_pmu_algorithm_lib FORCE
-endif
-
 #obj-$(CONFIG_SMBA10XX_BATTERY)             += smba10xx_battery/
 #obj-$(CONFIG_BQ27x00_BATTERY)              += bq27x00_battery.o
 #obj-$(CONFIG_PMU_ACT8xxx)                  += act8xxx_pmu/
@@ -36,8 +21,7 @@ obj-$(CONFIG_AW_AXP)                        += axp_power/
 obj-$(CONFIG_AML_PMU)                       += aml_pmu/
 obj-$(CONFIG_RICOH_PMU)                     += ricoh/
 obj-$(CONFIG_UBOOT_BATTERY_PARAMETERS)      += battery_parameter.o
-obj-$(CONFIG_AMLOGIC_PMU_OF)                += aml_pmu_of_common.o 
-obj-$(CONFIG_AML_PMU_ALGORITHM_SUPPORT)     += aml_pmu_algorithm_lib.o pmu_mutex.o
+obj-$(CONFIG_AMLOGIC_PMU_OF)                += aml_pmu_of_common.o pmu_mutex.o 
 
 endif
 

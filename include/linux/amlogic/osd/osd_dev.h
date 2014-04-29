@@ -76,6 +76,7 @@ extern u32 osddev_get_osd_order(u32 index);
 extern void osddev_change_osd_order(u32 index,u32 order);
 extern void osddev_free_scale_enable(u32 index ,u32 enable);
 extern void osddev_get_free_scale_enable(u32 index, u32 * free_scale_enable);
+extern void osddev_4k2k_fb_mode(u32 fb_for_4k2k);
 extern void osddev_free_scale_mode(u32 index ,u32 freescale_mode);
 extern void osddev_get_free_scale_mode(u32 index, u32 *freescale_mode);
 extern void osddev_free_scale_width(u32 index ,u32 width);

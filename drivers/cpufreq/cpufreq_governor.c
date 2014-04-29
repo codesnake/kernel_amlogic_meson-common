@@ -262,7 +262,7 @@ int cpufreq_governor_dbs(struct cpufreq_policy *policy,
 	struct cs_dbs_tuners *cs_tuners = NULL;
 	struct hg_dbs_tuners *hg_tuners = NULL;
 	struct cpu_dbs_common_info *cpu_cdbs;
-	unsigned int sampling_rate, latency, ignore_nice, j, cpu = policy->cpu;
+	unsigned int sampling_rate = 100000, latency, ignore_nice = 0, j, cpu = policy->cpu;
 	unsigned int max_periods;
 	int io_busy = 0;
 	int rc, i;

@@ -2142,6 +2142,12 @@ static struct platform_device aml_audio_dai = {
     .name           = "aml-dai",
     .id             = 0,
 };
+
+static struct platform_device aml_pcm2bt = {
+    .name           = "pcm2bt",
+    .id             = 0,
+};
+
 //fix@letv 20130323 by alexwang
 #if  defined(CONFIG_AM_TV_OUTPUT2)
 static struct resource vout2_device_resources[] = {
@@ -2499,6 +2505,7 @@ static struct platform_device  *platform_devs[] = {
 #endif
     &aml_audio,
     &aml_audio_dai,
+    &aml_pcm2bt,
 #if defined(CONFIG_SND_SOC_DUMMY_CODEC)
     &aml_dummy_codec_audio,
     &aml_dummy_codec,

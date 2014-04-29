@@ -1276,12 +1276,6 @@ ft5x0x_ts_probe(struct i2c_client *client, const struct i2c_device_id *id)
 //	aml_gpio_direction_input(g_pdata->gpio_interrupt);
 //	aml_gpio_to_irq(g_pdata->gpio_interrupt, g_pdata->irq-INT_GPIO_0, g_pdata->irq_edge);
 	disable_irq_nosync(g_pdata->irq);
-	err = request_irq(client->irq, ft5x0x_ts_interrupt, IRQF_DISABLED, client->name, ft5x0x_ts);
-	if (err < 0) {
-		dev_err(&client->dev, "request irq failed\n");
-		goto exit_irq_request_failed;
-	}
-
 	input_dev = input_allocate_device();
 	if (!input_dev) {
 		err = -ENOMEM;
@@ -1318,7 +1312,8 @@ ft5x0x_ts_probe(struct i2c_client *client, const struct i2c_device_id *id)
 			     ABS_MT_TOUCH_MAJOR, 0, PRESS_MAX, 0, 0);
 	input_set_abs_params(input_dev,
 			     ABS_MT_WIDTH_MAJOR, 0, 200, 0, 0);
-
+	input_set_abs_params(input_dev, 
+			     ABS_MT_TRACKING_ID, 0, FT5X0X_EVENT_MAX, 0, 0);
 	set_bit(EV_ABS, input_dev->evbit);
 	set_bit(EV_KEY, input_dev->evbit);
 
@@ -1357,6 +1352,11 @@ ft5x0x_ts_probe(struct i2c_client *client, const struct i2c_device_id *id)
     printk("[FST] Firmware new version after update = 0x%x\n", uc_reg_value);
 #endif
 	create_init(client->dev, g_pdata);
+	err = request_irq(client->irq, ft5x0x_ts_interrupt, IRQF_DISABLED, client->name, ft5x0x_ts);
+	if (err < 0) {
+		dev_err(&client->dev, "request irq failed\n");
+		goto exit_irq_request_failed;
+	}
 	printk("%s: probe success!\n", __FUNCTION__);
   return 0;
 

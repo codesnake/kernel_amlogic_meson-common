@@ -80,6 +80,15 @@ void root_func(){
 		aml_reserved_end = <0x05000000>;/**reserved memory end : dtb start for uboot*/
 		phys_offset = <0x00000000>;
 		linux,total-memory = <0x80000000>;
+
+        #address-cells = <1>;
+        #size-cells = <1>;
+
+        cma_0:region@0 {
+           region_name = "cma_0";
+           reg = <0 0x02700000>;
+           linux,contiguous-region;
+        };
 	};
 /// ***************************************************************************************
 ///	-	GIC
@@ -190,8 +199,8 @@ void root_func(){
 		compatible = "amlogic,amvenc_avc";
 		dev_name = "amvenc_avc.0";
 		status = "okay";
-		reserve-memory = <0x00f00000>;
-		reserve-iomap = "true";
+
+        linux,contiguous-region = <&cma_0>;
 	};
 
 /// ***************************************************************************************
@@ -261,8 +270,7 @@ void root_func(){
 		compatible = "amlogic,vm";
 		dev_name = "vm.0";
 		status = "okay";
-		reserve-memory = <0x01800000>;
-		reserve-iomap = "true";
+        linux,contiguous-region = <&cma_0>;
 	};
 
 /// ***************************************************************************************
@@ -462,6 +470,8 @@ void root_func(){
 		device_id = <0>;
 		pinctrl-names="default";
 		pinctrl-0=<&ao_i2c_master>;
+		use_pio = <0>;
+		master_i2c_speed = <100000>;
 	};
 
 //$$ DEVICE = "I2C_A"
@@ -479,6 +489,8 @@ void root_func(){
 		pinctrl-0=<&a_i2c_master>;
 		#address-cells = <1>;
 		#size-cells = <0>;
+		use_pio = <0>;
+		master_i2c_speed = <300000>;
 	};
 	
 //$$ DEVICE="I2C_B"
@@ -496,6 +508,8 @@ void root_func(){
 		pinctrl-0=<&b_i2c_master>;
 		#address-cells = <1>;
 		#size-cells = <0>;
+		use_pio = <0>;
+		master_i2c_speed = <300000>;
  	};
 
 //$$ DEVICE="I2C_C"
@@ -512,6 +526,8 @@ void root_func(){
 //		pinctrl-0=<&c_i2c_master>;
 		#address-cells = <1>;
 		#size-cells = <0>;
+		use_pio = <0>;
+		master_i2c_speed = <300000>;
 	};
 
 //$$ DEVICE="I2C_D"
@@ -529,6 +545,8 @@ void root_func(){
 		pinctrl-0=<&d_i2c_master>;
 		#address-cells = <1>;
 		#size-cells = <0>;
+		use_pio = <0>;
+		master_i2c_speed = <300000>;
 	};
 
 /// ***************************************************************************************
@@ -1051,6 +1069,25 @@ void root_func(){
 		status = "okay";
 	};
 
+//$$ DEVICE="adc_keypad"
+//$$ L2 PROP_STR = "status"
+//$$ L2 PROP_STR = "key_name"
+//$$ L2 PROP_U32 = "key_num"
+//$$ L2 PROP_U32 2 = "key_code"
+//$$ L2 PROP_U32 2 = "key_chan"
+//$$ L2 PROP_U32 2 = "key_val"
+//$$ L2 PROP_U32 2 = "key_tolerance"
+    adc_keypad{
+		compatible = "amlogic,adc_keypad";
+		status = "okay";
+		key_name = "menu", "vol-","vol+", "esc", "home";
+		key_num = <5>;
+		key_code = <139 114 115 1 102>;
+		key_chan = <0 0 0 0 0>;
+		key_val = <0 143 271 393 468>; //voltage=0/252/478/692/824mV, val=voltage/1800mV*1023
+		key_tolerance = <40 40 40 40 40>;
+	};
+
 //$$ DEVICE="meson-remote"
 //$$ L2 PROP_STR = "status"
 //$$ L2 PROP_U32 = "ao_baseaddr"
@@ -1171,11 +1208,12 @@ void root_func(){
 //$$ L2 PROP_U32 = "idle_interval"
 	thermal{
 		compatible = "amlogic-thermal";
-		#thermal-cells=<3>;
+		#thermal-cells=<7>;
 		dev_name = "aml_thermal";
-		trip_point=<50 1200000 1200000
-			    70  800000 800000
-			    110 0xffffffff 0xffffffff>;
+		trip_point=<60 1608001 1608001 511 511 2 3
+			    70 1200001 1200001 435 435 2 3
+			    80  800001 800001  328 328 1 1
+			    110 0xffffffff 0xffffffff 0xffffffff 0xffffffff 0xffffffff 0xffffffff>;
 		cpu_cali_a=<0>;
 		idle_interval=<1000>;
 

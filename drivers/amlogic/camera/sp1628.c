@@ -446,8 +446,9 @@ struct sp1628_fh {
 };
 
 
-static struct v4l2_frmsize_discrete sp1628_prev_resolution[2]= //should include 352x288 and 640x480, those two size are used for recording
+static struct v4l2_frmsize_discrete sp1628_prev_resolution[]= //should include 352x288 and 640x480, those two size are used for recording
 {
+	{320,240},
 	{352,288},
 	{640,480},
 };

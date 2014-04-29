@@ -78,6 +78,7 @@ typedef enum{
     FMT_YUV420,    
     FMT_YUV444_PLANE,
     FMT_RGB888,
+    FMT_RGB888_PLANE,
     FMT_RGB565,
     FMT_RGBA8888,
     MAX_FRAME_FMT 

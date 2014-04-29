@@ -4,6 +4,5 @@
 
 obj-y += aml_aes/
 
-obj-y += polarssl_aes/
-
+obj-y += aes_crypto.o
 

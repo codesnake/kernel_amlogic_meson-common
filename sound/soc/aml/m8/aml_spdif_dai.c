@@ -33,7 +33,7 @@
 #define ALSA_PRINT(fmt,args...)	printk(KERN_INFO "[aml-spdif-dai]" fmt,##args)
 #ifdef DEBUG_ALSA_SPDIF_DAI
 #define ALSA_DEBUG(fmt,args...) 	printk(KERN_INFO "[aml-spdif-dai]" fmt,##args)
-#define ALSA_TRACE()     			printk("[aml-spdif-dai] enter func %s,line %d\n",__FUNCTION__,__LINE__);
+#define ALSA_TRACE()     			printk("[aml-spdif-dai] enter func %s,line %d\n",__FUNCTION__,__LINE__)
 #else
 #define ALSA_DEBUG(fmt,args...) 
 #define ALSA_TRACE()   
@@ -51,8 +51,11 @@ static int aml_dai_spdif_set_sysclk(struct snd_soc_dai *cpu_dai,
 static int aml_dai_spdif_trigger(struct snd_pcm_substream *substream, int cmd,
 				struct snd_soc_dai *dai)
 {
-    	ALSA_TRACE();
+    	
 	struct snd_soc_pcm_runtime *rtd = NULL;
+
+    ALSA_TRACE();
+    
 	rtd = (struct snd_soc_pcm_runtime *)substream->private_data;
 	switch (cmd) {
 		case SNDRV_PCM_TRIGGER_START:
@@ -94,17 +97,19 @@ special call by the audiodsp,add these code,as there are three cases for 958 s/p
 static unsigned set_clock =  -1;
 static void aml_hw_iec958_init(struct snd_pcm_substream *substream)
 {
-	_aiu_958_raw_setting_t set;
-	_aiu_958_channel_status_t chstat;
-	struct snd_dma_buffer *buf = &substream->dma_buffer;	
-    	struct snd_pcm_runtime *runtime = substream->runtime;
+    _aiu_958_raw_setting_t set;
+    _aiu_958_channel_status_t chstat;
+    unsigned i2s_mode,iec958_mode;  
+    unsigned start,size;
+    int sample_rate;
+    struct snd_dma_buffer *buf = &substream->dma_buffer;    
+    struct snd_pcm_runtime *runtime = substream->runtime;
     if(buf==NULL && runtime==NULL){
         printk("buf/0x%x runtime/0x%x\n",(unsigned )buf,(unsigned )runtime);
         return;
     }
-	unsigned i2s_mode,iec958_mode;	
-	unsigned start,size;
-	int sample_rate;
+
+    i2s_mode = AIU_I2S_MODE_PCM16;
 	sample_rate = AUDIO_CLK_FREQ_48;
 	memset((void*)(&set), 0, sizeof(set));
 	memset((void*)(&chstat), 0, sizeof(chstat));
@@ -205,10 +210,34 @@ static void aml_hw_iec958_init(struct snd_pcm_substream *substream)
 		//audio_set_i2s_mode(AIU_I2S_MODE_PCM16);
 		//audio_set_aiubuf(start, size);		
 	}else{
-		set.chan_stat->chstat0_l = 0x1902;//NONE-PCM
-		set.chan_stat->chstat0_r = 0x1902;
-		set.chan_stat->chstat1_l = 0X200;
-		set.chan_stat->chstat1_r = 0X200;
+		if(IEC958_mode_codec == 4){ //DD+
+			if(runtime->rate == 32000){
+				set.chan_stat->chstat1_l = 0x300;
+				set.chan_stat->chstat1_r = 0x300;
+			}
+			else if(runtime->rate == 44100){
+				set.chan_stat->chstat1_l = 0xc00;
+				set.chan_stat->chstat1_r = 0xc00;			
+			}
+			else{
+				set.chan_stat->chstat1_l = 0Xe00;
+				set.chan_stat->chstat1_r = 0Xe00;			
+			}		
+		}
+		else{   //DTS,DD
+			if(runtime->rate == 32000){
+				set.chan_stat->chstat1_l = 0x300;
+				set.chan_stat->chstat1_r = 0x300;
+			}
+			else if(runtime->rate == 44100){
+				set.chan_stat->chstat1_l = 0;
+				set.chan_stat->chstat1_r = 0;			
+			}
+			else{
+				set.chan_stat->chstat1_l = 0X200;
+				set.chan_stat->chstat1_r = 0X200;			
+			}
+		}
 		start = buf->addr;
 		size = snd_pcm_lib_buffer_bytes(substream);;
 		audio_set_958outbuf(start, size, (iec958_mode == AIU_958_MODE_RAW)?1:0);
@@ -256,11 +285,13 @@ void	aml_alsa_hw_reprepare(void)
 static int aml_dai_spdif_startup(struct snd_pcm_substream *substream,
 					struct snd_soc_dai *dai)
 {	  	
-    	ALSA_TRACE();	
+    		
 	int ret = 0;
     	struct snd_pcm_runtime *runtime = substream->runtime;
     	struct aml_runtime_data *prtd = runtime->private_data;
 	audio_stream_t *s;	
+
+    ALSA_TRACE();
 	if(!prtd){
 		prtd = (struct aml_runtime_data *)kzalloc(sizeof(struct aml_runtime_data), GFP_KERNEL);
 		if (prtd == NULL) {
@@ -287,10 +318,10 @@ out:
 static void aml_dai_spdif_shutdown(struct snd_pcm_substream *substream,
 				struct snd_soc_dai *dai)
 {
-    	ALSA_TRACE();	
+    		
     	struct snd_pcm_runtime *runtime = substream->runtime;
-	struct snd_dma_buffer *buf = &substream->dma_buffer;	
-		
+	//struct snd_dma_buffer *buf = &substream->dma_buffer;	
+		ALSA_TRACE();
 	if(substream->stream == SNDRV_PCM_STREAM_PLAYBACK){
 		memset((void*)runtime->dma_area,0,snd_pcm_lib_buffer_bytes(substream));
 
@@ -303,11 +334,13 @@ static void aml_dai_spdif_shutdown(struct snd_pcm_substream *substream,
 static int aml_dai_spdif_prepare(struct snd_pcm_substream *substream,
 					struct snd_soc_dai *dai)
 {
-      ALSA_TRACE();
-	struct snd_soc_pcm_runtime *rtd = substream->private_data;
+      
+	//struct snd_soc_pcm_runtime *rtd = substream->private_data;
     	struct snd_pcm_runtime *runtime = substream->runtime;
-    	struct aml_runtime_data *prtd = runtime->private_data;
-	audio_stream_t *s = &prtd->s;	
+    //	struct aml_runtime_data *prtd = runtime->private_data;
+	//audio_stream_t *s = &prtd->s;
+
+    ALSA_TRACE();
 	if(substream->stream == SNDRV_PCM_STREAM_PLAYBACK){
 		if(playback_substream_handle != (unsigned)substream)
 			playback_substream_handle = (unsigned)substream;
@@ -330,10 +363,10 @@ static int aml_dai_spdif_hw_params(struct snd_pcm_substream *substream,
 				struct snd_soc_dai *socdai)
 {
     	ALSA_TRACE();
-	struct snd_soc_pcm_runtime *rtd = substream->private_data;
-    	struct snd_pcm_runtime *runtime = substream->runtime;
-    	struct aml_runtime_data *prtd = runtime->private_data;
-	audio_stream_t *s = &prtd->s;
+//	struct snd_soc_pcm_runtime *rtd = substream->private_data;
+    //	struct snd_pcm_runtime *runtime = substream->runtime;
+  //  	struct aml_runtime_data *prtd = runtime->private_data;
+	//audio_stream_t *s = &prtd->s;
 	return 0;
 }
 

@@ -178,7 +178,7 @@ u32 stbuf_space(struct stream_buf_s *buf)
     /* reserved space for safe write, the parser fifo size is 1024byts, so reserve it */
     int size = (buf->canusebuf_size- _READ_ST_REG(LEVEL)) ;
 
-#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8
+#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6TVD
     if ((buf->type == BUF_TYPE_VIDEO) && (vdec_on(VDEC_2))) {
         if ((_READ_VDEC2_ST_REG(START_PTR) == _READ_ST_REG(START_PTR)) &&
             (_READ_VDEC2_ST_REG(END_PTR)   == _READ_ST_REG(END_PTR))   &&
@@ -268,7 +268,7 @@ s32 stbuf_init(struct stream_buf_s *buf)
     return 0;
 }
 
-#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8
+#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6TVD
 void stbuf_vdec2_init(struct stream_buf_s *buf)
 {
     _WRITE_VDEC2_ST_REG(CONTROL, 0);

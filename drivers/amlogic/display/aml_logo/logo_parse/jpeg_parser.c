@@ -64,6 +64,8 @@ static inline u32 index2canvas(u32 index)
 
     return canvas_tab[index];
 }
+
+#if 0
 static irqreturn_t jpeglogo_isr(int irq, void *dev_id)
 {
 	u32 reg, index;
@@ -86,6 +88,8 @@ static irqreturn_t jpeglogo_isr(int irq, void *dev_id)
 
     return IRQ_HANDLED;
 }
+#endif
+
 static s32 parse_jpeg_info(u8 *dp,logo_object_t *plogo)
 {
 	int len = 0;
@@ -339,7 +343,7 @@ static inline void feed_vb(s32 s)
 static int hardware_init(logo_object_t *plogo,int logo_size)
 {
 	u32	*mc_addr_aligned = (u32 *)vmjpeg_mc;
-	int ret;
+	int ret = 0;
 	if(plogo->para.output_dev_type  <=LOGO_DEV_VID ) //now only support display on video layer.
 	{
 		if(plogo->para.output_dev_type < LOGO_DEV_VID)

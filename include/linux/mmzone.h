@@ -18,6 +18,7 @@
 #include <linux/page-flags-layout.h>
 #include <linux/atomic.h>
 #include <asm/page.h>
+#include <linux/sysctl.h>
 
 /* Free memory management - zoned buddy allocator.  */
 #ifndef CONFIG_FORCE_MAX_ZONEORDER
@@ -786,7 +787,11 @@ extern int init_currently_empty_zone(struct zone *zone, unsigned long start_pfn,
 				     enum memmap_context context);
 
 extern void lruvec_init(struct lruvec *lruvec);
-#define START_KSWAPD_FREE_PAGE_THRESH 32768
+#define START_KSWAPD_FREE_PAGE_THRESH 16384
+extern int mem_management_thresh;
+extern int proc_mem_management_thresh_handler(struct ctl_table *table, int write,
+		void __user *buffer, size_t *lenp,
+		loff_t *ppos);
 static inline struct zone *lruvec_zone(struct lruvec *lruvec)
 {
 #ifdef CONFIG_MEMCG

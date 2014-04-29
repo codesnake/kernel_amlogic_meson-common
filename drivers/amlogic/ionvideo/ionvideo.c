@@ -9,7 +9,7 @@
 
 #define IONVIDEO_MODULE_NAME "ionvideo"
 
-#define IONVIDEO_VERSION "3.0"
+#define IONVIDEO_VERSION "1.0"
 #define RECEIVER_NAME "ionvideo"
 
 static int is_actived = 0;
@@ -114,86 +114,19 @@ int is_ionvideo_active(void) {
 }
 EXPORT_SYMBOL(is_ionvideo_active);
 
-static void videoc_compute_pts(struct ionvideo_dev *dev, struct vframe_s* vf) {
+static void videoc_omx_compute_pts(struct ionvideo_dev *dev, struct vframe_s* vf) {
     if (vf->pts) {
-        if (abs(timestamp_pcrscr_get() - vf->pts) > tsync_vpts_discontinuity_margin()) {
-            tsync_avevent_locked(VIDEO_TSTAMP_DISCONTINUITY, vf->pts);
-        } else {
-            timestamp_vpts_set(vf->pts);
-            dev->pts = vf->pts_us64;
-        }
+        timestamp_vpts_set(vf->pts);
+        dev->receiver_register = 0;
+        dev->pts = vf->pts_us64;
+    } else if (dev->receiver_register){
+        timestamp_vpts_set(0);
+        dev->receiver_register = 0;
+        dev->pts = timestamp_vpts_get();
     } else {
         timestamp_vpts_inc(DUR2PTS(vf->duration));
         dev->pts = timestamp_vpts_get();
     }
-    if (dev->receiver_register){
-        tsync_avevent_locked(VIDEO_START, vf->pts ? vf->pts : timestamp_pcrscr_get());
-        dev->receiver_register = 0;
-    }
-}
-
-static int ionvideo_av_pause(void) {
-    static int p = 0;
-
-    if (p == timestamp_pcrscr_get()) {
-        return -EAGAIN;
-    } else {
-        p = timestamp_pcrscr_get();
-    }
-
-    return 0;
-}
-
-static int ionvideo_av_synchronization(struct ionvideo_dev *dev, struct ionvideo_buffer *buf) {
-    struct vframe_s* vf;
-    struct vb2_buffer *vb = &(buf->vb);
-    int ret = 0;
-    int d = timestamp_vpts_get() - timestamp_pcrscr_get();
-
-    if (d > 1350) {
-        vf = vf_get(RECEIVER_NAME);
-        if (vf) {
-            ret = ppmgr2_process(vf, &dev->ppmgr2_dev, vb->v4l2_buf.index);
-            videoc_compute_pts(dev, vf);
-            vf_put(vf, RECEIVER_NAME);
-        } else {
-            ret = -EAGAIN;
-        }
-    } else if (d < -11520) {
-        int s = (-d) >> 13;
-        printk("s");
-        while (vf_peek(RECEIVER_NAME) && s-- > 0) {
-            vf = vf_get(RECEIVER_NAME);
-            if (vf) {
-                videoc_compute_pts(dev, vf);
-                vf_put(vf, RECEIVER_NAME);
-            } else {
-                ret = -EAGAIN;
-            }
-        }
-        vf = vf_get(RECEIVER_NAME);
-        if (vf) {
-            ret = ppmgr2_process(vf, &dev->ppmgr2_dev, vb->v4l2_buf.index);
-            videoc_compute_pts(dev, vf);
-            vf_put(vf, RECEIVER_NAME);
-        } else {
-            ret = -EAGAIN;
-        }
-    } else if (d <= 1350 && d >= -11520) {
-        vf = vf_get(RECEIVER_NAME);
-        if (vf) {
-            ret = ppmgr2_process(vf, &dev->ppmgr2_dev, vb->v4l2_buf.index);
-            videoc_compute_pts(dev, vf);
-            vf_put(vf, RECEIVER_NAME);
-        } else {
-            ret = -EAGAIN;
-        }
-    }
-    if (d > 450000) {
-        printk("ionvideo_av_synchronization error\n");
-    }
-
-    return ret;
 }
 
 static int ionvideo_fillbuff(struct ionvideo_dev *dev, struct ionvideo_buffer *buf) {
@@ -202,27 +135,45 @@ static int ionvideo_fillbuff(struct ionvideo_dev *dev, struct ionvideo_buffer *b
     struct vb2_buffer *vb = &(buf->vb);
     int ret = 0;
 //-------------------------------------------------------
+    vf = vf_get(RECEIVER_NAME);
+    if (!vf) {
+        return -EAGAIN;
+    }
     if (freerun_mode == 0) {
-        ret = ionvideo_av_synchronization(dev, buf);
-        if (ret) {
-            return ret;
-        }
-    } else {
-        vf = vf_get(RECEIVER_NAME);
-        videoc_compute_pts(dev, vf);
+        buf->pts = vf->pts;
+        buf->duration = vf->duration;
         ret = ppmgr2_process(vf, &dev->ppmgr2_dev, vb->v4l2_buf.index);
         if (ret) {
             vf_put(vf, RECEIVER_NAME);
             return ret;
         }
         vf_put(vf, RECEIVER_NAME);
+    } else {
+        videoc_omx_compute_pts(dev, vf);
+        ret = ppmgr2_process(vf, &dev->ppmgr2_dev, vb->v4l2_buf.index);
+        if (ret) {
+            vf_put(vf, RECEIVER_NAME);
+            return ret;
+        }
+        vf_put(vf, RECEIVER_NAME);
+        buf->vb.v4l2_buf.timestamp.tv_sec = dev->pts >> 32;
+        buf->vb.v4l2_buf.timestamp.tv_usec = dev->pts & 0xFFFFFFFF;
     }
 //-------------------------------------------------------
-    buf->vb.v4l2_buf.timestamp.tv_sec = dev->pts >> 32;
-    buf->vb.v4l2_buf.timestamp.tv_usec = dev->pts & 0xFFFFFFFF;
-//  buf->vb.v4l2_buf.timestamp.tv_sec = 0;
-//  buf->vb.v4l2_buf.timestamp.tv_usec = dev->pts;
+    return 0;
+}
 
+static int ionvideo_size_changed(struct ionvideo_dev *dev, struct vframe_s* vf) {
+    int aw = vf->width;
+    int ah = vf->height;
+
+    v4l_bound_align_image(&aw, 48, MAX_WIDTH, 5, &ah, 32, MAX_HEIGHT, 0, 0);
+    dev->c_width = aw;
+    dev->c_height = ah;
+    if (aw != dev->width || ah != dev->height) {
+        dprintk(dev, 2, "Video frame size changed w:%d h:%d\n", aw, ah);
+        return -EAGAIN;
+    }
     return 0;
 }
 
@@ -230,12 +181,18 @@ static void ionvideo_thread_tick(struct ionvideo_dev *dev) {
     struct ionvideo_dmaqueue *dma_q = &dev->vidq;
     struct ionvideo_buffer *buf;
     unsigned long flags = 0;
+    struct vframe_s* vf;
 
     dprintk(dev, 4, "Thread tick\n");
     /* video seekTo clear list */
 
-    if (!vf_peek(RECEIVER_NAME)) {
+    vf = vf_peek(RECEIVER_NAME);
+    if (!vf) {
         msleep(5);
+        return;
+    }
+    if (freerun_mode == 0 && ionvideo_size_changed(dev, vf)) {
+        msleep(10);
         return;
     }
     spin_lock_irqsave(&dev->slock, flags);
@@ -474,6 +431,9 @@ static int vidioc_open(struct file *file) {
         return -EBUSY;
     }
     dev->pts = 0;
+    dev->c_width = 0;
+    dev->c_height = 0;
+    dev->skip = 0;
     dprintk(dev, 2, "vidioc_open\n");
     printk("ionvideo open\n");
     return v4l2_fh_open(file);
@@ -513,9 +473,26 @@ static int vidioc_enum_fmt_vid_cap(struct file *file, void *priv, struct v4l2_fm
 
 static int vidioc_g_fmt_vid_cap(struct file *file, void *priv, struct v4l2_format *f) {
     struct ionvideo_dev *dev = video_drvdata(file);
+    struct vb2_queue *q = &dev->vb_vidq;
+    int ret = 0;
+    unsigned long flags;
 
-    f->fmt.pix.width = dev->width;
-    f->fmt.pix.height = dev->height;
+    if (freerun_mode == 0) {
+        if (dev->c_width == 0 || dev->c_height == 0) {
+            return -EINVAL;
+        }
+        f->fmt.pix.width = dev->c_width;
+        f->fmt.pix.height = dev->c_height;
+        spin_lock_irqsave(&q->done_lock, flags);
+        ret = list_empty(&q->done_list);
+        spin_unlock_irqrestore(&q->done_lock, flags);
+        if (!ret) {
+            return -EAGAIN;
+        }
+    } else {
+        f->fmt.pix.width = dev->width;
+        f->fmt.pix.height = dev->height;
+    }
     f->fmt.pix.field = V4L2_FIELD_INTERLACED;
     f->fmt.pix.pixelformat = dev->fmt->fourcc;
     f->fmt.pix.bytesperline = (f->fmt.pix.width * dev->fmt->depth) >> 3;
@@ -524,6 +501,7 @@ static int vidioc_g_fmt_vid_cap(struct file *file, void *priv, struct v4l2_forma
         f->fmt.pix.colorspace = V4L2_COLORSPACE_SMPTE170M;
     else
         f->fmt.pix.colorspace = V4L2_COLORSPACE_SRGB;
+
     return 0;
 }
 
@@ -610,18 +588,87 @@ static int vidioc_qbuf(struct file *file, void *priv, struct v4l2_buffer *p) {
     return ret;
 }
 
+static int vidioc_synchronization_dqbuf(struct file *file, void *priv, struct v4l2_buffer *p) {
+    struct vb2_buffer *vb = NULL;
+    struct vb2_queue *q;
+    struct ionvideo_dev *dev = video_drvdata(file);
+    struct ionvideo_buffer *buf;
+    int ret = 0;
+    int d = 0;
+    unsigned long flags;
+
+    q = dev->vdev.queue;
+    spin_lock_irqsave(&q->done_lock, flags);
+    if (list_empty(&q->done_list)) {
+        spin_unlock_irqrestore(&q->done_lock, flags);
+        return -EAGAIN;
+    }
+    vb = list_first_entry(&q->done_list, struct vb2_buffer, done_entry);
+    spin_unlock_irqrestore(&q->done_lock, flags);
+
+    buf = container_of(vb, struct ionvideo_buffer, vb);
+    if (dev->receiver_register) {
+        tsync_avevent_locked(VIDEO_START, buf->pts ? buf->pts : timestamp_pcrscr_get());
+        dev->receiver_register = 0;
+        d = 0;
+    } else if (buf->pts) {
+        if (abs(timestamp_pcrscr_get() - buf->pts) > tsync_vpts_discontinuity_margin()) {
+            tsync_avevent_locked(VIDEO_TSTAMP_DISCONTINUITY, buf->pts);
+        } else {
+            timestamp_vpts_set(buf->pts);
+        }
+        d = timestamp_vpts_get() - timestamp_pcrscr_get();
+    } else {
+        d = timestamp_vpts_get() + DUR2PTS(buf->duration) - timestamp_pcrscr_get();
+    }
+    if (d > 450) {
+        return -EAGAIN;
+    } else if (d < -11520) {
+        int s = 3;
+        while (s--) {
+            ret = vb2_ioctl_dqbuf(file, priv, p);
+            if (ret) {  return ret; }
+            if (buf->pts) {
+                if (abs(timestamp_pcrscr_get() - buf->pts) > tsync_vpts_discontinuity_margin()) {
+                    tsync_avevent_locked(VIDEO_TSTAMP_DISCONTINUITY, buf->pts);
+                } else {
+                    timestamp_vpts_set(buf->pts);
+                }
+            } else {
+                timestamp_vpts_inc(DUR2PTS(buf->duration));
+            }
+            if(list_empty(&q->done_list)) {
+                break;
+            } else {
+                ret = vb2_ioctl_qbuf(file, priv, p);
+                if (ret) { return ret; }
+            }
+        }
+        dprintk(dev, 1, "s:%u\n", dev->skip++);
+    } else {
+        ret = vb2_ioctl_dqbuf(file, priv, p);
+        if (ret) {
+            return ret;
+        }
+        if (!buf->pts) {
+            timestamp_vpts_inc(DUR2PTS(buf->duration));
+        }
+    }
+    p->timestamp.tv_sec = 0;
+    p->timestamp.tv_usec = timestamp_vpts_get();
+
+    return 0;
+}
+
 static int vidioc_dqbuf(struct file *file, void *priv, struct v4l2_buffer *p){
     if (freerun_mode == 0) {
-        static int p = 0;
-        int d = timestamp_vpts_get() - timestamp_pcrscr_get();
-        if (p == timestamp_pcrscr_get()) {
+        static int t = 0;
+        if (t == timestamp_pcrscr_get()) {
             return -EAGAIN;
         } else {
-            p = timestamp_pcrscr_get();
+            t = timestamp_pcrscr_get();
         }
-        if (d > 1350) {
-            return -EAGAIN;
-        }
+        return vidioc_synchronization_dqbuf(file, priv, p);
     }
     return vb2_ioctl_dqbuf(file, priv, p);
 }

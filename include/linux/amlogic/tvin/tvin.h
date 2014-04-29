@@ -151,7 +151,7 @@ typedef enum tvin_sig_fmt_e {
         TVIN_SIG_FMT_VGA_1024X768P_75HZ_D029            = 0x02b,
         TVIN_SIG_FMT_VGA_1024X768P_84HZ_D997            = 0x02c,
         TVIN_SIG_FMT_VGA_1024X768P_74HZ_D925            = 0x02d,
-        TVIN_SIG_FMT_VGA_1024X768P_75HZ_D020            = 0x02e,
+        TVIN_SIG_FMT_VGA_1024X768P_60HZ_D020            = 0x02e,
         TVIN_SIG_FMT_VGA_1024X768P_70HZ_D008            = 0x02f,
         TVIN_SIG_FMT_VGA_1024X768P_75HZ_D782            = 0x030,
         TVIN_SIG_FMT_VGA_1024X768P_77HZ_D069            = 0x031,
@@ -225,11 +225,11 @@ typedef enum tvin_sig_fmt_e {
         TVIN_SIG_FMT_VGA_1920X1200P_59HZ_D950           = 0x075,
         TVIN_SIG_FMT_VGA_1024X768P_60HZ_D000_C          = 0x076,
         TVIN_SIG_FMT_VGA_1024X768P_60HZ_D000_D          = 0x077,
-        TVIN_SIG_FMT_VGA_1920X1200P_59HZ_D988            = 0x078,
-        TVIN_SIG_FMT_VGA_1400X900P_60HZ_D000             = 0x079,
-        TVIN_SIG_FMT_VGA_1680X1050P_60HZ_D000            = 0x07a,
-        TVIN_SIG_FMT_VGA_800X600P_85HZ_D062              = 0x07b,
-        TVIN_SIG_FMT_VGA_RESERVE7                       = 0x07c,
+        TVIN_SIG_FMT_VGA_1920X1200P_59HZ_D988           = 0x078,
+        TVIN_SIG_FMT_VGA_1400X900P_60HZ_D000            = 0x079,
+        TVIN_SIG_FMT_VGA_1680X1050P_60HZ_D000           = 0x07a,
+        TVIN_SIG_FMT_VGA_800X600P_60HZ_D062             = 0x07b,
+        TVIN_SIG_FMT_VGA_800X600P_60HZ_317_B            = 0x07c,
         TVIN_SIG_FMT_VGA_RESERVE8                       = 0x07d,
         TVIN_SIG_FMT_VGA_RESERVE9                       = 0x07e,
         TVIN_SIG_FMT_VGA_RESERVE10                      = 0x07f,
@@ -433,6 +433,8 @@ typedef struct tvin_info_s {
         enum tvin_trans_fmt    trans_fmt;
         enum tvin_sig_fmt_e    fmt;
         enum tvin_sig_status_e status;
+		enum tvin_color_fmt_e  cfmt;
+		unsigned int		   fps;
         unsigned int           reserved;
 }tvin_info_t;
 
@@ -452,20 +454,25 @@ typedef struct tvin_video_buf_s {
 
 // hs=he=vs=ve=0 is to disable Cut Window
 typedef struct tvin_cutwin_s {
-        unsigned int hs;
-        unsigned int he;
-        unsigned int vs;
-        unsigned int ve;
+        unsigned short hs;
+        unsigned short he;
+        unsigned short vs;
+        unsigned short ve;
 } tvin_cutwin_t;
 
 typedef struct tvin_parm_s {
         int                         index;    // index of frontend for vdin
         enum tvin_port_e            port;     // must set port in IOCTL
         struct tvin_info_s          info;
-        struct tvin_cutwin_s        cutwin;
-		unsigned int                hist_pow;
+        unsigned int                hist_pow;
+        unsigned int                luma_sum;
+        unsigned int                pixel_sum;
         unsigned short              histgram[64];
         unsigned int                flag;
+	unsigned short              dest_width;//for vdin horizontal scale down
+	unsigned short              dest_height;//for vdin vertical scale down
+		bool                h_reverse;//for vdin horizontal reverse
+		bool                v_reverse;//for vdin vertical reverse
         unsigned int                reserved;
 } tvin_parm_t;
 
@@ -536,10 +543,11 @@ typedef struct tvafe_adc_cal_s {
 } tvafe_adc_cal_t;
 
 typedef struct tvafe_adc_cal_clamp_s {
-	    short a_analog_clamp_diff;
-		short b_analog_clamp_diff;
-		short c_analog_clamp_diff;
+	short a_analog_clamp_diff;
+	short b_analog_clamp_diff;
+	short c_analog_clamp_diff;
 } tvafe_adc_cal_clamp_t;
+
 typedef struct tvafe_adc_comp_cal_s {
     struct tvafe_adc_cal_s comp_cal_val[3];
 } tvafe_adc_comp_cal_t;
@@ -602,7 +610,7 @@ typedef enum tvafe_adc_pin_e {
 	TVAFE_ADC_PIN_SOG_5	= 46,
 	TVAFE_ADC_PIN_SOG_6	= 47,
 	TVAFE_ADC_PIN_SOG_7	= 48,
-        TVAFE_ADC_PIN_MAX,
+	TVAFE_ADC_PIN_MAX,
 } tvafe_adc_pin_t;
 
 typedef enum tvafe_src_sig_e {

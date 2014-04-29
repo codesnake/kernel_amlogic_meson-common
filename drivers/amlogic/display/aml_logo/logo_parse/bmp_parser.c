@@ -53,7 +53,7 @@ static  int  bmp_decode(logo_object_t *plogo)
 	char	*in=plogo->para.mem_addr ;
 	char *out=plogo->parser->output_addr;
 	char *bmp_data;
-	int 	i, j;
+	int 	i;
 	bmp_header_t  *bmp_header=(bmp_header_t  *)plogo->parser->priv;
 	int bpp=plogo->parser->logo_pic_info.color_info/8 ;
 	int width=plogo->parser->logo_pic_info.width;

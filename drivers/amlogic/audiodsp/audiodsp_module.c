@@ -113,14 +113,14 @@ static audiodsp_pm_state_t pm_state;
 
 static void audiodsp_prevent_sleep(void)
 {
-    struct audiodsp_priv* priv = audiodsp_privdata();
+    /*struct audiodsp_priv* priv = */audiodsp_privdata();
     printk("audiodsp prevent sleep\n");
     //wake_lock(&priv->wakelock);
 }
 
 static void audiodsp_allow_sleep(void)
 {
-    struct audiodsp_priv *priv=audiodsp_privdata();
+    /*struct audiodsp_priv *priv=*/audiodsp_privdata();
     printk("audiodsp allow sleep\n");
     //wake_unlock(&priv->wakelock);
 }
@@ -220,7 +220,7 @@ static unsigned long audiodsp_drop_pcm(unsigned long size)
 {
 	struct audiodsp_priv *priv = audiodsp_privdata();
 	size_t len;
-	int count;
+	int count = 0;
 	unsigned long drop_bytes = size;
 
 	mutex_lock(&priv->stream_buffer_mutex);
@@ -707,7 +707,7 @@ static ssize_t codec_fatal_err_show(struct class* cla, struct class_attribute* a
 	
     return sprintf(buf, "%d\n", priv->decode_fatal_err);
 }
-static ssize_t codec_fatal_err_store(struct class* cla, struct class_attribute* attr, char* buf,
+static ssize_t codec_fatal_err_store(struct class* cla, struct class_attribute* attr, const char* buf,
 	                                       size_t count)
 {
      struct audiodsp_priv *priv = audiodsp_privdata();
@@ -746,7 +746,7 @@ static ssize_t dsp_working_status_show(struct class* cla, struct class_attribute
     pbuf += sprintf(pbuf, "\tdsp jeffies  0x%lx\n", DSP_RD(DSP_JIFFIES));
     pbuf += sprintf(pbuf, "\tdsp pcm wp  0x%lx\n", DSP_RD(DSP_DECODE_OUT_WD_ADDR));
     pbuf += sprintf(pbuf, "\tdsp pcm rp  0x%lx\n", DSP_RD(DSP_DECODE_OUT_RD_ADDR));
-		 pbuf += sprintf(pbuf, "\tdsp pcm buffer level  0x%lx\n", dsp_codec_get_bufer_data_len(priv));
+    pbuf += sprintf(pbuf, "\tdsp pcm buffer level  0x%x\n", dsp_codec_get_bufer_data_len(priv));
     pbuf += sprintf(pbuf, "\tdsp pcm buffered size  0x%lx\n", DSP_RD(DSP_BUFFERED_LEN));
     pbuf += sprintf(pbuf, "\tdsp es read offset  0x%lx\n", DSP_RD(DSP_AFIFO_RD_OFFSET1));
 
@@ -923,7 +923,7 @@ static ssize_t dts_dec_control_show(struct class*cla, struct class_attribute* at
 	char *dialnorm[] = {"disable","enable"};	
 	char *pbuf = buf;
 	pbuf += sprintf(pbuf, "\tdts  dmx mode : %s\n", dmxmode[(dts_dec_control>>DTS_DMX_MODE_BIT)&0x1]);
-	pbuf += sprintf(pbuf, "\tdts  drc scale : %d%\n", (dts_dec_control>>DTS_DRC_SCALE_BIT)&0xff);
+	pbuf += sprintf(pbuf, "\tdts  drc scale : %d\n", (dts_dec_control>>DTS_DRC_SCALE_BIT)&0xff);
 	pbuf += sprintf(pbuf, "\tdts  dial norm : %s\n", dialnorm[(dts_dec_control>>DTS_DIAL_NORM_BIT)&0x1]);
 	return (pbuf-buf);
 }
@@ -949,7 +949,7 @@ static ssize_t dts_dec_control_store(struct class* class, struct class_attribute
  	else if(strncmp(tmpbuf, "dtsdrcscale", 11)==0){
         val=simple_strtoul(buf+i+1, NULL, 16); 	
 		val = val&0xff;
-		printk("dts drc  scale set to %d%\n",val);
+		printk("dts drc  scale set to %d\n",val);
 		dts_dec_control = (dts_dec_control&(~(0xff<<DTS_DRC_SCALE_BIT)))|(val<<DTS_DRC_SCALE_BIT);
  	}
  	else if(strncmp(tmpbuf, "dtsdialnorm", 11)==0){
@@ -985,7 +985,7 @@ static ssize_t dsp_debug_store(struct class* class, struct class_attribute* attr
 static ssize_t skip_rawbytes_show(struct class*cla, struct class_attribute* attr, char* buf)
 {
   unsigned long bytes = DSP_RD(DSP_SKIP_BYTES);
-  return sprintf(buf, "%d\n", bytes);
+  return sprintf(buf, "%ld\n", bytes);
 }
 
 static ssize_t skip_rawbytes_store(struct class* class, struct class_attribute* attr,
@@ -993,7 +993,7 @@ static ssize_t skip_rawbytes_store(struct class* class, struct class_attribute* 
 {
   unsigned long bytes = simple_strtoul(buf, NULL, 16);
   DSP_WD(DSP_SKIP_BYTES, bytes);
-  printk("audio stream SKIP when ablevel>0x%x\n", bytes);
+  printk("audio stream SKIP when ablevel>0x%lx\n", bytes);
   return count;
 }
 
@@ -1009,14 +1009,14 @@ static struct class_attribute audiodsp_attrs[]={
 #ifdef CONFIG_ARCH_MESON1    
     __ATTR_RO(codec_mips),
 #endif    
-    __ATTR(codec_fatal_err, S_IRUGO | S_IWUSR, codec_fatal_err_show, codec_fatal_err_store),
+    __ATTR(codec_fatal_err, S_IRUGO | S_IWUSR | S_IWGRP, codec_fatal_err_show, codec_fatal_err_store),
     __ATTR_RO(swap_buf_ptr),
     __ATTR_RO(dsp_working_status),
-    __ATTR(digital_raw, S_IRUGO | S_IWUSR, digital_raw_show, digital_raw_store),
-     __ATTR(digital_codec, S_IRUGO | S_IWUSR, digital_codec_show, digital_codec_store),
+    __ATTR(digital_raw, S_IRUGO | S_IWUSR | S_IWGRP, digital_raw_show, digital_raw_store),
+     __ATTR(digital_codec, S_IRUGO | S_IWUSR | S_IWGRP, digital_codec_show, digital_codec_store),
     __ATTR(dec_option, S_IRUGO | S_IWUSR, dec_option_show, dec_option_store),
     __ATTR(print_flag, S_IRUGO | S_IWUSR, print_flag_show, print_flag_store),
-    __ATTR(ac3_drc_control, S_IRUGO | S_IWUSR, ac3_drc_control_show, ac3_drc_control_store),
+    __ATTR(ac3_drc_control, S_IRUGO | S_IWUSR | S_IWGRP, ac3_drc_control_show, ac3_drc_control_store),
     __ATTR(dsp_debug, S_IRUGO | S_IWUSR, dsp_debug_show, dsp_debug_store),
     __ATTR(dts_dec_control, S_IRUGO | S_IWUSR, dts_dec_control_show, dts_dec_control_store),   
     __ATTR(skip_rawbytes, S_IRUGO | S_IWUSR, skip_rawbytes_show, skip_rawbytes_store),
@@ -1027,7 +1027,7 @@ static struct class_attribute audiodsp_attrs[]={
 #ifdef CONFIG_PM
 static int audiodsp_suspend(struct device* dev, pm_message_t state)
 {
-     struct audiodsp_priv *priv = audiodsp_privdata();
+    /* struct audiodsp_priv *priv = */audiodsp_privdata();
 #if 0	 
     if(wake_lock_active(&priv->wakelock)){
         return -1; // please stop dsp first

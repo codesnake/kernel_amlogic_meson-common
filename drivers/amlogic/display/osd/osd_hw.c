@@ -39,7 +39,6 @@
 #include <linux/amlogic/amports/vframe_receiver.h>
 #include "osd_hw_def.h"
 #include "osd_prot.h"
-//#include <mach/utils.h>
 #include "osd_antiflicker.h"
 
 #ifdef CONFIG_AML_VSYNC_FIQ_ENABLE
@@ -222,6 +221,7 @@ static inline void wait_vsync_wakeup(void)
 	wake_up_interruptible(&osd_vsync_wq);
 }
 
+#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8
 static irqreturn_t osd_rdma_isr(int irq, void *dev_id)
 {
 #define  	VOUT_ENCI	1
@@ -323,6 +323,7 @@ static irqreturn_t osd_rdma_isr(int irq, void *dev_id)
 	aml_write_reg32(P_RDMA_CTRL, 1<<24);
 	return IRQ_HANDLED;
 }
+#endif
 
 static inline void  walk_through_update_list(void)
 {
@@ -360,7 +361,7 @@ static void osd_fiq_isr(void)
 static irqreturn_t vsync_isr(int irq, void *dev_id)
 #endif
 {
-#ifndef CONFIG_VSYNC_RDMA
+#if MESON_CPU_TYPE < MESON_CPU_TYPE_MESON8
 #define  	VOUT_ENCI	1
 #define   	VOUT_ENCP	2
 #define	VOUT_ENCT	3
@@ -437,18 +438,19 @@ static irqreturn_t vsync_isr(int irq, void *dev_id)
 		aml_write_reg32(P_VIU_OSD1_BLK3_CFG_W0+ REG_OFFSET, fb1_cfg_w0);
 	}
 	//go through update list
+#ifndef CONFIG_VSYNC_RDMA
 	walk_through_update_list();
-
+#endif
 	osd_update_3d_mode(osd_hw.mode_3d[OSD1].enable,osd_hw.mode_3d[OSD2].enable);
 #endif
 
-#if 0
+#if MESON_CPU_TYPE < MESON_CPU_TYPE_MESON8
 #ifdef CONFIG_VSYNC_RDMA
 	reset_rdma();
 #endif
 #endif
 
-#ifndef CONFIG_VSYNC_RDMA
+#if MESON_CPU_TYPE < MESON_CPU_TYPE_MESON8
 	if (!vsync_hit)
 	{
 #ifdef FIQ_VSYNC
@@ -476,9 +478,9 @@ void osd_set_scan_mode(int index)
 	const vinfo_t *vinfo;
 
 	osd_hw.scan_mode = SCAN_MODE_PROGRESSIVE;
-
 	vinfo = get_current_vinfo();
 	if (vinfo) {
+		osd_hw.scale_workaround = 0;
 		switch (vinfo->mode) {
 		case VMODE_480I:
 		case VMODE_480CVBS:
@@ -489,7 +491,18 @@ void osd_set_scan_mode(int index)
 			if(osd_hw.free_scale_mode[index]){
 				osd_hw.field_out_en = 1;
 			}
-			osd_hw.scan_mode= SCAN_MODE_INTERLACE;
+			osd_hw.scan_mode = SCAN_MODE_INTERLACE;
+		break;
+		case VMODE_4K2K_24HZ:
+		case VMODE_4K2K_25HZ:
+		case VMODE_4K2K_30HZ:
+		case VMODE_4K2K_SMPTE:
+			if(osd_hw.fb_for_4k2k){
+				if(osd_hw.free_scale_enable[index]){
+					osd_hw.scale_workaround = 1;
+				}
+			}
+			osd_hw.field_out_en = 0;
 		break;
 		default:
 			if(osd_hw.free_scale_mode[index]){
@@ -898,6 +911,11 @@ void osd_free_scale_mode_hw(u32 index,u32 freescale_mode)
 void osd_get_free_scale_mode_hw(u32 index, u32 *freescale_mode)
 {
 	*freescale_mode = osd_hw.free_scale_mode[index];
+}
+
+void osd_4k2k_fb_mode_hw(u32 fb_for_4k2k)
+{
+	osd_hw.fb_for_4k2k = fb_for_4k2k;
 }
 
 void osd_free_scale_width_hw(u32 index,u32 width)
@@ -1378,7 +1396,13 @@ static  void  osd1_update_disp_freescale_enable(void)
 	int hsc_ini_rcv_num, hsc_ini_rpt_p0_num;
 
 	int hf_bank_len = 4;
-	int vf_bank_len = 4;
+	int vf_bank_len = 0;
+
+	if(osd_hw.scale_workaround){
+		vf_bank_len = 2;
+	}else{
+		vf_bank_len = 4;
+	}
 
 	vsc_bot_rcv_num = 6;
 	vsc_bot_rpt_p0_num = 2;
@@ -1436,6 +1460,12 @@ static  void  osd1_update_disp_freescale_enable(void)
 			VSYNCOSD_WR_MPEG_REG_BITS(VPP_OSD_VSC_CTRL0, 0, 16, 2);
 			VSYNCOSD_WR_MPEG_REG_BITS(VPP_OSD_VSC_CTRL0, 0, 23, 1);
 		}
+
+		if(osd_hw.scale_workaround){
+			VSYNCOSD_WR_MPEG_REG_BITS(VPP_OSD_VSC_CTRL0, 0x1, 21, 1);
+		} else {
+			VSYNCOSD_CLR_MPEG_REG_MASK(VPP_OSD_VSC_CTRL0, 1<<21);
+		}
 		VSYNCOSD_WR_MPEG_REG_BITS(VPP_OSD_VSC_CTRL0, 1, 24, 1);
 	}else{
 		VSYNCOSD_CLR_MPEG_REG_MASK(VPP_OSD_VSC_CTRL0, 1<<24);
@@ -1471,6 +1501,10 @@ static void osd1_update_coef(void)
 	int vf_coef_idx = 0;
 	int vf_coef_wren = 1;
 	int *hf_coef, *vf_coef;
+
+	if(osd_hw.scale_workaround){
+		vf_coef_idx = 2;
+	}
 
 	if (vf_coef_idx == 0){
 		vf_coef = filt_coef0;
@@ -1640,7 +1674,7 @@ static   void  osd1_update_color_mode(void)
 		data32 |= osd_hw.fb_gem[OSD1].canvas_idx << 16 ;
 		if(!osd_hw.rotate[OSD1].on_off)
 		data32 |= OSD_DATA_LITTLE_ENDIAN	 <<15 ;
-		
+
 		data32 |= osd_hw.color_info[OSD1]->hw_colormat<< 2;
 		if(osd_hw.color_info[OSD1]->color_index < COLOR_INDEX_YUV_422)
 			data32 |= 1                      << 7; /* rgb enable */
@@ -1661,7 +1695,7 @@ static   void  osd2_update_color_mode(void)
 		data32 |= osd_hw.fb_gem[OSD2].canvas_idx << 16 ;
 		if(!osd_hw.rotate[OSD1].on_off)
 		data32 |= OSD_DATA_LITTLE_ENDIAN	 <<15 ;
-		
+
 		data32 |= osd_hw.color_info[OSD2]->hw_colormat<< 2;
 		if(osd_hw.color_info[OSD2]->color_index < COLOR_INDEX_YUV_422)
 			data32 |= 1                      << 7; /* rgb enable */
@@ -1721,7 +1755,7 @@ static   void  osd1_update_enable(void)
 static   void  osd2_update_enable(void)
 {
 	if (osd_hw.free_scale_mode[OSD2]){
-		if (osd_hw.enable[OSD1] == ENABLE){
+		if (osd_hw.enable[OSD2] == ENABLE){
 			VSYNCOSD_SET_MPEG_REG_MASK(VPP_MISC,VPP_OSD2_POSTBLEND);
 			VSYNCOSD_SET_MPEG_REG_MASK(VPP_MISC,VPP_POSTBLEND_EN);
 		}else{
@@ -1885,7 +1919,7 @@ static void osd2_update_disp_osd_rotate(void)
 	  case 1:
 	  y_rev=1;
 	  break;
-	  case 2://anti-clockwise  
+	  case 2://anti-clockwise
 	  x_rev=1;
           break;
 	  case 3://anti-clockwise H flip(dst)
@@ -1893,7 +1927,7 @@ static void osd2_update_disp_osd_rotate(void)
 	  y_rev=1;
 	  break;
 	}
-	
+
 	x_start = osd_hw.rotation_pandata[OSD2].x_start;
 	x_end = osd_hw.rotation_pandata[OSD2].x_end;
 	y_start = osd_hw.rotation_pandata[OSD2].y_start;
@@ -2308,14 +2342,13 @@ void osd_init_hw(u32  logo_loaded)
 	osd_hw.updated[OSD1]=0;
 	osd_hw.updated[OSD2]=0;
 	//here we will init default value ,these value only set once .
-#ifdef CONFIG_ARCH_MESON6TV
+#if defined(CONFIG_ARCH_MESON6TVD)||(defined(CONFIG_ARCH_MESON6TV))
 	aml_set_reg32_mask(P_VPU_OSD1_MMC_CTRL, 1<<12); // set OSD to vdisp2
-	aml_write_reg32(P_MMC_CHAN4_CTRL, 0xc01f); // adjust vdisp weight and age limit
 #endif
 	if(!logo_loaded)
 	{
 		data32 = 1;          // Set DDR request priority to be urgent
-		#ifdef CONFIG_ARCH_MESON6TV
+#if defined(CONFIG_ARCH_MESON6TVD)||(defined(CONFIG_ARCH_MESON6TV))
 		data32 |= 18  << 5;  // hold_fifo_lines
 		#else
 		data32 |= 4   << 5;  // hold_fifo_lines
@@ -2330,7 +2363,7 @@ void osd_init_hw(u32  logo_loaded)
 		aml_clr_reg32_mask(P_VPP_MISC, VPP_PREBLEND_EN);
 		aml_clr_reg32_mask(P_VPP_MISC,VPP_OSD1_POSTBLEND|VPP_OSD2_POSTBLEND );
 		// just disable osd to avoid booting hang up
-		#ifdef CONFIG_ARCH_MESON6TV
+		#if defined(CONFIG_ARCH_MESON6TVD)||(defined(CONFIG_ARCH_MESON6TV))
 		data32 = 0x0 << 0; // osd_blk_enable
 		#else
 		data32 = 0x1 << 0;
@@ -2396,17 +2429,13 @@ void osd_init_hw(u32  logo_loaded)
 #endif
 
 #ifdef CONFIG_VSYNC_RDMA
-#if MESON_CPU_TYPE < MESON_CPU_TYPE_MESON8
-	if (request_irq(INT_RDMA, &osd_rdma_isr,
-                    IRQF_SHARED, "osd_rdma", (void *)"osd_rdma"))
-
-#else
+#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8
 	if (request_irq(INT_RDMA, &osd_rdma_isr,
                     IRQF_DISABLED, "osd_rdma", (void *)"osd_rdma"))
-#endif
 	{
 		amlog_level(LOG_LEVEL_HIGH,"can't request irq for rdma\r\n");
 	}
+#endif
 #endif
 	return ;
 }

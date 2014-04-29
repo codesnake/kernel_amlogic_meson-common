@@ -31,7 +31,7 @@ extern spinlock_t gate_lock;
 
 #define CLK_GATE_ON(_MOD) \
 	do{                     \
-		int flags; \
+		unsigned long flags; \
 		spin_lock_irqsave(&gate_lock, flags); \
 		__CLK_GATE_ON(_MOD); \
 		spin_unlock_irqrestore(&gate_lock, flags); \
@@ -39,7 +39,7 @@ extern spinlock_t gate_lock;
 	
 #define CLK_GATE_OFF(_MOD) \
 	do{                     \
-		int flags; \
+		unsigned long flags; \
 		spin_lock_irqsave(&gate_lock, flags); \
 		__CLK_GATE_OFF(_MOD); \
 		spin_unlock_irqrestore(&gate_lock, flags); \

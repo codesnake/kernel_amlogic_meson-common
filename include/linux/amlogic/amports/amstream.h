@@ -120,6 +120,10 @@
 #define AMSTREAM_IOC_CM_DEBUG  _IOWR(AMSTREAM_IOC_MAGIC, 0x33, unsigned long long)
 #define AMSTREAM_IOC_CM_REGMAP  _IOW(AMSTREAM_IOC_MAGIC, 0x34, struct cm_regmap_s)
 
+//VPP.3D IOCTL command list^M
+#define  AMSTREAM_IOC_SET_3D_TYPE  _IOW(AMSTREAM_IOC_MAGIC, 0x3c, unsigned int)
+#define  AMSTREAM_IOC_GET_3D_TYPE  _IOW(AMSTREAM_IOC_MAGIC, 0x3d, unsigned int)
+
 #define AMSTREAM_IOC_SUB_NUM	_IOR(AMSTREAM_IOC_MAGIC, 0x50, unsigned long)
 #define AMSTREAM_IOC_SUB_INFO	_IOR(AMSTREAM_IOC_MAGIC, 0x51, unsigned long)
 #define AMSTREAM_IOC_GET_BLACKOUT_POLICY   _IOR(AMSTREAM_IOC_MAGIC, 0x52, unsigned long)
@@ -153,7 +157,7 @@
 #define AMSTREAM_IOC_GET_VIDEO_CUR_DELAY_MS _IOR(AMSTREAM_IOC_MAGIC, 0xa5, unsigned long)
 #define AMSTREAM_IOC_GET_AUDIO_AVG_BITRATE_BPS _IOR(AMSTREAM_IOC_MAGIC, 0xa6, unsigned long)
 #define AMSTREAM_IOC_GET_VIDEO_AVG_BITRATE_BPS _IOR(AMSTREAM_IOC_MAGIC, 0xa7, unsigned long)
-#define AMSTREAM_IOC_SET_APTS                  _IOW(AMSTREAM_IOC_MAGIC, 0xa8, unsigned long)                
+#define AMSTREAM_IOC_SET_APTS                  _IOW(AMSTREAM_IOC_MAGIC, 0xa8, unsigned long)
 #define AMSTREAM_IOC_GET_LAST_CHECKIN_APTS   _IOR(AMSTREAM_IOC_MAGIC, 0xa9, unsigned long)
 #define AMSTREAM_IOC_GET_LAST_CHECKIN_VPTS   _IOR(AMSTREAM_IOC_MAGIC, 0xaa, unsigned long)
 #define AMSTREAM_IOC_GET_LAST_CHECKOUT_APTS  _IOR(AMSTREAM_IOC_MAGIC, 0xab, unsigned long)
@@ -257,16 +261,16 @@ struct dec_sysinfo {
 
 struct subtitle_info
 {
-    unsigned char id;      
+    unsigned char id;
     unsigned char width;
     unsigned char height;
-    unsigned char type;    
+    unsigned char type;
 };
 
 struct codec_profile_t
 {
-	char *name;		// video codec short name 
-	char *profile;	// Attributes,seperated by commas 
+	char *name;		// video codec short name
+	char *profile;	// Attributes,seperated by commas
 };
 
 #define SUPPORT_VDEC_NUM	(8)
@@ -286,7 +290,7 @@ struct tsdemux_ops {
     int (*set_aid)(int apid);
     int (*set_sid)(int spid);
     int (*set_skipbyte)(int skipbyte);
-    int (*set_demux)(int dev);	
+    int (*set_demux)(int dev);
 };
 
 void tsdemux_set_ops(struct tsdemux_ops *ops);

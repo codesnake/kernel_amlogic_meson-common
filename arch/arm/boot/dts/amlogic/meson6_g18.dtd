@@ -95,7 +95,7 @@ void root_func(){
         compatible = "amlogic,ion_dev";
         dev_name = "ion_dev";
         status = "ok";
-        reserve-memory = <0x01200000>;
+        reserve-memory = <0x02000000>;
         reserve-iomap = "true";
     };
 
@@ -111,11 +111,11 @@ void root_func(){
 		compatible = "amlogic,mesonfb";
 		dev_name = "mesonfb";
 		status = "okay";
-		reserve-memory = <0x01000000 0x00100000>;
+		reserve-memory = <0x00b00000 0x00100000>;
 		reserve-iomap = "true";
-	  vmode = <2>; /*0:VMODE_720P 1:VMODE_LCD  2:VMODE_LVDS_1080P*/
+	  vmode = <0>; /*0:VMODE_720P 1:VMODE_LCD  2:VMODE_LVDS_1080P 3:VMODE_1080P*/
 	  scale_mode = <0>; /*0:default 1:new*/
-	  display_size_default = <1920 1080 1920 2160 32>;
+	  display_size_default = <1280 720 1280 1440 32>;  // osd0:8M, osd1:1m  1280*720*4*3 = 11,059,200
 	};
 //$$ DEVICE="deinterlace"
 //$$ L2 PROP_STR = "status"
@@ -124,7 +124,7 @@ void root_func(){
 		compatible = "amlogic,deinterlace";
 		dev_name = "deinterlace";
 		status = "okay";
-		reserve-memory = <0x02300000>;
+		reserve-memory = <0x01c00000>; // 27M
 		reserve-iomap = "true";
 	};
 
@@ -138,7 +138,7 @@ void root_func(){
 		compatible = "amlogic,mesonstream";
 		dev_name = "mesonstream.0";
 		status = "okay";
-		reserve-memory = <0x00a00000>;
+		reserve-memory = <0x00a00000>; //10M
 		reserve-iomap = "true";
 	};
 
@@ -153,7 +153,7 @@ void root_func(){
                 compatible = "amlogic,vdec";
                 dev_name = "vdec.0";
                 status = "okay";
-                reserve-memory = <0x04000000>;
+                reserve-memory = <0x02000000>; //32M
 		reserve-iomap = "true";
         };
 
@@ -167,7 +167,7 @@ void root_func(){
 		compatible = "amlogic,ppmgr";
 		dev_name = "ppmgr";
 		status = "okay";
-		reserve-memory = <0x02c00000>;	
+		reserve-memory = <0x01300000>;	// 1280*732*21 = 19,676,160
 		reserve-iomap = "true";	
 	};
 
@@ -425,6 +425,8 @@ void root_func(){
 		device_id = <0>;
 		pinctrl-names="default";
 		pinctrl-0=<&ao_i2c_master>;
+		use_pio = <0>;
+		master_i2c_speed = <100000>;
 	};
 
 //$$ DEVICE = "I2C_A"
@@ -442,6 +444,8 @@ void root_func(){
 		pinctrl-0=<&a_i2c_master>;
 		#address-cells = <1>;
 		#size-cells = <0>;	
+		use_pio = <0>;
+		master_i2c_speed = <300000>;
 	};
 	
 //$$ DEVICE="I2C_B"
@@ -459,6 +463,8 @@ void root_func(){
 		pinctrl-0=<&b_i2c_master>;
 		#address-cells = <1>;
 		#size-cells = <0>;
+		use_pio = <0>;
+		master_i2c_speed = <300000>;
 	};
 
 /// ***************************************************************************************
@@ -481,17 +487,17 @@ void root_func(){
             dvfs_table  = <
                 /* NOTE: frequent in this table must be ascending order */
                 /* frequent(Khz)    min_uV      max_uV                  */
-                 200000             1040000     1040000
-                 600000             1040000     1040000
-                 792000             1040000     1040000
-                 816000             1110000     1110000
-                 840000             1110000     1110000
-                 984000             1140000     1140000
-                1000000             1140000     1140000
-                1080000             1240000     1240000
-                1200000             1260000     1260000
-                1320000             1330000     1330000
-                1500000             1330000     1330000
+                 200000             1080000     1080000
+                 600000             1080000     1080000
+                 792000             1080000     1080000
+                 816000             1150000     1150000
+                 840000             1150000     1150000
+                 984000             1150000     1150000
+                1000000             1150000     1150000
+                1080000             1250000     1250000
+                1200000             1270000     1270000
+                1320000             1340000     1340000
+                1500000             1340000     1340000
             >;
 	};
     };
@@ -507,10 +513,11 @@ void root_func(){
         compatible = "amlogic, meson_vcck_dvfs";
         dev_name = "meson_vcck_dvfs_driver";
         status = "ok";
-        default_uV = <1110000>;
+        default_uV = <1280000>;
         pinctrl-names = "default";
         pinctrl-0 = <&aml_pwm_pins>;
         use_pwm = <1>; 
+        pmw_controller = "PWM_C";
         table_count = <16>;
         cs_voltage_table = <
         /*   
@@ -524,22 +531,22 @@ void root_func(){
          *    
          *  PWM value       VCCK voltage 
          */   
-            0x190003         970000
-            0x170005        1010000
-            0x150007        1040000
-            0x130009        1070000
-            0x11000b        1110000
-            0x0f000d        1140000
-            0x0d000f        1180000
-            0x0b0011        1210000
-            0x090013        1240000
-            0x080014        1260000
-            0x070015        1280000
-            0x060016        1300000
-            0x040018        1330000
-            0x030019        1350000
-            0x01001b        1380000
-            0x00001c        1400000
+            0x130009        1010000
+            0x12000a        1050000
+            0x11000b        1070000
+            0x10000c        1090000
+            0x0f000d        1110000
+            0x0e000e        1130000
+            0x0d000f        1150000
+            0x0c0010        1170000
+            0x0b0011        1190000
+            0x0a0012        1210000
+            0x090013        1220000
+            0x080014        1240000
+            0x070015        1270000
+            0x060016        1280000
+            0x050017        1300000
+            0x040018        1320000
         >;   
     };   	
 
@@ -828,10 +835,6 @@ void root_func(){
 			cache{
 				offset=<0x0 0x4a800000>;
 				size=<0x0 0x20000000>;
-			};
-			backup{
-				offset=<0x0 0x6a800000>;
-				size=<0x0 0x10000000>;
 			};
 			userdata{
 				offset=<0xffffffff 0xffffffff>;

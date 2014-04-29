@@ -39,16 +39,19 @@ struct bt_dev_runtime_data {
 
 static void bt_device_init(struct bt_dev_data *pdata)
 {
-    if(pdata->gpio_reset > 0 )
+    if(pdata->gpio_reset > 0 ) {
         amlogic_gpio_request(pdata->gpio_reset, BT_RFKILL);
+    }    
         
-    if(pdata->gpio_en > 0 )
+    if(pdata->gpio_en > 0 ) {
         amlogic_gpio_request(pdata->gpio_en, BT_RFKILL);
+    }
         
     if(pdata->gpio_wake > 0 ) {
         amlogic_gpio_request(pdata->gpio_wake, BT_RFKILL);
         amlogic_gpio_direction_output(pdata->gpio_wake, 1, BT_RFKILL);
     }
+
 }
 
 static void bt_device_deinit(struct bt_dev_data *pdata)

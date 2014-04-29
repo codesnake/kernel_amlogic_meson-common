@@ -54,7 +54,7 @@ static  output_dev_list_t aml_output_dev[LOGO_DEV_MAX];
 			res = &memobj;
 			idx = find_reserve_block(platform_dev->dev.of_node->name,num);
 			if(idx < 0){
-				amlog_mask_level(LOG_LEVEL_HIGH,"can not find %s%d reserve block\n",platform_dev->dev.of_node->name,num);
+				amlog_mask_level(LOG_MASK_DEVICE, LOG_LEVEL_HIGH,"can not find %s %d reserve block\n",platform_dev->dev.of_node->name, num);
 				continue;
 			}
 			res->start = (phys_addr_t)get_reserve_block_addr(idx);

@@ -105,6 +105,11 @@ int aml_mdio_register(struct net_device *ndev)
 				phydev->irq = PHY_POLL;
 				irqlist[addr] = PHY_POLL;
 			}
+			if (phydev->phy_id  != 0) {
+				//priv->phydev->addr = addr;
+				priv->phy_addr = addr;
+				irqlist[addr] = PHY_POLL;
+			}
 			pr_info("%s: PHY ID %08x at %d IRQ %d (%s)%s\n",
 					ndev->name, phydev->phy_id, addr,
 					phydev->irq, dev_name(&phydev->dev),

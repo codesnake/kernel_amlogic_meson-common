@@ -28,6 +28,16 @@
 
 #include <linux/amlogic/battery_parameter.h>
 #ifdef CONFIG_OF
+
+#ifdef CONFIG_AMLOGIC_USB
+static struct notifier_block axp20_otg_nb;                            // notifier_block for OTG issue
+static struct notifier_block axp20_usb_nb;                            // notifier_block for USB charger issue
+extern int dwc_otg_power_register_notifier(struct notifier_block *nb);
+extern int dwc_otg_power_unregister_notifier(struct notifier_block *nb);
+extern int dwc_otg_charger_detect_register_notifier(struct notifier_block *nb);
+extern int dwc_otg_charger_detect_unregister_notifier(struct notifier_block *nb);
+#endif
+
 /*
  * Move these configs from bsp to this file.
  * Most of these configs are fixed and no need to change.
@@ -653,6 +663,16 @@ static int  axp_mfd_probe(struct i2c_client *client,
     if (!type) {                                                        // sub type is not supported
         DBG("sub_type of '%s' is not match, abort\n", sub_type);
         goto out_free_chip; 
+    }
+#endif
+#ifdef CONFIG_AW_AXP20
+    if (type->driver_data == 2) {
+    #ifdef CONFIG_AMLOGIC_USB
+        axp20_otg_nb.notifier_call = axp202_otg_change;
+        axp20_usb_nb.notifier_call = axp202_usb_charger;
+        dwc_otg_power_register_notifier(&axp20_otg_nb);
+        dwc_otg_charger_detect_register_notifier(&axp20_usb_nb);
+    #endif
     }
 #endif
 	axp = client;

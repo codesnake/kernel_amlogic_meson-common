@@ -17,4 +17,11 @@ typedef struct vm_output_para{
 
 int vm_fill_buffer(struct videobuf_buffer* vb , vm_output_para_t* para);
 
+#ifdef CONFIG_CMA
+
+int vm_init_buf(size_t size);
+void vm_deinit_buf(void);
+void vm_reserve_cma(void);
+#endif
+
 #endif /* VM_API_INCLUDE_ */

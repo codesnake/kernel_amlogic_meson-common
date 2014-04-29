@@ -29,7 +29,11 @@
 
 #ifdef CONFIG_PLAT_MESON
 #include <mach/io.h>
+#ifdef CONFIG_MESON_TRUSTZONE
+#include <mach/meson-secure.h>
 #endif
+#endif
+
 
 #define CACHE_LINE_SIZE		32
 
@@ -110,7 +114,11 @@ static inline void debug_writel(unsigned long val)
 
 static void pl310_set_debug(unsigned long val)
 {
+#ifdef CONFIG_MESON_TRUSTZONE
+	meson_smc1(TRUSTZONE_MON_L2X0_DEBUG_INDEX, val);
+#else
 	writel_relaxed(val, l2x0_base + L2X0_DEBUG_CTRL);
+#endif
 }
 #else
 /* Optimised out for non-errata case */
@@ -336,7 +344,12 @@ static void l2x0_disable(void)
 
 	raw_spin_lock_irqsave(&l2x0_lock, flags);
 	__l2x0_flush_all();
+
+#ifdef CONFIG_MESON_TRUSTZONE
+	meson_smc1(TRUSTZONE_MON_L2X0_CTRL_INDEX, 0);
+#else
 	writel_relaxed(0, l2x0_base + L2X0_CTRL);
+#endif
 	dsb();
 	raw_spin_unlock_irqrestore(&l2x0_lock, flags);
 }
@@ -442,12 +455,21 @@ void __init l2x0_init(void __iomem *base, u32 aux_val, u32 aux_mask)
 		l2x0_unlock(l2x0_cache_id);
 
 		/* l2x0 controller is disabled */
+#ifdef CONFIG_MESON_TRUSTZONE
+		meson_smc1(TRUSTZONE_MON_L2X0_AUXCTRL_INDEX, aux);
+#else
 		writel_relaxed(aux, l2x0_base + L2X0_AUX_CTRL);
+#endif
 
 		l2x0_inv_all();
 
 		/* enable L2X0 */
+
+#ifdef CONFIG_MESON_TRUSTZONE
+		meson_smc1(TRUSTZONE_MON_L2X0_CTRL_INDEX, L2X0_CTRL_EN);
+#else
 		writel_relaxed(L2X0_CTRL_EN, l2x0_base + L2X0_CTRL);
+#endif
 	}
 
 	/* Re-read it in case some bits are reserved. */
@@ -623,28 +645,53 @@ static void __init pl310_of_setup(const struct device_node *np,
 
 	of_property_read_u32_array(np, "arm,tag-latency", tag, ARRAY_SIZE(tag));
 	if (tag[0] && tag[1] && tag[2])
+
+#ifdef CONFIG_MESON_TRUSTZONE
+		meson_smc1(TRUSTZONE_MON_L2X0_TAGLATENCY_INDEX,
+			((tag[0] - 1) << L2X0_LATENCY_CTRL_RD_SHIFT) |
+			((tag[1] - 1) << L2X0_LATENCY_CTRL_WR_SHIFT) |
+			((tag[2] - 1) << L2X0_LATENCY_CTRL_SETUP_SHIFT));
+#else
 		writel_relaxed(
 			((tag[0] - 1) << L2X0_LATENCY_CTRL_RD_SHIFT) |
 			((tag[1] - 1) << L2X0_LATENCY_CTRL_WR_SHIFT) |
 			((tag[2] - 1) << L2X0_LATENCY_CTRL_SETUP_SHIFT),
 			l2x0_base + L2X0_TAG_LATENCY_CTRL);
+#endif
 
 	of_property_read_u32_array(np, "arm,data-latency",
 				   data, ARRAY_SIZE(data));
 	if (data[0] && data[1] && data[2])
+
+#ifdef CONFIG_MESON_TRUSTZONE
+		meson_smc1(TRUSTZONE_MON_L2X0_DATALATENCY_INDEX,
+			((data[0] - 1) << L2X0_LATENCY_CTRL_RD_SHIFT) |
+			((data[1] - 1) << L2X0_LATENCY_CTRL_WR_SHIFT) |
+			((data[2] - 1) << L2X0_LATENCY_CTRL_SETUP_SHIFT));
+#else
 		writel_relaxed(
 			((data[0] - 1) << L2X0_LATENCY_CTRL_RD_SHIFT) |
 			((data[1] - 1) << L2X0_LATENCY_CTRL_WR_SHIFT) |
 			((data[2] - 1) << L2X0_LATENCY_CTRL_SETUP_SHIFT),
 			l2x0_base + L2X0_DATA_LATENCY_CTRL);
+#endif
 
 	of_property_read_u32_array(np, "arm,filter-ranges",
 				   filter, ARRAY_SIZE(filter));
 	if (filter[1]) {
+#ifdef CONFIG_MESON_TRUSTZONE
+		meson_smc1(TRUSTZONE_MON_L2X0_FILTEREND_INDEX, ALIGN(filter[0] + filter[1], SZ_1M));
+#else
 		writel_relaxed(ALIGN(filter[0] + filter[1], SZ_1M),
 			       l2x0_base + L2X0_ADDR_FILTER_END);
+#endif
+
+#ifdef CONFIG_MESON_TRUSTZONE
+		meson_smc1(TRUSTZONE_MON_L2X0_FILTERSTART_INDEX, (filter[0] & ~(SZ_1M - 1)) | L2X0_ADDR_FILTER_EN);
+#else
 		writel_relaxed((filter[0] & ~(SZ_1M - 1)) | L2X0_ADDR_FILTER_EN,
 			       l2x0_base + L2X0_ADDR_FILTER_START);
+#endif
 	}
 }
 
@@ -689,12 +736,20 @@ static void l2x0_resume(void)
 		/* restore aux ctrl and enable l2 */
 		l2x0_unlock(readl_relaxed(l2x0_base + L2X0_CACHE_ID));
 
+#ifdef CONFIG_MESON_TRUSTZONE
+		meson_smc1(TRUSTZONE_MON_L2X0_AUXCTRL_INDEX, l2x0_saved_regs.aux_ctrl);
+#else
 		writel_relaxed(l2x0_saved_regs.aux_ctrl, l2x0_base +
 			L2X0_AUX_CTRL);
+#endif
 
 		l2x0_inv_all();
 
+#ifdef CONFIG_MESON_TRUSTZONE
+		meson_smc1(TRUSTZONE_MON_L2X0_CTRL_INDEX, L2X0_CTRL_EN);
+#else
 		writel_relaxed(L2X0_CTRL_EN, l2x0_base + L2X0_CTRL);
+#endif
 	}
 }
 
@@ -704,24 +759,48 @@ static void pl310_resume(void)
 
 	if (!(readl_relaxed(l2x0_base + L2X0_CTRL) & L2X0_CTRL_EN)) {
 		/* restore pl310 setup */
+#ifdef CONFIG_MESON_TRUSTZONE
+		meson_smc1(TRUSTZONE_MON_L2X0_TAGLATENCY_INDEX, l2x0_saved_regs.tag_latency);
+#else
 		writel_relaxed(l2x0_saved_regs.tag_latency,
 			l2x0_base + L2X0_TAG_LATENCY_CTRL);
+#endif
+#ifdef CONFIG_MESON_TRUSTZONE
+		meson_smc1(TRUSTZONE_MON_L2X0_DATALATENCY_INDEX, l2x0_saved_regs.data_latency);
+#else
 		writel_relaxed(l2x0_saved_regs.data_latency,
 			l2x0_base + L2X0_DATA_LATENCY_CTRL);
+#endif
+#ifdef CONFIG_MESON_TRUSTZONE
+		meson_smc1(TRUSTZONE_MON_L2X0_FILTEREND_INDEX, l2x0_saved_regs.filter_end);
+#else
 		writel_relaxed(l2x0_saved_regs.filter_end,
 			l2x0_base + L2X0_ADDR_FILTER_END);
+#endif
+#ifdef CONFIG_MESON_TRUSTZONE
+		meson_smc1(TRUSTZONE_MON_L2X0_FILTERSTART_INDEX, l2x0_saved_regs.filter_start);
+#else
 		writel_relaxed(l2x0_saved_regs.filter_start,
 			l2x0_base + L2X0_ADDR_FILTER_START);
+#endif
 
 		l2x0_revision = readl_relaxed(l2x0_base + L2X0_CACHE_ID) &
 			L2X0_CACHE_ID_RTL_MASK;
 
 		if (l2x0_revision >= L2X0_CACHE_ID_RTL_R2P0) {
+#ifdef CONFIG_MESON_TRUSTZONE
+			meson_smc1(TRUSTZONE_MON_L2X0_PREFETCH_INDEX, l2x0_saved_regs.prefetch_ctrl);
+#else
 			writel_relaxed(l2x0_saved_regs.prefetch_ctrl,
 				l2x0_base + L2X0_PREFETCH_CTRL);
+#endif
 			if (l2x0_revision >= L2X0_CACHE_ID_RTL_R3P0)
+#ifdef CONFIG_MESON_TRUSTZONE
+				meson_smc1(TRUSTZONE_MON_L2X0_POWER_INDEX, l2x0_saved_regs.pwr_ctrl);
+#else
 				writel_relaxed(l2x0_saved_regs.pwr_ctrl,
 					l2x0_base + L2X0_POWER_CTRL);
+#endif
 		}
 	}
 
@@ -731,9 +810,14 @@ static void pl310_resume(void)
 static void aurora_resume(void)
 {
 	if (!(readl(l2x0_base + L2X0_CTRL) & L2X0_CTRL_EN)) {
+#ifdef CONFIG_MESON_TRUSTZONE
+		meson_smc1(TRUSTZONE_MON_L2X0_AUXCTRL_INDEX, l2x0_saved_regs.aux_ctrl);
+		meson_smc1(TRUSTZONE_MON_L2X0_CTRL_INDEX, l2x0_saved_regs.ctrl);
+#else
 		writel_relaxed(l2x0_saved_regs.aux_ctrl,
 				l2x0_base + L2X0_AUX_CTRL);
 		writel_relaxed(l2x0_saved_regs.ctrl, l2x0_base + L2X0_CTRL);
+#endif
 	}
 }
 
@@ -814,7 +898,11 @@ static void __init meson_of_setup(const struct device_node *np,
 		mask &= ~(1 << L2X0_AUX_CTRL_INSTR_PREFETCH_SHIFT);
 		prefetch_val = readl_relaxed(prefetch_reg);
 		prefetch_val |= (1 << L2X0_PREF_CTRL_INSTR_PREFETCH_SHIFT);
+#ifdef CONFIG_MESON_TRUSTZONE
+		meson_smc1(TRUSTZONE_MON_L2X0_PREFETCH_INDEX, prefetch_val);
+#else
 		writel_relaxed(prefetch_val,prefetch_reg);		
+#endif
 	}
 
 	if(of_property_read_bool(np, "aux-data_prefetch")){
@@ -822,7 +910,11 @@ static void __init meson_of_setup(const struct device_node *np,
 		mask &= ~(1 << L2X0_AUX_CTRL_DATA_PREFETCH_SHIFT);		
 		prefetch_val = readl_relaxed(prefetch_reg);
 		prefetch_val |= (1 << L2X0_PREF_CTRL_DATA_PREFETCH_SHIFT);
+#ifdef CONFIG_MESON_TRUSTZONE
+		meson_smc1(TRUSTZONE_MON_L2X0_PREFETCH_INDEX, prefetch_val);
+#else
 		writel_relaxed(prefetch_val,prefetch_reg);		
+#endif
 	}
 
 	if (of_property_read_bool(np, "aux-ns_lockdown")) {
@@ -908,31 +1000,51 @@ static void __init meson_of_setup(const struct device_node *np,
 	if(of_property_read_bool(np, "prefetch-double_line_fill")){
 		prefetch_val = readl_relaxed(prefetch_reg);
 		prefetch_val |= (1 << L2X0_PREF_CTRL_DOUBLE_LINE_FILL_SHIFT);
+#ifdef CONFIG_MESON_TRUSTZONE
+		meson_smc1(TRUSTZONE_MON_L2X0_PREFETCH_INDEX, prefetch_val);
+#else
 		writel_relaxed(prefetch_val,prefetch_reg);
+#endif
 	}
 
 	if(of_property_read_bool(np, "prefetch-double_line_fill_on_wrap_read_disable")){
 		prefetch_val = readl_relaxed(prefetch_reg);
 		prefetch_val |= (1 << L2X0_PREF_CTRL_DLF_ON_WRAP_DISABLE_SHIFT);
+#ifdef CONFIG_MESON_TRUSTZONE
+		meson_smc1(TRUSTZONE_MON_L2X0_PREFETCH_INDEX, prefetch_val);
+#else
 		writel_relaxed(prefetch_val,prefetch_reg);
+#endif
 	}
 
 	if(of_property_read_bool(np, "prefetch-prefetch_drop")){
 		prefetch_val = readl_relaxed(prefetch_reg);
 		prefetch_val |= (1 << L2X0_PREF_CTRL_PREFETCH_DROP_SHIFT);
+#ifdef CONFIG_MESON_TRUSTZONE
+		meson_smc1(TRUSTZONE_MON_L2X0_PREFETCH_INDEX, prefetch_val);
+#else
 		writel_relaxed(prefetch_val,prefetch_reg);
+#endif
 	}
 
 	if(of_property_read_bool(np, "prefetch-incr_double_line_fill")){
 		prefetch_val = readl_relaxed(prefetch_reg);
 		prefetch_val |= (1 << L2X0_PREF_CTRL_INCR_DLF_SHIFT);
+#ifdef CONFIG_MESON_TRUSTZONE
+		meson_smc1(TRUSTZONE_MON_L2X0_PREFETCH_INDEX, prefetch_val);
+#else
 		writel_relaxed(prefetch_val,prefetch_reg);
+#endif
 	}
 
 	if(of_property_read_bool(np, "prefetch-not_same_id_excl_seq")){
 		prefetch_val = readl_relaxed(prefetch_reg);
 		prefetch_val |= (1 << L2X0_PREF_CTRL_NOT_SAME_ID_EXEL_SEQ_SHIFT);
+#ifdef CONFIG_MESON_TRUSTZONE
+		meson_smc1(TRUSTZONE_MON_L2X0_PREFETCH_INDEX, prefetch_val);
+#else
 		writel_relaxed(prefetch_val,prefetch_reg);
+#endif
 	}
 
 	if(!of_property_read_u32(np, "prefetch-prefetch_offset",&prefetch_offset)){
@@ -944,7 +1056,11 @@ static void __init meson_of_setup(const struct device_node *np,
 			prefetch_val = readl_relaxed(prefetch_reg);
 			prefetch_val &= ~(L2X0_PREF_CTRL_PERFETCH_OFFSET_MASK);
 			prefetch_val |= (prefetch_offset << L2X0_PREF_CTRL_PERFETCH_OFFSET_SHIFT);
-			writel_relaxed(prefetch_val,prefetch_reg);	
+#ifdef CONFIG_MESON_TRUSTZONE
+			meson_smc1(TRUSTZONE_MON_L2X0_PREFETCH_INDEX, prefetch_val);
+#else
+			writel_relaxed(prefetch_val,prefetch_reg);
+#endif
 		default:
 			break;
 		}
@@ -954,13 +1070,21 @@ static void __init meson_of_setup(const struct device_node *np,
 	if(of_property_read_bool(np, "power-dynamic_clk_gating")){
 		power_val = readl_relaxed(power_reg);
 		power_val |= L2X0_DYNAMIC_CLK_GATING_EN;
+#ifdef CONFIG_MESON_TRUSTZONE
+		meson_smc1(TRUSTZONE_MON_L2X0_POWER_INDEX, power_val);
+#else
 		writel_relaxed(power_val,power_reg);
+#endif
 	}
 
 	if(of_property_read_bool(np, "power-standby_mode")){
 		power_val = readl_relaxed(power_reg);
 		power_val |= L2X0_STNDBY_MODE_EN;
+#ifdef CONFIG_MESON_TRUSTZONE
+		meson_smc1(TRUSTZONE_MON_L2X0_POWER_INDEX, power_val);
+#else
 		writel_relaxed(power_val,power_reg);
+#endif
 	}
 
 	*aux_val = val;

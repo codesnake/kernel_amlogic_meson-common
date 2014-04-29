@@ -51,8 +51,6 @@ static int  osd_rdma_init(void);
 
 static int  update_table_item(u32 addr,u32 val)
 {
-	int i;
-
 	if(item_count > (MAX_TABLE_ITEM-1)) return -1;
 
 	//new comer,then add it .
@@ -163,14 +161,13 @@ static int start_osd_rdma(char channel)
 	data32 &= ~(1<<inc_bit);   // [    2] ctrl_cbus_addr_incr_1. 1=Incremental register access; 0=Non-incremental.
 
 	aml_write_reg32(P_RDMA_ACCESS_AUTO, data32);
+	return 1;
 }
 
 static int stop_rdma(char channel)
 {
 	char intr_bit=8*channel;
-	char rw_bit=4+channel;
-	char inc_bit=channel;
-	u32 data32;
+	u32 data32 = 0x0;
 
 	data32  = aml_read_reg32(P_RDMA_ACCESS_AUTO);
 	data32 &= ~(0x1 << intr_bit);   // [23: 16] interrupt inputs enable mask for auto-start 1: vsync int bit 0
@@ -188,10 +185,6 @@ EXPORT_SYMBOL(reset_rdma);
 
 int osd_rdma_enable(u32  enable)
 {
-	char intr_bit=8;
-	char rw_bit=5;
-	char inc_bit=1;
-	u32 data32;
 	if (!osd_rdma_init_flat){
 		osd_rdma_init();
 	}
@@ -206,16 +199,17 @@ int osd_rdma_enable(u32  enable)
 	}else{
 		stop_rdma(RDMA_CHANNEL_INDEX);
 	}
+	return 1;
 }
 EXPORT_SYMBOL(osd_rdma_enable);
 
 static int  osd_rdma_init(void)
 {
 	// alloc map table .
-	static u32* table_vaddr;
+	static ulong table_vaddr;
 	osd_rdma_init_flat = true;
 	table_vaddr= __get_free_pages(GFP_KERNEL, get_order(PAGE_SIZE));
-	if (NULL==table_vaddr) {
+	if (!table_vaddr) {
 		printk("%s: failed to alloc rmda_table\n", __func__);
 		return -1;
 	}

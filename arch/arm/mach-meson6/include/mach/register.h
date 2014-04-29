@@ -1194,6 +1194,10 @@
 #define P_HHI_VDIN_MEAS_CLK_CNTL 		CBUS_REG_ADDR(HHI_VDIN_MEAS_CLK_CNTL) 	///../ucode/register.h
 #define HHI_PCM_CLK_CNTL 0x1096 	///../ucode/register.h
 #define P_HHI_PCM_CLK_CNTL 		CBUS_REG_ADDR(HHI_PCM_CLK_CNTL) 	///../ucode/register.h
+#define HHI_VDAC_CNTL0 0x10bd 	///../ucode/register.h:1642
+#define P_HHI_VDAC_CNTL0 		CBUS_REG_ADDR(HHI_VDAC_CNTL0)
+#define HHI_VDAC_CNTL1 0x10be 	///../ucode/register.h:1643
+#define P_HHI_VDAC_CNTL1 		CBUS_REG_ADDR(HHI_VDAC_CNTL1)
 #define HHI_SYS_PLL_CNTL 0x1098 	///../ucode/register.h
 #define P_HHI_SYS_PLL_CNTL 		CBUS_REG_ADDR(HHI_SYS_PLL_CNTL) 	///../ucode/register.h
 #define HHI_SYS_PLL_CNTL2 0x1099 	///../ucode/register.h

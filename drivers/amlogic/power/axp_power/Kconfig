@@ -25,7 +25,6 @@ config AW_AXP19
 
 config AW_AXP20
 	bool "AXP20 driver"
-    select AML_PMU_ALGORITHM_SUPPORT
 	---help---
 	  AXP20 driver
 

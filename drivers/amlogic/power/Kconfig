@@ -56,15 +56,13 @@ config UBOOT_BATTERY_PARAMETERS
 	    Say y if you want to get battery parameters from uboot
 
 config AML_PMU_ALGORITHM_SUPPORT
-    bool "Amlogic PMU battery algorithm support"
-    default n
+    tristate "Amlogic PMU battery algorithm support"
     select AML_RTC
     help
         Say y if your pmu device need this algorithm support
 
 config AML_DVFS
     bool "Amlogic DVFS interface support"
-    depends on AMLOGIC_MESON_CPUFREQ 
     default y
     help
         interface for clock adjustment and power managment

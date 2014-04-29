@@ -835,14 +835,6 @@ int rn5t618_usb_charger(struct notifier_block *nb, unsigned long value, void *pd
         rn5t618_charger_job.value = value;
         return 0;
     }
-#ifdef CONFIG_HAS_EARLYSUSPEND
-    if (in_early_suspend) {
-        wake_lock(&rn5t618_lock);
-        RICOH_DBG("%s, usb power status changed in early suspend, wake up now\n", __func__);
-        input_report_key(rn5t618_power_key, KEY_POWER, 1);              // assume power key pressed 
-        input_sync(rn5t618_power_key);
-    }
-#endif
     switch (value) {
     case USB_BC_MODE_DISCONNECT:                                        // disconnect
     case USB_BC_MODE_SDP:                                               // pc
@@ -1037,11 +1029,14 @@ static ssize_t dbg_info_show(struct device *dev, struct device_attribute *attr, 
 {
     struct power_supply   *battery = dev_get_drvdata(dev);
     struct rn5t618_supply *supply = container_of(battery, struct rn5t618_supply, batt); 
-    int size;
+    struct aml_pmu_api  *api;
 
-    size = aml_pmu_format_dbg_buffer(&supply->aml_charger, buf);
-
-    return size;
+    api = aml_pmu_get_api();
+    if (api && api->pmu_format_dbg_buffer) {
+        return api->pmu_format_dbg_buffer(&supply->aml_charger, buf);
+    } else {
+        return sprintf(buf, "api not found, please insert pmu.ko\n");
+    }
 }
 
 static ssize_t dbg_info_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
@@ -1087,18 +1082,28 @@ static ssize_t battery_para_store(struct device *dev, struct device_attribute *a
 
 static ssize_t report_delay_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
-    return sprintf(buf, "report_delay = %d\n", aml_pmu_get_report_delay()); 
+    struct aml_pmu_api *api = aml_pmu_get_api();
+    if (api && api->pmu_get_report_delay) {
+        return sprintf(buf, "report_delay = %d\n", api->pmu_get_report_delay());
+    } else {
+        return sprintf(buf, "error, api not found\n");
+    }
 }
 
 static ssize_t report_delay_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
 {
-    uint32_t tmp = simple_strtoul(buf, NULL, 10);
+    struct aml_pmu_api *api = aml_pmu_get_api();
+    uint32_t tmp = simple_strtoul(buf, NULL, 10); 
 
     if (tmp > 200) {
-        RICOH_DBG("input too large, failed to set report_delay\n");    
+        RICOH_DBG("input too large, failed to set report_delay\n");
         return count;
-    }
-    aml_pmu_set_report_delay(tmp);
+    }    
+    if (api && api->pmu_set_report_delay) {
+        api->pmu_set_report_delay(tmp);
+    } else {
+        RICOH_DBG("API not found\n");
+    }    
     return count;
 }
 
@@ -1197,6 +1202,12 @@ static int rn5t618_update_state(struct aml_charger *charger)
     }
 #endif
 
+    rn5t618_read(0x00ef, buff);
+    if (buff[0] & 0x01) {
+        RICOH_DBG("cc is paused, reopen it\n");
+        buff[0] &= ~0x01;
+        rn5t618_write(0x00ef, buff[0]); 
+    }
     rn5t618_read(0x00C5, buff);
     if (buff[0] & 0x20) {
         RICOH_DBG("charge time out, reset charger\n");
@@ -1295,6 +1306,8 @@ static void rn5t618_charging_monitor(struct work_struct *work)
     int32_t  pre_rest_cap;
     uint8_t  pre_chg_status;
     uint8_t  pre_pwr_status;
+    struct aml_pmu_api *api = aml_pmu_get_api();
+    static bool api_flag = false;
 
     supply  = container_of(work, struct rn5t618_supply, work.work);
     charger = &supply->aml_charger;
@@ -1309,7 +1322,17 @@ static void rn5t618_charging_monitor(struct work_struct *work)
      * 4. if battery capacity is larger than 429496 mAh, will cause over flow
      */
     if (rn5t618_battery) {
-        aml_pmu_update_battery_capacity(charger, rn5t618_battery);
+        if (!api) {
+            schedule_delayed_work(&supply->work, supply->interval);
+            return ;                                                // KO is not ready
+        }
+        if (api && !api_flag) {
+            api_flag = true;
+            if (api->pmu_probe_process) {
+                api->pmu_probe_process(charger, rn5t618_battery);
+            }
+        }
+        api->pmu_update_battery_capacity(charger, rn5t618_battery);
     } else {
         rn5t618_update_state(charger);
     }
@@ -1344,6 +1367,14 @@ static void rn5t618_charging_monitor(struct work_struct *work)
             charger->resume = 0;
         }
         power_supply_changed(&supply->batt);
+    #ifdef CONFIG_HAS_EARLYSUSPEND
+        if (in_early_suspend && (pre_pwr_status != charger->ext_valid)) {
+            wake_lock(&rn5t618_lock);
+            RICOH_DBG("%s, usb power status changed in early suspend, wake up now\n", __func__);
+            input_report_key(rn5t618_power_key, KEY_POWER, 1);              // assume power key pressed 
+            input_sync(rn5t618_power_key);
+        }
+    #endif
     } 
     /* reschedule for the next time */
     schedule_delayed_work(&supply->work, supply->interval);
@@ -1579,7 +1610,6 @@ static int rn5t618_battery_probe(struct platform_device *pdev)
     wake_lock_init(&rn5t618_lock, WAKE_LOCK_SUSPEND, "rn5t618");
 #endif
     if (rn5t618_battery) {
-        aml_pmu_probe_process(charger, rn5t618_battery);
         power_supply_changed(&supply->batt);                    // update battery status
     }
     
@@ -1633,11 +1663,14 @@ static int rn5t618_battery_remove(struct platform_device *dev)
 static int rn5t618_suspend(struct platform_device *dev, pm_message_t state)
 {
     struct rn5t618_supply *supply = platform_get_drvdata(dev);
+    struct aml_pmu_api    *api;
 
     cancel_delayed_work_sync(&supply->work);
     if (rn5t618_battery) {
-        rn5t618_set_charge_current(rn5t618_battery->pmu_suspend_chgcur);
-        aml_pmu_suspend_process(&supply->aml_charger);
+        api = aml_pmu_get_api();
+        if (api && api->pmu_suspend_process) {
+            api->pmu_suspend_process(&supply->aml_charger);
+        } 
     }
 #ifdef CONFIG_HAS_EARLYSUSPEND
     if (early_power_status != supply->aml_charger.ext_valid) {
@@ -1655,11 +1688,14 @@ static int rn5t618_suspend(struct platform_device *dev, pm_message_t state)
 
 static int rn5t618_resume(struct platform_device *dev)
 {
-    struct   rn5t618_supply *supply = platform_get_drvdata(dev);
+    struct rn5t618_supply *supply = platform_get_drvdata(dev);
+    struct aml_pmu_api    *api;
 
     if (rn5t618_battery) {
-        aml_pmu_resume_process(&supply->aml_charger, rn5t618_battery);
-        rn5t618_set_charge_current(rn5t618_battery->pmu_resume_chgcur);
+        api = aml_pmu_get_api();
+        if (api && api->pmu_resume_process) {
+            api->pmu_resume_process(&supply->aml_charger, rn5t618_battery);
+        }
     }
     schedule_work(&supply->work.work);
 

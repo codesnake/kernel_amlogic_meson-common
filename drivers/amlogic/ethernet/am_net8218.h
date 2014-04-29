@@ -42,8 +42,8 @@
 
 //ring buf must less than the MAX alloc length 131072
 //131072/1536~=85;
-#define TX_RING_SIZE 	64
-#define RX_RING_SIZE 	64
+#define TX_RING_SIZE 	128
+#define RX_RING_SIZE 	128
 #define CACHE_LINE 32
 #define IS_CACHE_ALIGNED(x)		(!((unsigned long )x &(CACHE_LINE-1)))
 #define CACHE_HEAD_ALIGNED(x)	((x-CACHE_LINE) & (~(CACHE_LINE-1)))
@@ -68,7 +68,7 @@
 #define TX_BUF_UN_EN 1<<2
 #define RX_INTR_EN  1<<6
 #define EARLY_RX_INTR_EN 1<<14
-
+#define INTERNALPHY_ID 79898963
 enum mii_reg_bits {
 	MDIO_ShiftClk = 0x10000, MDIO_DataIn = 0x80000, MDIO_DataOut = 0x20000,
 	MDIO_EnbOutput = 0x40000, MDIO_EnbIn = 0x00000,

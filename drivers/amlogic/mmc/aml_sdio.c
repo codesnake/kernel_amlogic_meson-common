@@ -989,6 +989,8 @@ static int aml_sdio_probe(struct platform_device *pdev)
         if (pdata->caps & MMC_CAP_NONREMOVABLE) {
             pdata->is_in = true;
         }
+       if (pdata->caps & MMC_PM_KEEP_POWER)
+            mmc->pm_caps |= MMC_PM_KEEP_POWER;
 
         pdata->host = host;
         // host->pdata = pdata; // should not do this here, it will conflict with aml_sdio_request

@@ -35,7 +35,7 @@ static int i2s_pos_sync = 0;
 #define ALSA_PRINT(fmt,args...)	printk(KERN_INFO "[aml-i2s-dai]" fmt,##args)
 #ifdef DEBUG_ALSA_SOC_DAI_SPDIF
 #define ALSA_DEBUG(fmt,args...) 	printk(KERN_INFO "[aml-i2s-dai]" fmt,##args)
-#define ALSA_TRACE()     			printk("[aml-i2s-dai] enter func %s,line %d\n",__FUNCTION__,__LINE__);
+#define ALSA_TRACE()     			printk("[aml-i2s-dai] enter func %s,line %d\n",__FUNCTION__,__LINE__)
 #else
 #define ALSA_DEBUG(fmt,args...) 
 #define ALSA_TRACE()   
@@ -48,7 +48,7 @@ for the case that only use our ALSA driver for PCM s/pdif output.
 static void  aml_hw_i2s_init(struct snd_pcm_runtime *runtime)
 {
 
-		unsigned i2s_mode;
+		unsigned i2s_mode = AIU_I2S_MODE_PCM16;
 		switch(runtime->format){
 		case SNDRV_PCM_FORMAT_S32_LE:
 			i2s_mode = AIU_I2S_MODE_PCM32;
@@ -68,11 +68,11 @@ static void  aml_hw_i2s_init(struct snd_pcm_runtime *runtime)
 static int aml_dai_i2s_startup(struct snd_pcm_substream *substream,
 					struct snd_soc_dai *dai)
 {	  	
-	ALSA_TRACE();
 	int ret = 0;
     	struct snd_pcm_runtime *runtime = substream->runtime;
     	struct aml_runtime_data *prtd = (struct aml_runtime_data *)runtime->private_data;
 	audio_stream_t *s;	
+    ALSA_TRACE();
 	if(prtd == NULL){
 		prtd = (struct aml_runtime_data *)kzalloc(sizeof(struct aml_runtime_data), GFP_KERNEL);
 		if (prtd == NULL) {
@@ -103,12 +103,12 @@ static void aml_dai_i2s_shutdown(struct snd_pcm_substream *substream,
 static int  set_clock = -1;
 static int aml_dai_i2s_prepare(struct snd_pcm_substream *substream,
 					struct snd_soc_dai *dai)
-{
-	ALSA_TRACE();
+{	
 	struct snd_pcm_runtime *runtime = substream->runtime;
 	struct aml_runtime_data *prtd = runtime->private_data;
 	int  sample_rate = AUDIO_CLK_FREQ_48;
 	audio_stream_t *s = &prtd->s;	
+    ALSA_TRACE();
 	switch(runtime->rate){
 		case 192000:
 			sample_rate	=	AUDIO_CLK_FREQ_192;
@@ -182,8 +182,9 @@ static int aml_dai_i2s_prepare(struct snd_pcm_substream *substream,
 static int aml_dai_i2s_trigger(struct snd_pcm_substream *substream, int cmd,
 				struct snd_soc_dai *dai)
 {
-	ALSA_TRACE();
 	struct snd_pcm_runtime *rtd = substream->runtime;
+    int * ppp = NULL;
+    ALSA_TRACE();
 	switch (cmd) {
 		case SNDRV_PCM_TRIGGER_START:
 		case SNDRV_PCM_TRIGGER_RESUME:
@@ -194,7 +195,7 @@ static int aml_dai_i2s_trigger(struct snd_pcm_substream *substream, int cmd,
 				audio_out_i2s_enable(1);
 			}else{
 				audio_in_i2s_enable(1);
-				int * ppp = (int*)(rtd->dma_area+rtd->dma_bytes*2-8);
+				ppp = (int*)(rtd->dma_area+rtd->dma_bytes*2-8);
 				ppp[0] = 0x78787878;
 				ppp[1] = 0x78787878;
 			}

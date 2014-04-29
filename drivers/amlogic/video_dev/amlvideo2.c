@@ -37,6 +37,7 @@
 #include <linux/amlogic/amports/vframe.h>
 #include <linux/amlogic/amports/vframe_provider.h>
 #include <linux/amlogic/amports/vframe_receiver.h>
+#include "common/vfp-queue.h"
 #include <linux/amlogic/ge2d/ge2d.h>
 #include <linux/amlogic/amports/timestamp.h>
 #include <linux/kernel.h>
@@ -80,6 +81,7 @@
 #define RECEIVER_NAME1 "amlvideo2_1"
 #else
 #define RECEIVER_NAME "amlvideo2"
+#define DEVICE_NAME   "amlvideo2"
 #endif
 
 #define VM_RES0_CANVAS_INDEX AMLVIDEO2_RES_CANVAS
@@ -107,6 +109,11 @@ static unsigned video_nr = 11;
 static unsigned debug=0;
 //module_param(debug, uint, 0644);
 //MODULE_PARM_DESC(debug, "activates debug info");
+
+#define AMLVIDEO2_POOL_SIZE 4
+static vfq_t q_ready;
+void vf_inqueue(struct vframe_s *vf, const char *receiver);
+struct vframe_s *amlvideo2_pool_ready[AMLVIDEO2_POOL_SIZE+1];
 
 struct timeval thread_ts1;
 struct timeval thread_ts2;
@@ -176,11 +183,19 @@ static struct v4l2_frmivalenum amlvideo2_frmivalenum[]={
 
 typedef enum{
 	AML_PROVIDE_NONE  = 0,
-	AML_PROVIDE_VDIN0  = 1,
-	AML_PROVIDE_VDIN1  = 2,
-	AML_PROVIDE_DECODE  = 3,
-	AML_PROVIDE_MAX  = 4
+	AML_PROVIDE_MIRROCAST_VDIN0  = 1,
+	AML_PROVIDE_MIRROCAST_VDIN1  = 2,
+	AML_PROVIDE_HDMIIN_VDIN0  = 3,
+	AML_PROVIDE_HDMIIN_VDIN1  = 4,
+	AML_PROVIDE_DECODE  = 5,
+	AML_PROVIDE_MAX  = 6
 }aml_provider_type;
+
+typedef enum{
+	AML_RECEIVER_NONE  = 0,
+	AML_RECEIVER_PPMGR,
+	AML_RECEIVER_MAX,
+}aml_receiver_type;
 
 struct amlvideo2_fmt {
 	char  *name;
@@ -299,6 +314,7 @@ struct amlvideo2_device{
 	int node_num;
 };
 
+struct amlvideo2_fh;
 struct amlvideo2_node {
 
 	spinlock_t                 slock;
@@ -318,10 +334,14 @@ struct amlvideo2_node {
 
 	struct videobuf_res_privdata res;
 	struct vframe_receiver_s recv;
-	//struct vframe_provider_s * provider;
-	//aml_provider_type p_type;
+	struct vframe_receiver_s *sub_recv;
+	struct vframe_provider_s *provider;
+	aml_provider_type p_type;
+	aml_receiver_type r_type;
 	int provide_ready;
-	
+
+	struct amlvideo2_fh *fh;
+	unsigned int input;			//0:mirrocast; 1:hdmiin
 	ge2d_context_t *context;
 };
 
@@ -501,7 +521,75 @@ static int get_input_format(vframe_t* vf)
 		}
 	}
 	if(print_ifmt == 1){
-		printk("vf->type=%x, format=%x\n", vf->type, format);
+		printk("vf->type=%x, format=%x, w*h=%dx%d, canvas0=%x, canvas1=%x\n",
+                        vf->type, format, vf->width, vf->height, vf->canvas0Addr, vf->canvas1Addr);
+
+                printk("vf->type=%x, VIDTYPE_INTERLACE_BOTTOM=%x, VIDTYPE_INTERLACE_TOP=%x\n",
+                vf->type, VIDTYPE_INTERLACE_BOTTOM, VIDTYPE_INTERLACE_TOP);
+		print_ifmt = 0;
+	}
+	return format;
+}
+
+static int get_interlace_input_format(vframe_t* vf, struct amlvideo2_output* output)
+{
+	int format= GE2D_FORMAT_M24_NV21;
+	if(vf->type&VIDTYPE_VIU_422){
+                format =  GE2D_FORMAT_S16_YUV422;
+                if(vf->height >= output->height<<2){
+			format =  GE2D_FORMAT_S16_YUV422|(GE2D_FORMAT_S16_YUV422T & (3<<3));
+                }
+	}else if(vf->type&VIDTYPE_VIU_NV21){
+                format =  GE2D_FORMAT_M24_NV21;
+                if(vf->height >= output->height<<2){
+			format =  GE2D_FORMAT_M24_NV21|(GE2D_FORMAT_M24_NV21T & (3<<3));
+                }
+	} else{
+                format =  GE2D_FORMAT_M24_YUV420;
+                if(vf->height >= output->height<<2){
+			format =  GE2D_FORMAT_M24_YUV420|(GE2D_FORMAT_M24_YUV420T & (3<<3));
+                }
+	}
+	if(print_ifmt == 1){
+		printk("vf->type=%x, format=%x, w*h=%dx%d, canvas0=%x, canvas1=%x\n",
+                        vf->type, format, vf->width, vf->height, vf->canvas0Addr, vf->canvas1Addr);
+		print_ifmt = 0;
+	}
+	return format;
+}
+
+static inline int get_top_input_format(vframe_t* vf)
+{
+	int format= GE2D_FORMAT_M24_NV21;
+	if(vf->type&VIDTYPE_VIU_422){
+                format =  GE2D_FORMAT_S16_YUV422|(GE2D_FORMAT_S16_YUV422T & (3<<3));
+	}else if(vf->type&VIDTYPE_VIU_NV21){
+                format =  GE2D_FORMAT_M24_NV21|(GE2D_FORMAT_M24_NV21T & (3<<3));
+	} else{
+                format =  GE2D_FORMAT_M24_YUV420|(GE2D_FORMAT_M24_YUV420T & (3<<3));
+	}
+	if(print_ifmt == 1){
+		printk("vf->type=%x, format=%x, w*h=%dx%d, canvas0=%x, canvas1=%x\n",
+                        vf->type, format, vf->width, vf->height, vf->canvas0Addr, vf->canvas1Addr);
+		print_ifmt = 0;
+	}
+	return format;
+}
+
+static inline int get_bottom_input_format(vframe_t* vf)
+{
+	int format= GE2D_FORMAT_M24_NV21;
+	if(vf->type&VIDTYPE_VIU_422){
+                format =  GE2D_FORMAT_S16_YUV422|(GE2D_FORMAT_S16_YUV422B & (3<<3));
+	}else if(vf->type&VIDTYPE_VIU_NV21){
+                format =  GE2D_FORMAT_M24_NV21|(GE2D_FORMAT_M24_NV21B & (3<<3));
+	} else{
+                format =  GE2D_FORMAT_M24_YUV420|(GE2D_FMT_M24_YUV420B & (3<<3));
+        }
+
+	if(print_ifmt == 1){
+		printk("vf->type=%x, format=%x, w*h=%dx%d, canvas0=%x, canvas1=%x\n",
+                        vf->type, format, vf->width, vf->height, vf->canvas0Addr, vf->canvas1Addr);
 		print_ifmt = 0;
 	}
 	return format;
@@ -579,6 +667,1073 @@ static void output_axis_adjust(int src_w, int src_h, int* dst_w, int* dst_h, int
     *dst_h = h;
 }
 
+int amlvideo2_ge2d_interlace_two_canvasAddr_process(vframe_t* vf, ge2d_context_t *context,config_para_ex_t* ge2d_config, struct amlvideo2_output* output)
+{
+	int src_top ,src_left ,src_width, src_height;
+	int dst_top ,dst_left ,dst_width, dst_height;
+	canvas_t cs0,cs1,cs2,cd;
+	int current_mirror = 0;
+	int cur_angle = 0;
+	int output_canvas  = vf->canvas0Addr;
+
+        //============================
+        //      top field
+        //============================
+	src_top = 0;
+	src_left = 0;
+	src_width = vf->width;
+	src_height = vf->height/2;
+
+	dst_top = 0;
+	dst_left = 0;
+	dst_width = output->width;
+	dst_height = output->height;
+
+	current_mirror = 0;
+	cur_angle = output->angle;
+	if(current_mirror == 1)
+		cur_angle = (360 - cur_angle%360);
+	else
+		cur_angle = cur_angle%360;
+
+	if(src_width<src_height)
+		cur_angle = (cur_angle+90)%360;
+
+       output_axis_adjust(src_width,src_height,&dst_width,&dst_height,cur_angle);
+	dst_top = (output->height-dst_height)/2;
+	dst_left = (output->width-dst_width)/2;
+	dst_top = dst_top&0xfffffffe;
+	dst_left = dst_left&0xfffffffe;
+	/* data operating. */
+
+	memset(ge2d_config,0,sizeof(config_para_ex_t));
+	if((dst_left!=output->frame->x)||(dst_top!=output->frame->y)
+	  ||(dst_width!=output->frame->w)||(dst_height!=output->frame->h)){
+		ge2d_config->alu_const_color= 0;//0x000000ff;
+		ge2d_config->bitmask_en  = 0;
+		ge2d_config->src1_gb_alpha = 0;//0xff;
+		ge2d_config->dst_xy_swap = 0;
+
+		canvas_read(output_canvas&0xff,&cd);
+		ge2d_config->src_planes[0].addr = cd.addr;
+		ge2d_config->src_planes[0].w = cd.width;
+		ge2d_config->src_planes[0].h = cd.height;
+		ge2d_config->dst_planes[0].addr = cd.addr;
+		ge2d_config->dst_planes[0].w = cd.width;
+		ge2d_config->dst_planes[0].h = cd.height;
+
+		ge2d_config->src_key.key_enable = 0;
+		ge2d_config->src_key.key_mask = 0;
+		ge2d_config->src_key.key_mode = 0;
+
+		ge2d_config->src_para.canvas_index=output_canvas;
+		ge2d_config->src_para.mem_type = CANVAS_TYPE_INVALID;
+		ge2d_config->src_para.format = get_output_format(output->v4l2_format)|GE2D_LITTLE_ENDIAN;;
+		ge2d_config->src_para.fill_color_en = 0;
+		ge2d_config->src_para.fill_mode = 0;
+		ge2d_config->src_para.x_rev = 0;
+		ge2d_config->src_para.y_rev = 0;
+		ge2d_config->src_para.color = 0;
+		ge2d_config->src_para.top = 0;
+		ge2d_config->src_para.left = 0;
+		ge2d_config->src_para.width = output->width;
+		ge2d_config->src_para.height = output->height;
+
+		ge2d_config->src2_para.mem_type = CANVAS_TYPE_INVALID;
+
+		ge2d_config->dst_para.canvas_index=output_canvas;
+		ge2d_config->dst_para.mem_type = CANVAS_TYPE_INVALID;
+		ge2d_config->dst_para.format = get_output_format(output->v4l2_format)|GE2D_LITTLE_ENDIAN;;
+		ge2d_config->dst_para.fill_color_en = 0;
+		ge2d_config->dst_para.fill_mode = 0;
+		ge2d_config->dst_para.x_rev = 0;
+		ge2d_config->dst_para.y_rev = 0;
+		ge2d_config->dst_para.color = 0;
+		ge2d_config->dst_para.top = 0;
+		ge2d_config->dst_para.left = 0;
+		ge2d_config->dst_para.width = output->width;
+		ge2d_config->dst_para.height = output->height;
+
+		if(ge2d_context_config_ex(context,ge2d_config)<0) {
+			printk("++ge2d configing error.\n");
+			return -2;
+		}
+		fillrect(context, 0, 0, output->width, output->height, (ge2d_config->dst_para.format&GE2D_FORMAT_YUV)?0x008080ff:0);
+		output->frame->x = dst_left;
+		output->frame->y = dst_top;
+		output->frame->w = dst_width;
+		output->frame->h = dst_height;
+		memset(ge2d_config,0,sizeof(config_para_ex_t));
+	}
+	ge2d_config->alu_const_color= 0;//0x000000ff;
+	ge2d_config->bitmask_en  = 0;
+	ge2d_config->src1_gb_alpha = 0;//0xff;
+	ge2d_config->dst_xy_swap = 0;
+
+	canvas_read(vf->canvas0Addr&0xff,&cs0);
+	canvas_read((vf->canvas0Addr>>8)&0xff,&cs1);
+	canvas_read((vf->canvas0Addr>>16)&0xff,&cs2);
+	ge2d_config->src_planes[0].addr = cs0.addr;
+	ge2d_config->src_planes[0].w = cs0.width;
+	ge2d_config->src_planes[0].h = cs0.height;
+	ge2d_config->src_planes[1].addr = cs1.addr;
+	ge2d_config->src_planes[1].w = cs1.width;
+	ge2d_config->src_planes[1].h = cs1.height;
+	ge2d_config->src_planes[2].addr = cs2.addr;
+	ge2d_config->src_planes[2].w = cs2.width;
+	ge2d_config->src_planes[2].h = cs2.height;
+	canvas_read(output_canvas&0xff,&cd);
+	ge2d_config->dst_planes[0].addr = cd.addr;
+	ge2d_config->dst_planes[0].w = cd.width;
+	ge2d_config->dst_planes[0].h = cd.height;
+	ge2d_config->src_key.key_enable = 0;
+	ge2d_config->src_key.key_mask = 0;
+	ge2d_config->src_key.key_mode = 0;
+	ge2d_config->src_para.canvas_index=vf->canvas0Addr;
+	ge2d_config->src_para.mem_type = CANVAS_TYPE_INVALID;
+	ge2d_config->src_para.format = get_input_format(vf);
+	ge2d_config->src_para.fill_color_en = 0;
+	ge2d_config->src_para.fill_mode = 0;
+	ge2d_config->src_para.x_rev = 0;
+	ge2d_config->src_para.y_rev = 0;
+	ge2d_config->src_para.color = 0xffffffff;
+	ge2d_config->src_para.top = 0;
+	ge2d_config->src_para.left = 0;
+	ge2d_config->src_para.width = vf->width;
+	ge2d_config->src_para.height = vf->height;
+	/* printk("vf_width is %d , vf_height is %d \n",vf->width ,vf->height); */
+	ge2d_config->src2_para.mem_type = CANVAS_TYPE_INVALID;
+	ge2d_config->dst_para.canvas_index = output_canvas&0xff;
+
+	if((output->v4l2_format!= V4L2_PIX_FMT_YUV420)
+		&& (output->v4l2_format != V4L2_PIX_FMT_YVU420))
+		ge2d_config->dst_para.canvas_index = output_canvas;
+
+	ge2d_config->dst_para.mem_type = CANVAS_TYPE_INVALID;
+	ge2d_config->dst_para.format = get_output_format(output->v4l2_format)|GE2D_LITTLE_ENDIAN;     
+	ge2d_config->dst_para.fill_color_en = 0;
+	ge2d_config->dst_para.fill_mode = 0;
+	ge2d_config->dst_para.x_rev = 0;
+	ge2d_config->dst_para.y_rev = 0;
+	ge2d_config->dst_para.color = 0;
+	ge2d_config->dst_para.top = 0;
+	ge2d_config->dst_para.left = 0;
+	ge2d_config->dst_para.width = output->width;
+	ge2d_config->dst_para.height = output->height;
+
+	if(current_mirror==1){
+		ge2d_config->dst_para.x_rev = 1;
+		ge2d_config->dst_para.y_rev = 0;
+	}else if(current_mirror==2){
+		ge2d_config->dst_para.x_rev = 0;
+		ge2d_config->dst_para.y_rev = 1;
+	}else{
+		ge2d_config->dst_para.x_rev = 0;
+		ge2d_config->dst_para.y_rev = 0;
+	}
+
+	if(cur_angle==90){
+		ge2d_config->dst_xy_swap = 1;
+		ge2d_config->dst_para.x_rev ^= 1;
+	}else if(cur_angle==180){
+		ge2d_config->dst_para.x_rev ^= 1;
+		ge2d_config->dst_para.y_rev ^= 1;
+	}else if(cur_angle==270){
+		ge2d_config->dst_xy_swap = 1;
+		ge2d_config->dst_para.y_rev ^= 1;
+	}
+
+	if(ge2d_context_config_ex(context,ge2d_config)<0) {
+		printk("++ge2d configing error.\n");
+		return -1;
+	}
+	stretchblt_noalpha(context,src_left ,src_top ,src_width, src_height,output->frame->x,output->frame->y,output->frame->w,output->frame->h);
+
+	/* for cr of  yuv420p or yuv420sp. */
+	if((output->v4l2_format==V4L2_PIX_FMT_YUV420)
+		||(output->v4l2_format==V4L2_PIX_FMT_YVU420)){
+		/* for cb. */
+		canvas_read((output_canvas>>8)&0xff,&cd);
+		ge2d_config->dst_planes[0].addr = cd.addr;
+		ge2d_config->dst_planes[0].w = cd.width;
+		ge2d_config->dst_planes[0].h = cd.height;
+		ge2d_config->dst_para.canvas_index=(output_canvas>>8)&0xff;
+		ge2d_config->dst_para.format=GE2D_FORMAT_S8_CB|GE2D_LITTLE_ENDIAN;
+		ge2d_config->dst_para.width = output->width/2;
+		ge2d_config->dst_para.height = output->height/2;
+		ge2d_config->dst_xy_swap = 0;
+
+		if(current_mirror==1){
+			ge2d_config->dst_para.x_rev = 1;
+			ge2d_config->dst_para.y_rev = 0;
+		}else if(current_mirror==2){
+			ge2d_config->dst_para.x_rev = 0;
+			ge2d_config->dst_para.y_rev = 1;
+		}else{
+			ge2d_config->dst_para.x_rev = 0;
+			ge2d_config->dst_para.y_rev = 0;
+		}
+
+		if(cur_angle==90){
+			ge2d_config->dst_xy_swap = 1;
+			ge2d_config->dst_para.x_rev ^= 1;
+		}else if(cur_angle==180){
+			ge2d_config->dst_para.x_rev ^= 1;
+			ge2d_config->dst_para.y_rev ^= 1;
+		}else if(cur_angle==270){
+			ge2d_config->dst_xy_swap = 1;
+			ge2d_config->dst_para.y_rev ^= 1;
+		}
+	
+		if(ge2d_context_config_ex(context,ge2d_config)<0) {
+			printk("++ge2d configing error.\n");
+			return -1;
+		}
+		stretchblt_noalpha(context, src_left, src_top, src_width, src_height,
+			output->frame->x/2,output->frame->y/2,output->frame->w/2,output->frame->h/2);
+	} 
+	/* for cb of yuv420p or yuv420sp. */
+	if(output->v4l2_format==V4L2_PIX_FMT_YUV420||
+		output->v4l2_format==V4L2_PIX_FMT_YVU420) {
+		canvas_read((output_canvas>>16)&0xff,&cd);
+		ge2d_config->dst_planes[0].addr = cd.addr;
+		ge2d_config->dst_planes[0].w = cd.width;
+		ge2d_config->dst_planes[0].h = cd.height;
+		ge2d_config->dst_para.canvas_index=(output_canvas>>16)&0xff;
+		ge2d_config->dst_para.format=GE2D_FORMAT_S8_CR|GE2D_LITTLE_ENDIAN;
+		ge2d_config->dst_para.width = output->width/2;
+		ge2d_config->dst_para.height = output->height/2;
+		ge2d_config->dst_xy_swap = 0;
+
+		if(current_mirror==1){
+			ge2d_config->dst_para.x_rev = 1;
+			ge2d_config->dst_para.y_rev = 0;
+		}else if(current_mirror==2){
+			ge2d_config->dst_para.x_rev = 0;
+			ge2d_config->dst_para.y_rev = 1;
+		}else{
+			ge2d_config->dst_para.x_rev = 0;
+			ge2d_config->dst_para.y_rev = 0;
+		}
+
+		if(cur_angle==90){
+			ge2d_config->dst_xy_swap = 1;
+			ge2d_config->dst_para.x_rev ^= 1;
+		}else if(cur_angle==180){
+			ge2d_config->dst_para.x_rev ^= 1;
+			ge2d_config->dst_para.y_rev ^= 1;
+		}else if(cur_angle==270){
+			ge2d_config->dst_xy_swap = 1;
+			ge2d_config->dst_para.y_rev ^= 1;
+		}
+
+		if(ge2d_context_config_ex(context,ge2d_config)<0) {
+			printk("++ge2d configing error.\n");
+			return -1;
+		}
+		stretchblt_noalpha(context, src_left, src_top, src_width, src_height,
+			output->frame->x/2,output->frame->y/2,output->frame->w/2,output->frame->h/2);
+	}
+
+     //============================
+    //      bottom field
+    //============================
+	output_canvas  = vf->canvas1Addr;
+	src_top = 0;
+	src_left = 0;
+	src_width = vf->width;
+	src_height = vf->height/2;
+
+	dst_top = 0;
+	dst_left = 0;
+	dst_width = output->width;
+	dst_height = output->height;
+
+	current_mirror = 0;
+	cur_angle = output->angle;
+	if(current_mirror == 1)
+		cur_angle = (360 - cur_angle%360);
+	else
+		cur_angle = cur_angle%360;
+
+	if(src_width<src_height)
+		cur_angle = (cur_angle+90)%360;
+
+       output_axis_adjust(src_width,src_height,&dst_width,&dst_height,cur_angle);
+	dst_top = (output->height-dst_height)/2;
+	dst_left = (output->width-dst_width)/2;
+	dst_top = dst_top&0xfffffffe;
+	dst_left = dst_left&0xfffffffe;
+	/* data operating. */
+
+	memset(ge2d_config,0,sizeof(config_para_ex_t));
+	if((dst_left!=output->frame->x)||(dst_top!=output->frame->y)
+	  ||(dst_width!=output->frame->w)||(dst_height!=output->frame->h)){
+		ge2d_config->alu_const_color= 0;//0x000000ff;
+		ge2d_config->bitmask_en  = 0;
+		ge2d_config->src1_gb_alpha = 0;//0xff;
+		ge2d_config->dst_xy_swap = 0;
+
+		canvas_read(output_canvas&0xff,&cd);
+		ge2d_config->src_planes[0].addr = cd.addr;
+		ge2d_config->src_planes[0].w = cd.width;
+		ge2d_config->src_planes[0].h = cd.height;
+		ge2d_config->dst_planes[0].addr = cd.addr;
+		ge2d_config->dst_planes[0].w = cd.width;
+		ge2d_config->dst_planes[0].h = cd.height;
+
+		ge2d_config->src_key.key_enable = 0;
+		ge2d_config->src_key.key_mask = 0;
+		ge2d_config->src_key.key_mode = 0;
+
+		ge2d_config->src_para.canvas_index=output_canvas;
+		ge2d_config->src_para.mem_type = CANVAS_TYPE_INVALID;
+		ge2d_config->src_para.format = get_output_format(output->v4l2_format)|GE2D_LITTLE_ENDIAN;;
+		ge2d_config->src_para.fill_color_en = 0;
+		ge2d_config->src_para.fill_mode = 0;
+		ge2d_config->src_para.x_rev = 0;
+		ge2d_config->src_para.y_rev = 0;
+		ge2d_config->src_para.color = 0;
+		ge2d_config->src_para.top = 0;
+		ge2d_config->src_para.left = 0;
+		ge2d_config->src_para.width = output->width;
+		ge2d_config->src_para.height = output->height;
+
+		ge2d_config->src2_para.mem_type = CANVAS_TYPE_INVALID;
+
+		ge2d_config->dst_para.canvas_index=output_canvas;
+		ge2d_config->dst_para.mem_type = CANVAS_TYPE_INVALID;
+		ge2d_config->dst_para.format = get_output_format(output->v4l2_format)|GE2D_LITTLE_ENDIAN;;
+		ge2d_config->dst_para.fill_color_en = 0;
+		ge2d_config->dst_para.fill_mode = 0;
+		ge2d_config->dst_para.x_rev = 0;
+		ge2d_config->dst_para.y_rev = 0;
+		ge2d_config->dst_para.color = 0;
+		ge2d_config->dst_para.top = 0;
+		ge2d_config->dst_para.left = 0;
+		ge2d_config->dst_para.width = output->width;
+		ge2d_config->dst_para.height = output->height;
+
+		if(ge2d_context_config_ex(context,ge2d_config)<0) {
+			printk("++ge2d configing error.\n");
+			return -2;
+		}
+		fillrect(context, 0, 0, output->width, output->height, (ge2d_config->dst_para.format&GE2D_FORMAT_YUV)?0x008080ff:0);
+		output->frame->x = dst_left;
+		output->frame->y = dst_top;
+		output->frame->w = dst_width;
+		output->frame->h = dst_height;
+		memset(ge2d_config,0,sizeof(config_para_ex_t));
+	}
+	ge2d_config->alu_const_color= 0;//0x000000ff;
+	ge2d_config->bitmask_en  = 0;
+	ge2d_config->src1_gb_alpha = 0;//0xff;
+	ge2d_config->dst_xy_swap = 0;
+
+	canvas_read(vf->canvas1Addr&0xff,&cs0);
+	canvas_read((vf->canvas1Addr>>8)&0xff,&cs1);
+	canvas_read((vf->canvas1Addr>>16)&0xff,&cs2);
+	ge2d_config->src_planes[0].addr = cs0.addr;
+	ge2d_config->src_planes[0].w = cs0.width;
+	ge2d_config->src_planes[0].h = cs0.height;
+	ge2d_config->src_planes[1].addr = cs1.addr;
+	ge2d_config->src_planes[1].w = cs1.width;
+	ge2d_config->src_planes[1].h = cs1.height;
+	ge2d_config->src_planes[2].addr = cs2.addr;
+	ge2d_config->src_planes[2].w = cs2.width;
+	ge2d_config->src_planes[2].h = cs2.height;
+	canvas_read(output_canvas&0xff,&cd);
+	ge2d_config->dst_planes[0].addr = cd.addr;
+	ge2d_config->dst_planes[0].w = cd.width;
+	ge2d_config->dst_planes[0].h = cd.height;
+	ge2d_config->src_key.key_enable = 0;
+	ge2d_config->src_key.key_mask = 0;
+	ge2d_config->src_key.key_mode = 0;
+	ge2d_config->src_para.canvas_index=vf->canvas1Addr;
+	ge2d_config->src_para.mem_type = CANVAS_TYPE_INVALID;
+	ge2d_config->src_para.format = get_input_format(vf);
+	ge2d_config->src_para.fill_color_en = 0;
+	ge2d_config->src_para.fill_mode = 0;
+	ge2d_config->src_para.x_rev = 0;
+	ge2d_config->src_para.y_rev = 0;
+	ge2d_config->src_para.color = 0xffffffff;
+	ge2d_config->src_para.top = 0;
+	ge2d_config->src_para.left = 0;
+	ge2d_config->src_para.width = vf->width;
+	ge2d_config->src_para.height = vf->height;
+	/* printk("vf_width is %d , vf_height is %d \n",vf->width ,vf->height); */
+	ge2d_config->src2_para.mem_type = CANVAS_TYPE_INVALID;
+	ge2d_config->dst_para.canvas_index = output_canvas&0xff;
+
+	if((output->v4l2_format!= V4L2_PIX_FMT_YUV420)
+		&& (output->v4l2_format != V4L2_PIX_FMT_YVU420))
+		ge2d_config->dst_para.canvas_index = output_canvas;
+
+	ge2d_config->dst_para.mem_type = CANVAS_TYPE_INVALID;
+	ge2d_config->dst_para.format = get_output_format(output->v4l2_format)|GE2D_LITTLE_ENDIAN;     
+	ge2d_config->dst_para.fill_color_en = 0;
+	ge2d_config->dst_para.fill_mode = 0;
+	ge2d_config->dst_para.x_rev = 0;
+	ge2d_config->dst_para.y_rev = 0;
+	ge2d_config->dst_para.color = 0;
+	ge2d_config->dst_para.top = 0;
+	ge2d_config->dst_para.left = 0;
+	ge2d_config->dst_para.width = output->width;
+	ge2d_config->dst_para.height = output->height;
+
+	if(current_mirror==1){
+		ge2d_config->dst_para.x_rev = 1;
+		ge2d_config->dst_para.y_rev = 0;
+	}else if(current_mirror==2){
+		ge2d_config->dst_para.x_rev = 0;
+		ge2d_config->dst_para.y_rev = 1;
+	}else{
+		ge2d_config->dst_para.x_rev = 0;
+		ge2d_config->dst_para.y_rev = 0;
+	}
+
+	if(cur_angle==90){
+		ge2d_config->dst_xy_swap = 1;
+		ge2d_config->dst_para.x_rev ^= 1;
+	}else if(cur_angle==180){
+		ge2d_config->dst_para.x_rev ^= 1;
+		ge2d_config->dst_para.y_rev ^= 1;
+	}else if(cur_angle==270){
+		ge2d_config->dst_xy_swap = 1;
+		ge2d_config->dst_para.y_rev ^= 1;
+	}
+
+	if(ge2d_context_config_ex(context,ge2d_config)<0) {
+		printk("++ge2d configing error.\n");
+		return -1;
+	}
+	stretchblt_noalpha(context,src_left ,src_top ,src_width, src_height,output->frame->x,output->frame->y,output->frame->w,output->frame->h);
+
+	/* for cr of  yuv420p or yuv420sp. */
+	if((output->v4l2_format==V4L2_PIX_FMT_YUV420)
+		||(output->v4l2_format==V4L2_PIX_FMT_YVU420)){
+		/* for cb. */
+		canvas_read((output_canvas>>8)&0xff,&cd);
+		ge2d_config->dst_planes[0].addr = cd.addr;
+		ge2d_config->dst_planes[0].w = cd.width;
+		ge2d_config->dst_planes[0].h = cd.height;
+		ge2d_config->dst_para.canvas_index=(output_canvas>>8)&0xff;
+		ge2d_config->dst_para.format=GE2D_FORMAT_S8_CB|GE2D_LITTLE_ENDIAN;
+		ge2d_config->dst_para.width = output->width/2;
+		ge2d_config->dst_para.height = output->height/2;
+		ge2d_config->dst_xy_swap = 0;
+
+		if(current_mirror==1){
+			ge2d_config->dst_para.x_rev = 1;
+			ge2d_config->dst_para.y_rev = 0;
+		}else if(current_mirror==2){
+			ge2d_config->dst_para.x_rev = 0;
+			ge2d_config->dst_para.y_rev = 1;
+		}else{
+			ge2d_config->dst_para.x_rev = 0;
+			ge2d_config->dst_para.y_rev = 0;
+		}
+
+		if(cur_angle==90){
+			ge2d_config->dst_xy_swap = 1;
+			ge2d_config->dst_para.x_rev ^= 1;
+		}else if(cur_angle==180){
+			ge2d_config->dst_para.x_rev ^= 1;
+			ge2d_config->dst_para.y_rev ^= 1;
+		}else if(cur_angle==270){
+			ge2d_config->dst_xy_swap = 1;
+			ge2d_config->dst_para.y_rev ^= 1;
+		}
+	
+		if(ge2d_context_config_ex(context,ge2d_config)<0) {
+			printk("++ge2d configing error.\n");
+			return -1;
+		}
+		stretchblt_noalpha(context, src_left, src_top, src_width, src_height,
+			output->frame->x/2,output->frame->y/2,output->frame->w/2,output->frame->h/2);
+	} 
+	/* for cb of yuv420p or yuv420sp. */
+	if(output->v4l2_format==V4L2_PIX_FMT_YUV420||
+		output->v4l2_format==V4L2_PIX_FMT_YVU420) {
+		canvas_read((output_canvas>>16)&0xff,&cd);
+		ge2d_config->dst_planes[0].addr = cd.addr;
+		ge2d_config->dst_planes[0].w = cd.width;
+		ge2d_config->dst_planes[0].h = cd.height;
+		ge2d_config->dst_para.canvas_index=(output_canvas>>16)&0xff;
+		ge2d_config->dst_para.format=GE2D_FORMAT_S8_CR|GE2D_LITTLE_ENDIAN;
+		ge2d_config->dst_para.width = output->width/2;
+		ge2d_config->dst_para.height = output->height/2;
+		ge2d_config->dst_xy_swap = 0;
+
+		if(current_mirror==1){
+			ge2d_config->dst_para.x_rev = 1;
+			ge2d_config->dst_para.y_rev = 0;
+		}else if(current_mirror==2){
+			ge2d_config->dst_para.x_rev = 0;
+			ge2d_config->dst_para.y_rev = 1;
+		}else{
+			ge2d_config->dst_para.x_rev = 0;
+			ge2d_config->dst_para.y_rev = 0;
+		}
+
+		if(cur_angle==90){
+			ge2d_config->dst_xy_swap = 1;
+			ge2d_config->dst_para.x_rev ^= 1;
+		}else if(cur_angle==180){
+			ge2d_config->dst_para.x_rev ^= 1;
+			ge2d_config->dst_para.y_rev ^= 1;
+		}else if(cur_angle==270){
+			ge2d_config->dst_xy_swap = 1;
+			ge2d_config->dst_para.y_rev ^= 1;
+		}
+
+		if(ge2d_context_config_ex(context,ge2d_config)<0) {
+			printk("++ge2d configing error.\n");
+			return -1;
+		}
+		stretchblt_noalpha(context, src_left, src_top, src_width, src_height,
+			output->frame->x/2,output->frame->y/2,output->frame->w/2,output->frame->h/2);
+	}
+	
+	
+	return output_canvas;
+}
+
+int amlvideo2_ge2d_interlace_vdindata_process(vframe_t* vf, ge2d_context_t *context,config_para_ex_t* ge2d_config, struct amlvideo2_output* output)
+{
+	int src_top ,src_left ,src_width, src_height;
+	int dst_top ,dst_left ,dst_width, dst_height;
+	canvas_t cs0,cs1,cs2,cd;
+	int current_mirror = 0;
+	int cur_angle = 0;
+	int output_canvas  = output->canvas_id;
+
+	src_top = 0;
+	src_left = 0;
+	src_width = vf->width;
+	src_height = vf->height;
+
+	dst_top = 0;
+	dst_left = 0;
+	dst_width = output->width;
+	dst_height = output->height;
+
+	current_mirror = 0;
+	cur_angle = output->angle;
+	if(current_mirror == 1)
+		cur_angle = (360 - cur_angle%360);
+	else
+		cur_angle = cur_angle%360;
+
+	if(src_width<src_height)
+		cur_angle = (cur_angle+90)%360;
+
+       output_axis_adjust(src_width,src_height,&dst_width,&dst_height,cur_angle);
+	dst_top = (output->height-dst_height)/2;
+	dst_left = (output->width-dst_width)/2;
+	dst_top = dst_top&0xfffffffe;
+	dst_left = dst_left&0xfffffffe;
+	/* data operating. */
+
+	memset(ge2d_config,0,sizeof(config_para_ex_t));
+	if((dst_left!=output->frame->x)||(dst_top!=output->frame->y)
+	  ||(dst_width!=output->frame->w)||(dst_height!=output->frame->h)){
+		ge2d_config->alu_const_color= 0;//0x000000ff;
+		ge2d_config->bitmask_en  = 0;
+		ge2d_config->src1_gb_alpha = 0;//0xff;
+		ge2d_config->dst_xy_swap = 0;
+
+		canvas_read(output_canvas&0xff,&cd);
+		ge2d_config->src_planes[0].addr = cd.addr;
+		ge2d_config->src_planes[0].w = cd.width;
+		ge2d_config->src_planes[0].h = cd.height;
+		ge2d_config->dst_planes[0].addr = cd.addr;
+		ge2d_config->dst_planes[0].w = cd.width;
+		ge2d_config->dst_planes[0].h = cd.height;
+
+		ge2d_config->src_key.key_enable = 0;
+		ge2d_config->src_key.key_mask = 0;
+		ge2d_config->src_key.key_mode = 0;
+
+		ge2d_config->src_para.canvas_index=output_canvas;
+		ge2d_config->src_para.mem_type = CANVAS_TYPE_INVALID;
+		ge2d_config->src_para.format = get_interlace_input_format(vf, output)|GE2D_LITTLE_ENDIAN;
+		ge2d_config->src_para.format = get_interlace_input_format(vf, output);
+		ge2d_config->src_para.fill_color_en = 0;
+		ge2d_config->src_para.fill_mode = 0;
+		ge2d_config->src_para.x_rev = 0;
+		ge2d_config->src_para.y_rev = 0;
+		ge2d_config->src_para.color = 0;
+		ge2d_config->src_para.top = 0;
+		ge2d_config->src_para.left = 0;
+		ge2d_config->src_para.width = output->width;
+		ge2d_config->src_para.height = output->height;
+
+		ge2d_config->src2_para.mem_type = CANVAS_TYPE_INVALID;
+
+		ge2d_config->dst_para.canvas_index=output_canvas;
+		ge2d_config->dst_para.mem_type = CANVAS_TYPE_INVALID;
+		ge2d_config->dst_para.format = get_output_format(output->v4l2_format)|GE2D_LITTLE_ENDIAN;;
+		ge2d_config->dst_para.fill_color_en = 0;
+		ge2d_config->dst_para.fill_mode = 0;
+		ge2d_config->dst_para.x_rev = 0;
+		ge2d_config->dst_para.y_rev = 0;
+		ge2d_config->dst_para.color = 0;
+		ge2d_config->dst_para.top = 0;
+		ge2d_config->dst_para.left = 0;
+		ge2d_config->dst_para.width = output->width;
+		ge2d_config->dst_para.height = output->height;
+
+		if(ge2d_context_config_ex(context,ge2d_config)<0) {
+			printk("++ge2d configing error.\n");
+			return -2;
+		}
+		fillrect(context, 0, 0, output->width, output->height, (ge2d_config->dst_para.format&GE2D_FORMAT_YUV)?0x008080ff:0);
+		output->frame->x = dst_left;
+		output->frame->y = dst_top;
+		output->frame->w = dst_width;
+		output->frame->h = dst_height;
+		memset(ge2d_config,0,sizeof(config_para_ex_t));
+	}
+	src_height = vf->height/2;
+	ge2d_config->alu_const_color= 0;//0x000000ff;
+	ge2d_config->bitmask_en  = 0;
+	ge2d_config->src1_gb_alpha = 0;//0xff;
+	ge2d_config->dst_xy_swap = 0;
+
+	canvas_read(vf->canvas0Addr&0xff,&cs0);
+	canvas_read((vf->canvas0Addr>>8)&0xff,&cs1);
+	canvas_read((vf->canvas0Addr>>16)&0xff,&cs2);
+	ge2d_config->src_planes[0].addr = cs0.addr;
+	ge2d_config->src_planes[0].w = cs0.width;
+	ge2d_config->src_planes[0].h = cs0.height;
+	ge2d_config->src_planes[1].addr = cs1.addr;
+	ge2d_config->src_planes[1].w = cs1.width;
+	ge2d_config->src_planes[1].h = cs1.height;
+	ge2d_config->src_planes[2].addr = cs2.addr;
+	ge2d_config->src_planes[2].w = cs2.width;
+	ge2d_config->src_planes[2].h = cs2.height;
+	canvas_read(output_canvas&0xff,&cd);
+	ge2d_config->dst_planes[0].addr = cd.addr;
+	ge2d_config->dst_planes[0].w = cd.width;
+	ge2d_config->dst_planes[0].h = cd.height;
+	ge2d_config->src_key.key_enable = 0;
+	ge2d_config->src_key.key_mask = 0;
+	ge2d_config->src_key.key_mode = 0;
+	ge2d_config->src_para.canvas_index=vf->canvas0Addr;
+	ge2d_config->src_para.mem_type = CANVAS_TYPE_INVALID;
+	ge2d_config->src_para.format = get_interlace_input_format(vf, output);
+	ge2d_config->src_para.fill_color_en = 0;
+	ge2d_config->src_para.fill_mode = 0;
+	ge2d_config->src_para.x_rev = 0;
+	ge2d_config->src_para.y_rev = 0;
+	ge2d_config->src_para.color = 0xffffffff;
+	ge2d_config->src_para.top = 0;
+	ge2d_config->src_para.left = 0;
+	ge2d_config->src_para.width = vf->width;
+	ge2d_config->src_para.height = src_height;
+	/* printk("vf_width is %d , vf_height is %d \n",vf->width ,vf->height); */
+	ge2d_config->src2_para.mem_type = CANVAS_TYPE_INVALID;
+	ge2d_config->dst_para.canvas_index = output_canvas&0xff;
+
+	if((output->v4l2_format!= V4L2_PIX_FMT_YUV420)
+		&& (output->v4l2_format != V4L2_PIX_FMT_YVU420))
+		ge2d_config->dst_para.canvas_index = output_canvas;
+
+	ge2d_config->dst_para.mem_type = CANVAS_TYPE_INVALID;
+	ge2d_config->dst_para.format = get_output_format(output->v4l2_format)|GE2D_LITTLE_ENDIAN;     
+	ge2d_config->dst_para.fill_color_en = 0;
+	ge2d_config->dst_para.fill_mode = 0;
+	ge2d_config->dst_para.x_rev = 0;
+	ge2d_config->dst_para.y_rev = 0;
+	ge2d_config->dst_para.color = 0;
+	ge2d_config->dst_para.top = 0;
+	ge2d_config->dst_para.left = 0;
+	ge2d_config->dst_para.width = output->width;
+	ge2d_config->dst_para.height = output->height;
+
+	if(current_mirror==1){
+		ge2d_config->dst_para.x_rev = 1;
+		ge2d_config->dst_para.y_rev = 0;
+	}else if(current_mirror==2){
+		ge2d_config->dst_para.x_rev = 0;
+		ge2d_config->dst_para.y_rev = 1;
+	}else{
+		ge2d_config->dst_para.x_rev = 0;
+		ge2d_config->dst_para.y_rev = 0;
+	}
+
+	if(cur_angle==90){
+		ge2d_config->dst_xy_swap = 1;
+		ge2d_config->dst_para.x_rev ^= 1;
+	}else if(cur_angle==180){
+		ge2d_config->dst_para.x_rev ^= 1;
+		ge2d_config->dst_para.y_rev ^= 1;
+	}else if(cur_angle==270){
+		ge2d_config->dst_xy_swap = 1;
+		ge2d_config->dst_para.y_rev ^= 1;
+	}
+
+	if(ge2d_context_config_ex(context,ge2d_config)<0) {
+		printk("++ge2d configing error.\n");
+		return -1;
+	}
+	stretchblt_noalpha(context,src_left ,src_top ,src_width, src_height,output->frame->x,output->frame->y,output->frame->w,output->frame->h);
+
+	/* for cr of  yuv420p or yuv420sp. */
+	if((output->v4l2_format==V4L2_PIX_FMT_YUV420)
+		||(output->v4l2_format==V4L2_PIX_FMT_YVU420)){
+		/* for cb. */
+		canvas_read((output_canvas>>8)&0xff,&cd);
+		ge2d_config->dst_planes[0].addr = cd.addr;
+		ge2d_config->dst_planes[0].w = cd.width;
+		ge2d_config->dst_planes[0].h = cd.height;
+		ge2d_config->dst_para.canvas_index=(output_canvas>>8)&0xff;
+		ge2d_config->dst_para.format=GE2D_FORMAT_S8_CB|GE2D_LITTLE_ENDIAN;
+		ge2d_config->dst_para.width = output->width/2;
+		ge2d_config->dst_para.height = output->height/2;
+		ge2d_config->dst_xy_swap = 0;
+
+		if(current_mirror==1){
+			ge2d_config->dst_para.x_rev = 1;
+			ge2d_config->dst_para.y_rev = 0;
+		}else if(current_mirror==2){
+			ge2d_config->dst_para.x_rev = 0;
+			ge2d_config->dst_para.y_rev = 1;
+		}else{
+			ge2d_config->dst_para.x_rev = 0;
+			ge2d_config->dst_para.y_rev = 0;
+		}
+
+		if(cur_angle==90){
+			ge2d_config->dst_xy_swap = 1;
+			ge2d_config->dst_para.x_rev ^= 1;
+		}else if(cur_angle==180){
+			ge2d_config->dst_para.x_rev ^= 1;
+			ge2d_config->dst_para.y_rev ^= 1;
+		}else if(cur_angle==270){
+			ge2d_config->dst_xy_swap = 1;
+			ge2d_config->dst_para.y_rev ^= 1;
+		}
+	
+		if(ge2d_context_config_ex(context,ge2d_config)<0) {
+			printk("++ge2d configing error.\n");
+			return -1;
+		}
+		stretchblt_noalpha(context, src_left, src_top, src_width, src_height,
+			output->frame->x/2,output->frame->y/2,output->frame->w/2,output->frame->h/2);
+	} 
+	/* for cb of yuv420p or yuv420sp. */
+	if(output->v4l2_format==V4L2_PIX_FMT_YUV420||
+		output->v4l2_format==V4L2_PIX_FMT_YVU420) {
+		canvas_read((output_canvas>>16)&0xff,&cd);
+		ge2d_config->dst_planes[0].addr = cd.addr;
+		ge2d_config->dst_planes[0].w = cd.width;
+		ge2d_config->dst_planes[0].h = cd.height;
+		ge2d_config->dst_para.canvas_index=(output_canvas>>16)&0xff;
+		ge2d_config->dst_para.format=GE2D_FORMAT_S8_CR|GE2D_LITTLE_ENDIAN;
+		ge2d_config->dst_para.width = output->width/2;
+		ge2d_config->dst_para.height = output->height/2;
+		ge2d_config->dst_xy_swap = 0;
+
+		if(current_mirror==1){
+			ge2d_config->dst_para.x_rev = 1;
+			ge2d_config->dst_para.y_rev = 0;
+		}else if(current_mirror==2){
+			ge2d_config->dst_para.x_rev = 0;
+			ge2d_config->dst_para.y_rev = 1;
+		}else{
+			ge2d_config->dst_para.x_rev = 0;
+			ge2d_config->dst_para.y_rev = 0;
+		}
+
+		if(cur_angle==90){
+			ge2d_config->dst_xy_swap = 1;
+			ge2d_config->dst_para.x_rev ^= 1;
+		}else if(cur_angle==180){
+			ge2d_config->dst_para.x_rev ^= 1;
+			ge2d_config->dst_para.y_rev ^= 1;
+		}else if(cur_angle==270){
+			ge2d_config->dst_xy_swap = 1;
+			ge2d_config->dst_para.y_rev ^= 1;
+		}
+
+		if(ge2d_context_config_ex(context,ge2d_config)<0) {
+			printk("++ge2d configing error.\n");
+			return -1;
+		}
+		stretchblt_noalpha(context, src_left, src_top, src_width, src_height,
+			output->frame->x/2,output->frame->y/2,output->frame->w/2,output->frame->h/2);
+	}
+	return output_canvas;
+}
+
+int amlvideo2_ge2d_interlace_one_canvasAddr_process(vframe_t* vf, ge2d_context_t *context,config_para_ex_t* ge2d_config, struct amlvideo2_output* output)
+{
+	int src_top ,src_left ,src_width, src_height;
+	int dst_top ,dst_left ,dst_width, dst_height;
+	canvas_t cs0,cs1,cs2,cd;
+	int current_mirror = 0;
+	int cur_angle = 0;
+	int output_canvas  = output->canvas_id;
+
+	src_top = 0;
+	src_left = 0;
+	src_width = vf->width;
+	src_height = vf->height/2;
+
+	dst_top = 0;
+	dst_left = 0;
+	dst_width = output->width;
+	dst_height = output->height;
+
+	current_mirror = 0;
+	cur_angle = output->angle;
+	if(current_mirror == 1)
+		cur_angle = (360 - cur_angle%360);
+	else
+		cur_angle = cur_angle%360;
+
+	if(src_width<src_height)
+		cur_angle = (cur_angle+90)%360;
+
+       output_axis_adjust(src_width,src_height,&dst_width,&dst_height,cur_angle);
+	dst_top = (output->height-dst_height)/2;
+	dst_left = (output->width-dst_width)/2;
+	dst_top = dst_top&0xfffffffe;
+	dst_left = dst_left&0xfffffffe;
+	/* data operating. */
+
+	memset(ge2d_config,0,sizeof(config_para_ex_t));
+	if((dst_left!=output->frame->x)||(dst_top!=output->frame->y)
+	  ||(dst_width!=output->frame->w)||(dst_height!=output->frame->h)){
+		ge2d_config->alu_const_color= 0;//0x000000ff;
+		ge2d_config->bitmask_en  = 0;
+		ge2d_config->src1_gb_alpha = 0;//0xff;
+		ge2d_config->dst_xy_swap = 0;
+
+		canvas_read(output_canvas&0xff,&cd);
+		ge2d_config->src_planes[0].addr = cd.addr;
+		ge2d_config->src_planes[0].w = cd.width;
+		ge2d_config->src_planes[0].h = cd.height;
+		ge2d_config->dst_planes[0].addr = cd.addr;
+		ge2d_config->dst_planes[0].w = cd.width;
+		ge2d_config->dst_planes[0].h = cd.height;
+
+		ge2d_config->src_key.key_enable = 0;
+		ge2d_config->src_key.key_mask = 0;
+		ge2d_config->src_key.key_mode = 0;
+
+		ge2d_config->src_para.canvas_index=output_canvas;
+		ge2d_config->src_para.mem_type = CANVAS_TYPE_INVALID;
+		ge2d_config->src_para.format = get_output_format(output->v4l2_format)|GE2D_LITTLE_ENDIAN;;
+		ge2d_config->src_para.fill_color_en = 0;
+		ge2d_config->src_para.fill_mode = 0;
+		ge2d_config->src_para.x_rev = 0;
+		ge2d_config->src_para.y_rev = 0;
+		ge2d_config->src_para.color = 0;
+		ge2d_config->src_para.top = 0;
+		ge2d_config->src_para.left = 0;
+		ge2d_config->src_para.width = output->width;
+		ge2d_config->src_para.height = output->height;
+
+		ge2d_config->src2_para.mem_type = CANVAS_TYPE_INVALID;
+
+		ge2d_config->dst_para.canvas_index=output_canvas;
+		ge2d_config->dst_para.mem_type = CANVAS_TYPE_INVALID;
+		ge2d_config->dst_para.format = get_output_format(output->v4l2_format)|GE2D_LITTLE_ENDIAN;;
+		ge2d_config->dst_para.fill_color_en = 0;
+		ge2d_config->dst_para.fill_mode = 0;
+		ge2d_config->dst_para.x_rev = 0;
+		ge2d_config->dst_para.y_rev = 0;
+		ge2d_config->dst_para.color = 0;
+		ge2d_config->dst_para.top = 0;
+		ge2d_config->dst_para.left = 0;
+		ge2d_config->dst_para.width = output->width;
+		ge2d_config->dst_para.height = output->height;
+
+		if(ge2d_context_config_ex(context,ge2d_config)<0) {
+			printk("++ge2d configing error.\n");
+			return -2;
+		}
+		fillrect(context, 0, 0, output->width, output->height, (ge2d_config->dst_para.format&GE2D_FORMAT_YUV)?0x008080ff:0);
+		output->frame->x = dst_left;
+		output->frame->y = dst_top;
+		output->frame->w = dst_width;
+		output->frame->h = dst_height;
+		memset(ge2d_config,0,sizeof(config_para_ex_t));
+	}
+	ge2d_config->alu_const_color= 0;//0x000000ff;
+	ge2d_config->bitmask_en  = 0;
+	ge2d_config->src1_gb_alpha = 0;//0xff;
+	ge2d_config->dst_xy_swap = 0;
+
+	canvas_read(vf->canvas0Addr&0xff,&cs0);
+	canvas_read((vf->canvas0Addr>>8)&0xff,&cs1);
+	canvas_read((vf->canvas0Addr>>16)&0xff,&cs2);
+	ge2d_config->src_planes[0].addr = cs0.addr;
+	ge2d_config->src_planes[0].w = cs0.width;
+	ge2d_config->src_planes[0].h = cs0.height;
+	ge2d_config->src_planes[1].addr = cs1.addr;
+	ge2d_config->src_planes[1].w = cs1.width;
+	ge2d_config->src_planes[1].h = cs1.height;
+	ge2d_config->src_planes[2].addr = cs2.addr;
+	ge2d_config->src_planes[2].w = cs2.width;
+	ge2d_config->src_planes[2].h = cs2.height;
+	canvas_read(output_canvas&0xff,&cd);
+	ge2d_config->dst_planes[0].addr = cd.addr;
+	ge2d_config->dst_planes[0].w = cd.width;
+	ge2d_config->dst_planes[0].h = cd.height;
+	ge2d_config->src_key.key_enable = 0;
+	ge2d_config->src_key.key_mask = 0;
+	ge2d_config->src_key.key_mode = 0;
+	ge2d_config->src_para.canvas_index=vf->canvas0Addr;
+	ge2d_config->src_para.mem_type = CANVAS_TYPE_INVALID;
+	ge2d_config->src_para.format = get_input_format(vf);
+	ge2d_config->src_para.fill_color_en = 0;
+	ge2d_config->src_para.fill_mode = 0;
+	ge2d_config->src_para.x_rev = 0;
+	ge2d_config->src_para.y_rev = 0;
+	ge2d_config->src_para.color = 0xffffffff;
+	ge2d_config->src_para.top = 0;
+	ge2d_config->src_para.left = 0;
+	ge2d_config->src_para.width = vf->width;
+	ge2d_config->src_para.height = vf->height;
+	/* printk("vf_width is %d , vf_height is %d \n",vf->width ,vf->height); */
+	ge2d_config->src2_para.mem_type = CANVAS_TYPE_INVALID;
+	ge2d_config->dst_para.canvas_index = output_canvas&0xff;
+
+	if((output->v4l2_format!= V4L2_PIX_FMT_YUV420)
+		&& (output->v4l2_format != V4L2_PIX_FMT_YVU420))
+		ge2d_config->dst_para.canvas_index = output_canvas;
+
+	ge2d_config->dst_para.mem_type = CANVAS_TYPE_INVALID;
+	ge2d_config->dst_para.format = get_output_format(output->v4l2_format)|GE2D_LITTLE_ENDIAN;     
+	ge2d_config->dst_para.fill_color_en = 0;
+	ge2d_config->dst_para.fill_mode = 0;
+	ge2d_config->dst_para.x_rev = 0;
+	ge2d_config->dst_para.y_rev = 0;
+	ge2d_config->dst_para.color = 0;
+	ge2d_config->dst_para.top = 0;
+	ge2d_config->dst_para.left = 0;
+	ge2d_config->dst_para.width = output->width;
+	ge2d_config->dst_para.height = output->height;
+
+	if(current_mirror==1){
+		ge2d_config->dst_para.x_rev = 1;
+		ge2d_config->dst_para.y_rev = 0;
+	}else if(current_mirror==2){
+		ge2d_config->dst_para.x_rev = 0;
+		ge2d_config->dst_para.y_rev = 1;
+	}else{
+		ge2d_config->dst_para.x_rev = 0;
+		ge2d_config->dst_para.y_rev = 0;
+	}
+
+	if(cur_angle==90){
+		ge2d_config->dst_xy_swap = 1;
+		ge2d_config->dst_para.x_rev ^= 1;
+	}else if(cur_angle==180){
+		ge2d_config->dst_para.x_rev ^= 1;
+		ge2d_config->dst_para.y_rev ^= 1;
+	}else if(cur_angle==270){
+		ge2d_config->dst_xy_swap = 1;
+		ge2d_config->dst_para.y_rev ^= 1;
+	}
+
+	if(ge2d_context_config_ex(context,ge2d_config)<0) {
+		printk("++ge2d configing error.\n");
+		return -1;
+	}
+	stretchblt_noalpha(context,src_left ,src_top ,src_width, src_height,output->frame->x,output->frame->y,output->frame->w,output->frame->h);
+
+	/* for cr of  yuv420p or yuv420sp. */
+	if((output->v4l2_format==V4L2_PIX_FMT_YUV420)
+		||(output->v4l2_format==V4L2_PIX_FMT_YVU420)){
+		/* for cb. */
+		canvas_read((output_canvas>>8)&0xff,&cd);
+		ge2d_config->dst_planes[0].addr = cd.addr;
+		ge2d_config->dst_planes[0].w = cd.width;
+		ge2d_config->dst_planes[0].h = cd.height;
+		ge2d_config->dst_para.canvas_index=(output_canvas>>8)&0xff;
+		ge2d_config->dst_para.format=GE2D_FORMAT_S8_CB|GE2D_LITTLE_ENDIAN;
+		ge2d_config->dst_para.width = output->width/2;
+		ge2d_config->dst_para.height = output->height/2;
+		ge2d_config->dst_xy_swap = 0;
+
+		if(current_mirror==1){
+			ge2d_config->dst_para.x_rev = 1;
+			ge2d_config->dst_para.y_rev = 0;
+		}else if(current_mirror==2){
+			ge2d_config->dst_para.x_rev = 0;
+			ge2d_config->dst_para.y_rev = 1;
+		}else{
+			ge2d_config->dst_para.x_rev = 0;
+			ge2d_config->dst_para.y_rev = 0;
+		}
+
+		if(cur_angle==90){
+			ge2d_config->dst_xy_swap = 1;
+			ge2d_config->dst_para.x_rev ^= 1;
+		}else if(cur_angle==180){
+			ge2d_config->dst_para.x_rev ^= 1;
+			ge2d_config->dst_para.y_rev ^= 1;
+		}else if(cur_angle==270){
+			ge2d_config->dst_xy_swap = 1;
+			ge2d_config->dst_para.y_rev ^= 1;
+		}
+	
+		if(ge2d_context_config_ex(context,ge2d_config)<0) {
+			printk("++ge2d configing error.\n");
+			return -1;
+		}
+		stretchblt_noalpha(context, src_left, src_top, src_width, src_height,
+			output->frame->x/2,output->frame->y/2,output->frame->w/2,output->frame->h/2);
+	} 
+	/* for cb of yuv420p or yuv420sp. */
+	if(output->v4l2_format==V4L2_PIX_FMT_YUV420||
+		output->v4l2_format==V4L2_PIX_FMT_YVU420) {
+		canvas_read((output_canvas>>16)&0xff,&cd);
+		ge2d_config->dst_planes[0].addr = cd.addr;
+		ge2d_config->dst_planes[0].w = cd.width;
+		ge2d_config->dst_planes[0].h = cd.height;
+		ge2d_config->dst_para.canvas_index=(output_canvas>>16)&0xff;
+		ge2d_config->dst_para.format=GE2D_FORMAT_S8_CR|GE2D_LITTLE_ENDIAN;
+		ge2d_config->dst_para.width = output->width/2;
+		ge2d_config->dst_para.height = output->height/2;
+		ge2d_config->dst_xy_swap = 0;
+
+		if(current_mirror==1){
+			ge2d_config->dst_para.x_rev = 1;
+			ge2d_config->dst_para.y_rev = 0;
+		}else if(current_mirror==2){
+			ge2d_config->dst_para.x_rev = 0;
+			ge2d_config->dst_para.y_rev = 1;
+		}else{
+			ge2d_config->dst_para.x_rev = 0;
+			ge2d_config->dst_para.y_rev = 0;
+		}
+
+		if(cur_angle==90){
+			ge2d_config->dst_xy_swap = 1;
+			ge2d_config->dst_para.x_rev ^= 1;
+		}else if(cur_angle==180){
+			ge2d_config->dst_para.x_rev ^= 1;
+			ge2d_config->dst_para.y_rev ^= 1;
+		}else if(cur_angle==270){
+			ge2d_config->dst_xy_swap = 1;
+			ge2d_config->dst_para.y_rev ^= 1;
+		}
+
+		if(ge2d_context_config_ex(context,ge2d_config)<0) {
+			printk("++ge2d configing error.\n");
+			return -1;
+		}
+		stretchblt_noalpha(context, src_left, src_top, src_width, src_height,
+			output->frame->x/2,output->frame->y/2,output->frame->w/2,output->frame->h/2);
+	}
+	return output_canvas;
+}
 
 int amlvideo2_ge2d_pre_process(vframe_t* vf, ge2d_context_t *context,config_para_ex_t* ge2d_config, struct amlvideo2_output* output)
 {
@@ -922,9 +2077,22 @@ static int amlvideo2_fillbuff(struct amlvideo2_fh *fh, struct amlvideo2_node_buf
 			break;
 	}
 	src_canvas = vf->canvas0Addr;
+        if(ge2d_proc){
+                if( (vf->type &VIDTYPE_INTERLACE_BOTTOM) || (vf->type &VIDTYPE_INTERLACE_TOP)){
+                        if(vf->canvas0Addr == vf->canvas1Addr){
+                                if( (AML_PROVIDE_MIRROCAST_VDIN1 == node->p_type) || (AML_PROVIDE_MIRROCAST_VDIN0 == node->p_type) ) {
+                                        src_canvas = amlvideo2_ge2d_interlace_vdindata_process(vf,node->context,&ge2d_config,&output);
+                                }else{
+                                        src_canvas = amlvideo2_ge2d_interlace_one_canvasAddr_process(vf,node->context,&ge2d_config,&output);
+                                }
 
-	if(ge2d_proc)
-		src_canvas = amlvideo2_ge2d_pre_process(vf,node->context,&ge2d_config,&output); 
+                        }else{
+                                src_canvas = amlvideo2_ge2d_interlace_two_canvasAddr_process(vf,node->context,&ge2d_config,&output);
+                        }
+                }else{
+                        src_canvas = amlvideo2_ge2d_pre_process(vf,node->context,&ge2d_config,&output); 
+                }
+        }
 
 	if ((sw_proc)&&(src_canvas>0))
 		amlvideo2_sw_post_process(src_canvas ,(unsigned)vbuf);
@@ -952,16 +2120,22 @@ static void amlvideo2_thread_tick(struct amlvideo2_fh *fh)
 
 	dprintk(node->vid_dev, 1, "Thread tick\n");
 
-
-	if(!fh->is_streamed_on){
-		dprintk(node->vid_dev, 1, "dev doesn't stream on\n");
-		return ;
-	}
-
 	if(!node->provide_ready){
 		dprintk(node->vid_dev, 1, "provide is not ready\n");
 		return ;
-	}
+        }
+        if( (AML_RECEIVER_NONE != node->r_type) && vfq_full( &q_ready) ){
+                return;
+        }
+
+	if(!fh->is_streamed_on){
+                dprintk(node->vid_dev, 1, "dev doesn't stream on\n");
+                if( vf_peek(node->recv.name)){
+                        vf = vf_get(node->recv.name);
+                        vf_inqueue(vf, node->recv.name);
+                }
+                return ;
+        }
 
 	spin_lock_irqsave(&node->slock, flags);
 	if (list_empty(&dma_q->active)){
@@ -996,7 +2170,7 @@ static void amlvideo2_thread_tick(struct amlvideo2_fh *fh)
 		  //||(active_duration  > (int)fh->frm_save_time_us)
 			if(vf){
 				if(tmp_vf != NULL ){
-					vf_put(tmp_vf,node->recv.name);
+					vf_inqueue(tmp_vf,node->recv.name);
 				}
 				tmp_vf = NULL;
 			}else if(tmp_vf){
@@ -1008,7 +2182,7 @@ static void amlvideo2_thread_tick(struct amlvideo2_fh *fh)
 		}else{
 			if(vf){
 				if(tmp_vf != NULL){
-					vf_put(tmp_vf,node->recv.name);
+					vf_inqueue(tmp_vf,node->recv.name);
 				}
 				tmp_vf = vf;
 			}
@@ -1031,7 +2205,7 @@ static void amlvideo2_thread_tick(struct amlvideo2_fh *fh)
 	spin_unlock_irqrestore(&node->slock, flags);
 	amlvideo2_fillbuff(fh, buf,vf);
 
-	vf_put(vf,node->recv.name);
+	vf_inqueue(vf,node->recv.name);
 	dprintk(node->vid_dev, 1, "filled buffer %p\n", buf);
 
 	if (waitqueue_active(&buf->vb.done)){
@@ -1126,56 +2300,121 @@ static void amlvideo2_stop_thread(struct amlvideo2_node_dmaqueue  *dma_q)
 	}
 }
 
-aml_provider_type get_provider_type(const char* name)
+aml_provider_type get_provider_type(const char* name, int input)
 {
 	aml_provider_type type = AML_PROVIDE_NONE;
 	if(!name)
 		return type;
-	if(strcasecmp(name,"vdin0")){
-		type = AML_PROVIDE_VDIN0;
-	}else if(strcasecmp(name,"vdin1")){
-		type = AML_PROVIDE_VDIN1;
-	}else if(strncasecmp(name,"decode",7)){
+	if( 0 == strncasecmp(name,"vdin0", 5)){
+		if(0 == input)
+			type = AML_PROVIDE_MIRROCAST_VDIN0;
+		else
+			type = AML_PROVIDE_HDMIIN_VDIN0;
+	}else if( 0 == strncasecmp(name,"vdin1", 5)){
+		if(1 == input)
+			type = AML_PROVIDE_MIRROCAST_VDIN1;
+		else
+			type = AML_PROVIDE_HDMIIN_VDIN1;
+	}else if(0 == strncasecmp(name,"decoder",7)){
 		type = AML_PROVIDE_DECODE;
+	}else{
+		type = AML_PROVIDE_MAX;
 	}
 	return type;	
 }
 
-static int video_receiver_event_fun(int type, void* data, void* private_data)
+aml_provider_type get_sub_receiver_type(const char* name)
 {
-	struct amlvideo2_node  *node  = (struct amlvideo2_node  *)private_data;
-	struct amlvideo2_fh * fh = (struct amlvideo2_fh *)container_of(node, struct amlvideo2_fh, node);
-
-	switch(type) {
-		case VFRAME_EVENT_PROVIDER_VFRAME_READY:
-			node->provide_ready = 1;
-			break;
-		case VFRAME_EVENT_PROVIDER_QUREY_STATE:
-			if(fh->is_streamed_on){
-				return RECEIVER_ACTIVE ;		
-			}else{
-				return RECEIVER_INACTIVE;
-			}
-			break;   
-		case VFRAME_EVENT_PROVIDER_START:
-			break;
-		case VFRAME_EVENT_PROVIDER_UNREG: 
-			node->provide_ready = 0;
-			break;
-		case VFRAME_EVENT_PROVIDER_LIGHT_UNREG:
-			break;
-		case VFRAME_EVENT_PROVIDER_RESET:
-			break;
-		default:
-			break;
-	}    		
-	return 0;
+	aml_provider_type type = AML_RECEIVER_NONE;
+	if(!name)
+		return type;
+	if(0 == strncasecmp(name,"ppmgr",5)){
+		type = AML_RECEIVER_PPMGR;
+                printk("type is ppmgr");
+	}else{
+                type = AML_RECEIVER_MAX;
+                printk("type is not certain\n");
+        }
+	return type;	
+}
+/* ------------------------------------------------------------------
+ *           provider operations
+ *-----------------------------------------------------------------*/
+static vframe_t *amlvideo2_vf_peek(void *op_arg)
+{
+        return vfq_peek(&q_ready);
 }
 
-static const struct vframe_receiver_op_s video_vf_receiver =
+static vframe_t *amlvideo2_vf_get(void *op_arg)
 {
-    .event_cb = video_receiver_event_fun
+        return vfq_pop(&q_ready);
+}
+
+static void amlvideo2_vf_put(vframe_t *vf, void *op_arg)
+{
+        vf_put(vf, DEVICE_NAME);
+}
+
+static int amlvideo2_event_cb(int type, void *data, void *private_data)
+{
+        if (type & VFRAME_EVENT_RECEIVER_PUT) {
+              //printk("video put, avail=%d\n", vfq_level(&q_ready) );
+        }else if (type & VFRAME_EVENT_RECEIVER_GET) {
+              //printk("video get, avail=%d\n", vfq_level(&q_ready) );
+        }else if(type & VFRAME_EVENT_RECEIVER_FRAME_WAIT){
+              // up(&thread_sem);
+              printk("receiver is waiting\n");
+        }else if(type & VFRAME_EVENT_RECEIVER_FRAME_WAIT){
+                printk("frame wait\n");
+        }
+
+        return 0;
+}
+
+static int amlvideo2_vf_states(vframe_states_t *states, void *op_arg)
+{
+        //unsigned long flags;
+        //spin_lock_irqsave(&lock, flags);
+
+        states->vf_pool_size    = AMLVIDEO2_POOL_SIZE;
+        states->buf_recycle_num = 0;
+        states->buf_free_num    =  AMLVIDEO2_POOL_SIZE - vfq_level(&q_ready);
+        states->buf_avail_num   = vfq_level(&q_ready);
+
+        //spin_unlock_irqrestore(&lock, flags);
+
+        return 0;
+}
+
+static const struct vframe_operations_s amlvideo2_vf_provider =
+{
+        .peek      = amlvideo2_vf_peek,
+        .get       = amlvideo2_vf_get,
+        .put       = amlvideo2_vf_put,
+        .event_cb  = amlvideo2_event_cb,
+        .vf_states = amlvideo2_vf_states,
 };
+
+static struct vframe_provider_s amlvideo2_vf_prov;
+
+/* ------------------------------------------------------------------
+   queue operations
+   ------------------------------------------------------------------*/
+
+void vf_inqueue(struct vframe_s *vf, const char *receiver)
+{
+
+	struct vframe_receiver_s *vfp;
+
+	vfp = vf_get_receiver(DEVICE_NAME);
+        if(NULL == vfp){
+                vf_put(vf, receiver);
+                return ;
+        }
+
+        vfq_push( &q_ready, vf);
+        vf_notify_receiver(DEVICE_NAME,VFRAME_EVENT_PROVIDER_VFRAME_READY,NULL);
+}
 
 /* ------------------------------------------------------------------
 	Videobuf operations
@@ -1508,6 +2747,7 @@ static int vidioc_streamon(struct file *file, void *priv, enum v4l2_buf_type i)
 {
 	int ret;
 	struct amlvideo2_fh  *fh  = priv;
+	struct amlvideo2_node *node = fh->node;
 	vdin_parm_t para;
 	const vinfo_t *vinfo;
 
@@ -1515,39 +2755,83 @@ static int vidioc_streamon(struct file *file, void *priv, enum v4l2_buf_type i)
 	if ((fh->type != V4L2_BUF_TYPE_VIDEO_CAPTURE) || (i != fh->type))
 		return -EINVAL;
 	ret = videobuf_streamon(&fh->vb_vidq);
+	printk("%s, videobuf_streamon() ret: %d\n", __func__, ret);
+	printk("%s, node->input: %d, node->r_type: %d, node->p_type: %d\n", __func__, node->input, node->r_type, node->p_type);
 	if(ret == 0){
 		if(1){
-			memset( &para, 0, sizeof( para ));
-			para.port  = TVIN_PORT_VIU;
-			para.fmt = TVIN_SIG_FMT_MAX;
-			para.frame_rate = 60;//175
-			para.h_active = vinfo->width;//fh->width;
-			para.v_active = vinfo->height;//fh->height;
-			para.hsync_phase = 0;//0x1
-			para.vsync_phase  = 1;//0x1
-			para.hs_bp = 0;
-			para.vs_bp = 0;
-			para.dfmt = TVIN_NV21;//TVIN_YUV422;
-			para.scan_mode = TVIN_SCAN_MODE_PROGRESSIVE;	
-			int dst_w = fh->width, dst_h = fh->height;
-			if(vinfo->width<vinfo->height){
-				dst_w = fh->height;
-				dst_h = fh->width;
-				output_axis_adjust(vinfo->height,vinfo->width, (int *)&dst_h,(int *)&dst_w,0);
-			}else{
-				output_axis_adjust(vinfo->width,vinfo->height, (int *)&dst_w,(int *)&dst_h,0);	
-			}
-			para.dest_hactive = dst_w;
-			para.dest_vactive = dst_h;
-			printk("amlvideo2--vidioc_streamon: para.h_active: %d, para.v_active: %d, para.dest_hactive: %d, para.dest_vactive: %d, fh->width: %d, fh->height: %d \n",para.h_active,para.v_active, para.dest_hactive, para.dest_vactive,fh->width,fh->height);
+
 			//start_tvin_service((fh->node->vid== 0)?0:1,&para);
 			//start_tvin_service(1,&para);
-			vops.start_tvin_service(1,&para);
+			if(node->input == 0) {			//	0:mirrocast
+				if(AML_RECEIVER_NONE == node->r_type){
+                	if( AML_PROVIDE_MIRROCAST_VDIN0 == node->p_type){
+
+			                 memset( &para, 0, sizeof( para ));
+											 para.port  = TVIN_PORT_VIU;
+											 para.fmt = TVIN_SIG_FMT_MAX;
+											 para.frame_rate = 60;//175
+	                     if(AML_RECEIVER_NONE == node->r_type){
+	                               para.h_active = vinfo->width;//fh->width;
+	                               para.v_active = vinfo->height;//fh->height;
+	                     }
+											 para.hsync_phase = 0;//0x1
+											 para.vsync_phase  = 1;//0x1
+											 para.hs_bp = 0;
+											 para.vs_bp = 0;
+											 para.dfmt = TVIN_NV21;//TVIN_YUV422;
+											 para.scan_mode = TVIN_SCAN_MODE_PROGRESSIVE;	
+											 int dst_w = fh->width, dst_h = fh->height;
+											 if(vinfo->width<vinfo->height){
+												 dst_w = fh->height;
+												 dst_h = fh->width;
+												 output_axis_adjust(vinfo->height,vinfo->width, (int *)&dst_h,(int *)&dst_w,0);
+											 }else{
+												 output_axis_adjust(vinfo->width,vinfo->height, (int *)&dst_w,(int *)&dst_h,0);	
+											 }
+											 para.dest_hactive = dst_w;
+											 para.dest_vactive = dst_h;
+											 printk("amlvideo2--vidioc_streamon: para.h_active: %d, para.v_active: %d"
+	                     								          "para.dest_hactive: %d, para.dest_vactive: %d, fh->width: %d, fh->height: %d \n",
+	                              								 para.h_active,para.v_active, para.dest_hactive, para.dest_vactive,fh->width,fh->height);
+	
+                      	vops.start_tvin_service(0,&para);
+                    }else if( AML_PROVIDE_MIRROCAST_VDIN1 == node->p_type){
+			                 memset( &para, 0, sizeof( para ));
+											 para.port  = TVIN_PORT_VIU;
+											 para.fmt = TVIN_SIG_FMT_MAX;
+											 para.frame_rate = 60;//175
+	                     if(AML_RECEIVER_NONE == node->r_type){
+	                               para.h_active = vinfo->width;//fh->width;
+	                               para.v_active = vinfo->height;//fh->height;
+	                     }
+											 para.hsync_phase = 0;//0x1
+											 para.vsync_phase  = 1;//0x1
+											 para.hs_bp = 0;
+											 para.vs_bp = 0;
+											 para.dfmt = TVIN_NV21;//TVIN_YUV422;
+											 para.scan_mode = TVIN_SCAN_MODE_PROGRESSIVE;	
+											 int dst_w = fh->width, dst_h = fh->height;
+											 if(vinfo->width<vinfo->height){
+												 dst_w = fh->height;
+												 dst_h = fh->width;
+												 output_axis_adjust(vinfo->height,vinfo->width, (int *)&dst_h,(int *)&dst_w,0);
+											 }else{
+												 output_axis_adjust(vinfo->width,vinfo->height, (int *)&dst_w,(int *)&dst_h,0);	
+											 }
+											 para.dest_hactive = dst_w;
+											 para.dest_vactive = dst_h;
+											 printk("amlvideo2--vidioc_streamon: para.h_active: %d, para.v_active: %d"
+	                     								          "para.dest_hactive: %d, para.dest_vactive: %d, fh->width: %d, fh->height: %d \n",
+	                              								 para.h_active,para.v_active, para.dest_hactive, para.dest_vactive,fh->width,fh->height);
+                        vops.start_tvin_service(1,&para);
+                    }
+                }
+			}
 		}
 #if 0
-		if((fh->node->p_type == AML_PROVIDE_VDIN0)||(fh->node->p_type == AML_PROVIDE_VDIN1)){
+		if((fh->node->p_type == AML_PROVIDE_MIRROCAST_VDIN0)||(fh->node->p_type == AML_PROVIDE_MIRROCAST_VDIN1)){
 			memset( &para, 0, sizeof( para ));
-        		//para.port  = (fh->node->p_type == AML_PROVIDE_VDIN0)?TVIN_PORT_CAMERA:TVIN_PORT_VIU;
+        		//para.port  = (fh->node->p_type == AML_PROVIDE_MIRROCAST_VDIN0)?TVIN_PORT_CAMERA:TVIN_PORT_VIU;
         		para.port  = TVIN_PORT_VIU;
         		para.fmt = TVIN_SIG_FMT_MAX;
 			para.frame_rate = 60;//175
@@ -1582,14 +2866,21 @@ static int vidioc_streamoff(struct file *file, void *priv, enum v4l2_buf_type i)
 {
 	int ret;
 	struct amlvideo2_fh  *fh  = priv;
+	struct amlvideo2_node *node = fh->node;
 
 	if ((fh->type != V4L2_BUF_TYPE_VIDEO_CAPTURE) || (i != fh->type))
 		return -EINVAL;
 	ret = videobuf_streamoff(&fh->vb_vidq);
 	if(ret == 0){
-		//stop_tvin_service((fh->node->vid== 0)?0:1);
-		//stop_tvin_service(1);
-		vops.stop_tvin_service(1);
+		if(0 == node->input){
+            if(AML_RECEIVER_NONE == node->r_type){
+                if( AML_PROVIDE_MIRROCAST_VDIN0 == node->p_type){
+                    vops.stop_tvin_service(0);
+                }else if( AML_PROVIDE_MIRROCAST_VDIN1 == node->p_type){
+                    vops.stop_tvin_service(1);
+                }
+            }
+        }
 		fh->is_streamed_on = 0;
 	}
 	return ret;
@@ -1690,6 +2981,26 @@ static int vidioc_queryctrl(struct file *file, void *priv,
 	return -EINVAL;
 }
 
+
+static int vidioc_g_input(struct file *file, void *priv, unsigned int *i)
+{
+    struct amlvideo2_fh *fh = priv;
+    struct amlvideo2_node *node = fh->node;
+
+    *i = node->input;
+    return (0);
+}
+
+static int vidioc_s_input(struct file *file, void *priv, unsigned int i)
+{
+    struct amlvideo2_fh *fh = priv;
+    struct amlvideo2_node *node = fh->node;
+
+    node->input = i;
+    printk("current input:%d\n", node->input);
+    return (0);
+}
+
 static int vidioc_g_ctrl(struct file *file, void *priv,
 			 struct v4l2_control *ctrl)
 {
@@ -1748,7 +3059,7 @@ static int amlvideo2_open(struct file *file)
 		mutex_unlock(&node->mutex);
 		return -ENODEV;
 	}
-	node->p_type = get_provider_type(node->provider->name);
+	node->p_type = get_provider_type(node->provider->name, node->input);
 	if((node->p_type == AML_PROVIDE_NONE)||(node->p_type>=AML_PROVIDE_MAX)){
 		node->users--;
 		node->provider = NULL;
@@ -1757,7 +3068,7 @@ static int amlvideo2_open(struct file *file)
 	}
 #endif
 
-	fh = kzalloc(sizeof(*fh), GFP_KERNEL);
+	fh = node->fh;
 	if (NULL == fh) {
 		node->users--;
 		//node->provider  = NULL;
@@ -1765,9 +3076,35 @@ static int amlvideo2_open(struct file *file)
 		return -ENOMEM;
 	}
 	mutex_unlock(&node->mutex);
+	node->input = 0;    //default input is miracast
+        node->sub_recv = vf_get_receiver(DEVICE_NAME);
+        if(node->sub_recv){
+                printk("node->sub_recv->name=%s\n", node->sub_recv->name);
+                node->provider = vf_get_provider(DEVICE_NAME);
+                if(NULL == node->provider){
+                        printk("node->provider=%p", node->provider);
+                        node->p_type = AML_PROVIDE_MAX;
+                }else{
+                        printk("node->provider=%p", node->provider);
+                        node->p_type =  get_provider_type(node->provider->name, node->input);
+                }
+                printk("node->r_type=%d\n", node->r_type);
+                node->r_type = get_sub_receiver_type(node->sub_recv->name);
+        }else{
+                printk("as an end receiver\n");
+                node->p_type = AML_PROVIDE_MIRROCAST_VDIN1;
+                node->provider = vf_get_provider(DEVICE_NAME);
+                if (NULL == node->provider) {
+                    node->p_type = AML_PROVIDE_MIRROCAST_VDIN1;
+                } else {
+                    printk("node->provider = %p\n", node->provider);
+                    node->p_type = get_provider_type(node->provider->name, node->input);
+                }
+                node->r_type = AML_RECEIVER_NONE;
 #if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6
 	switch_mod_gate_by_name("ge2d", 1);
 #endif
+        }
 
 	file->private_data = fh;
 	fh->node      = node;
@@ -1784,9 +3121,12 @@ static int amlvideo2_open(struct file *file)
 					NULL, &node->slock, fh->type, V4L2_FIELD_INTERLACED,
 					sizeof(struct amlvideo2_node_buffer), (void*)res, NULL);
 
+    if( AML_RECEIVER_NONE == node->r_type){
+    	amlvideo2_start_thread(fh);
+    }
 	v4l2_vdin_ops_init(&vops);
 	fh->frm_save_time_us = 1000000/DEF_FRAMERATE;
-	amlvideo2_start_thread(fh);
+
 	return 0;
 }
 
@@ -1821,14 +3161,18 @@ static int amlvideo2_close(struct file *file)
 {
 	struct amlvideo2_fh *fh = file->private_data;
 	struct amlvideo2_node *node       = fh->node;
-	amlvideo2_stop_thread(&node->vidq);
+    if(AML_RECEIVER_NONE == node->r_type){
+		amlvideo2_stop_thread(&node->vidq);
+    }
 	videobuf_stop(&fh->vb_vidq);
 	videobuf_mmap_free(&fh->vb_vidq);
-	kfree(fh);
+
 	mutex_lock(&node->mutex);
+    if(AML_RECEIVER_NONE == node->r_type){
 #if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6
 	switch_mod_gate_by_name("ge2d", 0);
 #endif	
+	}
 	node->users--;
 	amlvideo2_frmintervals_active.numerator = 1;
 	amlvideo2_frmintervals_active.denominator = 30;
@@ -1886,6 +3230,8 @@ static const struct v4l2_ioctl_ops amlvideo2_ioctl_ops = {
 	.vidioc_streamoff     = vidioc_streamoff,
 	.vidioc_enum_framesizes = vidioc_enum_framesizes,
     .vidioc_enum_frameintervals =vidioc_enum_frameintervals,
+    .vidioc_s_input       = vidioc_s_input,
+    .vidioc_g_input       = vidioc_g_input,
 #ifdef CONFIG_VIDEO_V4L1_COMPAT
 	.vidiocgmbuf          = vidiocgmbuf,
 #endif
@@ -1901,6 +3247,83 @@ static struct video_device amlvideo2_template = {
 	.current_norm         = V4L2_STD_NTSC_M,
 };
 
+static int amlvideo2_receiver_event_fun(int type, void* data, void* private_data)
+{
+	struct amlvideo2_node  *node  = (struct amlvideo2_node  *)private_data;
+	struct amlvideo2_fh *fh = node->fh;//(struct amlvideo2_fh *)container_of(node, struct amlvideo2_fh, node);
+
+	switch(type) {
+		case VFRAME_EVENT_PROVIDER_VFRAME_READY:
+			node->provide_ready = 1;
+			break;
+		case VFRAME_EVENT_PROVIDER_QUREY_STATE:
+                        if(vfq_level(&q_ready)){
+				return RECEIVER_ACTIVE ;		
+                        }else{
+				return RECEIVER_INACTIVE;
+                        }
+			break;   
+		case VFRAME_EVENT_PROVIDER_START:
+#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6
+                        switch_mod_gate_by_name("ge2d", 1);
+#endif
+                        node->sub_recv = vf_get_receiver(DEVICE_NAME);
+                        printk("sub recv=%p\n", node->sub_recv);
+                        if(node->sub_recv){
+                                printk("node->provider->name=%s\n", node->sub_recv->name);
+                                node->r_type = get_sub_receiver_type(node->sub_recv->name);
+                                printk("r_type=%d\n", node->r_type);
+
+                                node->provider = vf_get_provider(DEVICE_NAME);
+                                printk("provider=%p\n", node->provider);
+                                if(node->provider){
+                                        printk("provider=%s\n", node->provider->name);
+                                        node->p_type =  get_provider_type(node->provider->name, node->input);
+                                }
+
+                                fh->node     = node;
+
+                                vf_reg_provider(&amlvideo2_vf_prov);
+                                vf_notify_receiver(DEVICE_NAME,VFRAME_EVENT_PROVIDER_START,NULL);
+                                vfq_init(&q_ready, AMLVIDEO2_POOL_SIZE+1, &amlvideo2_pool_ready[0]);
+
+                                printk("start thread\n");
+
+                                printk("test, test node=%p, fh=%p\n", node, fh);
+                                amlvideo2_start_thread(fh);
+                        }
+
+			break;
+		case VFRAME_EVENT_PROVIDER_UNREG: 
+			node->provide_ready = 0;
+                        printk("r_type=%d,p_type=%d\n", node->r_type, node->p_type);
+                        if( AML_RECEIVER_NONE != node->r_type){
+                                amlvideo2_stop_thread(&node->vidq);
+                                printk("%s,%dstop thread\n", __func__, __LINE__);
+                        }
+
+                        printk("unreg amlvideo2\n");
+                        vf_unreg_provider(&amlvideo2_vf_prov);
+#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6
+                        switch_mod_gate_by_name("ge2d", 0);
+#endif
+			break;
+		case VFRAME_EVENT_PROVIDER_LIGHT_UNREG:
+                        printk("provider light unreg\n");
+			break;
+		case VFRAME_EVENT_PROVIDER_RESET:
+                        printk("provider reset\n");
+			break;
+		default:
+			break;
+	}
+	return 0;
+}
+
+static const struct vframe_receiver_op_s video_vf_receiver =
+{
+    .event_cb = amlvideo2_receiver_event_fun
+};
 /* -----------------------------------------------------------------
 	Initialization and module stuff
    ------------------------------------------------------------------*/
@@ -1917,6 +3340,8 @@ static int amlvideo2_release_node(struct amlvideo2_device *vid_dev)
 			vf_unreg_receiver(&vid_dev->node[i]->recv);
 			if(vid_dev->node[i]->context)
 				destroy_ge2d_work_queue(vid_dev->node[i]->context);
+            kfree(vid_dev->node[i]->fh);
+			vid_dev->node[i]->fh = NULL;
 			kfree(vid_dev->node[i]);
 			vid_dev->node[i] = NULL;
 		}
@@ -1931,6 +3356,7 @@ static int amlvideo2_create_node(struct platform_device *pdev)
 	int ret = 0, i = 0, j = 0;
 	struct video_device *vfd = NULL;
 	struct amlvideo2_node* vid_node = NULL;
+    struct amlvideo2_fh *fh = NULL;
 	struct resource *res = NULL;
 	struct v4l2_device *v4l2_dev = platform_get_drvdata(pdev);
 	struct amlvideo2_device *vid_dev = container_of(v4l2_dev,
@@ -1997,7 +3423,13 @@ static int amlvideo2_create_node(struct platform_device *pdev)
 			break;
 		}
 
-		video_set_drvdata(vfd, vid_node);
+                fh = kzalloc(sizeof(*fh), GFP_KERNEL);
+                if ( !fh ) {
+                        break;
+                }
+
+                vid_node->fh = fh;
+                video_set_drvdata(vfd, vid_node);
 
 		/* Set all controls to their default value. */
 		for (j = 0; j < ARRAY_SIZE(amlvideo2_node_qctrl); j++)
@@ -2014,6 +3446,7 @@ static int amlvideo2_create_node(struct platform_device *pdev)
 		vf_receiver_init(&vid_node->recv, RECEIVER_NAME, &video_vf_receiver, (void*)vid_node);
 #endif
        	vf_reg_receiver(&vid_node->recv);
+        vf_provider_init(&amlvideo2_vf_prov, DEVICE_NAME ,&amlvideo2_vf_provider, NULL);
 		vid_dev->node[i] = vid_node;
 		v4l2_info(&vid_dev->v4l2_dev, "V4L2 device registered as %s\n",
 		  	video_device_node_name(vfd));
@@ -2026,7 +3459,7 @@ static int amlvideo2_create_node(struct platform_device *pdev)
 	return ret;
 }
 
-static int amlvideo2_driver_probe(struct platform_device *pdev)
+static int __init amlvideo2_driver_probe(struct platform_device *pdev)
 {
 	int ret = 0;
 	struct amlvideo2_device *dev = NULL;

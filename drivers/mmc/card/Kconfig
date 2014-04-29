@@ -50,6 +50,13 @@ config MMC_BLOCK_BOUNCE
 
 	  If unsure, say Y here.
 
+config EMMC_SECURE_STORAGE
+	bool "Meson secure storage store in emmc device support"
+	depends on MMC_BLOCK
+	default n
+	help
+	  Support secure storage store in emmc device
+	  
 config MMC_BLOCK_DEFERRED_RESUME
 	bool "Deferr MMC layer resume until I/O is requested"
 	depends on MMC_BLOCK

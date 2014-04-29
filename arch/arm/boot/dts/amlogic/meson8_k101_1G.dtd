@@ -80,6 +80,14 @@ void root_func(){
 		aml_reserved_end = <0x05000000>;/**reserved memory end */
 		phys_offset = <0x00000000>;
 		linux,total-memory = <0x40000000>;
+        #address-cells = <1>;
+        #size-cells = <1>;
+
+        cma_0:region@0 {
+           region_name = "cma_0";
+           reg = <0 0x02700000>;
+           linux,contiguous-region;
+        };
 	};
 /// ***************************************************************************************
 ///	-	GIC
@@ -136,7 +144,7 @@ void root_func(){
 		compatible = "amlogic,mesonfb-ext";
 		dev_name = "mesonfb-ext";
 		status = "ok";
-	   	reserve-memory = <0x01000000  0x00100000>;
+		need-memory = <0>; /*0:no need,1:need*/
 	   	reserve-iomap = "true";
         display_size_default = <768 1024 768 3072 32>;//1024x768x4x3==0x0900000 < 0x01000000
 	 
@@ -195,8 +203,7 @@ void root_func(){
 		compatible = "amlogic,amvenc_avc";
 		dev_name = "amvenc_avc.0";
 		status = "okay";
-		reserve-memory = <0x00f00000>;
-		reserve-iomap = "true";
+        linux,contiguous-region = <&cma_0>;
 	};
 
 /// ***************************************************************************************
@@ -257,8 +264,7 @@ void root_func(){
 		compatible = "amlogic,vm";
 		dev_name = "vm.0";
 		status = "okay";
-		reserve-memory = <0x01800000>;
-		reserve-iomap = "true";
+        linux,contiguous-region = <&cma_0>;
 	};
 
 /// ***************************************************************************************
@@ -427,19 +433,19 @@ sdio{
 //$$ L3 PROP_U32 = "max_req_size"
 //$$ L2 PROP_STR = "gpio_dat3"       	
 //$$ L2 PROP_U32 = "card_type"
-        emmc{
-            status = "ok";
-            port = <2>;          /**0:sdio_a, 1:sdio_b, 2:sdio_c, 3:sdhc_a, 4:sdhc_b, 5:sdhc_c */
-            pinname = "emmc";
-            ocr_avail = <0x200000>;          /**VDD voltage 3.3 ~ 3.4 */
-            caps = "MMC_CAP_4_BIT_DATA","MMC_CAP_MMC_HIGHSPEED","MMC_CAP_SD_HIGHSPEED", "MMC_CAP_NONREMOVABLE"; // MMC_CAP_NEEDS_POLL -- for detect, MMC_CAP_NONREMOVABLE -- for eMMC/TSD
-            f_min = <300000>;
-            f_max = <50000000>;
-            f_max_w = <50000000>;
-            max_req_size = <0x20000>;          /**128KB*/
-            gpio_dat3 = "BOOT_3";
-            card_type = <5>; /* 0:unknown, 1:mmc card(include eMMC), 2:sd card(include tSD), 3:sdio device(ie:sdio-wifi), 4:SD combo (IO+mem) card, 5:NON sdio device(means sd/mmc card), other:reserved */
-        };
+//        emmc{
+//            status = "ok";
+//            port = <2>;          /**0:sdio_a, 1:sdio_b, 2:sdio_c, 3:sdhc_a, 4:sdhc_b, 5:sdhc_c */
+//            pinname = "emmc";
+//            ocr_avail = <0x200000>;          /**VDD voltage 3.3 ~ 3.4 */
+//            caps = "MMC_CAP_4_BIT_DATA","MMC_CAP_MMC_HIGHSPEED","MMC_CAP_SD_HIGHSPEED", "MMC_CAP_NONREMOVABLE"; // MMC_CAP_NEEDS_POLL -- for detect, MMC_CAP_NONREMOVABLE -- for eMMC/TSD
+//            f_min = <300000>;
+//            f_max = <50000000>;
+//            f_max_w = <50000000>;
+//            max_req_size = <0x20000>;          /**128KB*/
+//            gpio_dat3 = "BOOT_3";
+//            card_type = <1>; /* 0:unknown, 1:mmc card(include eMMC), 2:sd card(include tSD), 3:sdio device(ie:sdio-wifi), 4:SD combo (IO+mem) card, 5:NON sdio device(means sd/mmc card), other:reserved */
+//        };
 
     };
 
@@ -461,6 +467,8 @@ sdio{
 		device_id = <0>;
 		pinctrl-names="default";
 		pinctrl-0=<&ao_i2c_master>;
+		use_pio = <0>;
+		master_i2c_speed = <100000>;
 	};
 
 //$$ DEVICE = "I2C_A"
@@ -478,6 +486,8 @@ sdio{
 		pinctrl-0=<&a_i2c_master>;
 		#address-cells = <1>;
 		#size-cells = <0>;
+		use_pio = <0>;
+		master_i2c_speed = <300000>;
 	};
 	
 //$$ DEVICE="I2C_B"
@@ -495,6 +505,8 @@ sdio{
 		pinctrl-0=<&b_i2c_master>;
 		#address-cells = <1>;
 		#size-cells = <0>;
+		use_pio = <0>;
+		master_i2c_speed = <300000>;
  	};
 
 //$$ DEVICE="I2C_C"
@@ -511,6 +523,8 @@ sdio{
 //		pinctrl-0=<&c_i2c_master>;
 		#address-cells = <1>;
 		#size-cells = <0>;
+		use_pio = <0>;
+		master_i2c_speed = <300000>;
 	};
 
 //$$ DEVICE="I2C_D"
@@ -528,6 +542,8 @@ sdio{
 		pinctrl-0=<&d_i2c_master>;
 		#address-cells = <1>;
 		#size-cells = <0>;
+		use_pio = <0>;
+		master_i2c_speed = <300000>;
 	};
 
 /// ***************************************************************************************
@@ -683,17 +699,17 @@ sdio{
 //$$ L2 PROP_U32 = "vddao_voltage"
 //$$ L2 PROP_CHOICE "battery_parameter_match" = "board_battery"
 //$$ L2 PROP_STR = "status"
-        axp202 { /* PMU for AXP */
-            compatible = "axp_mfd";                             /* for driver probe, must have          */
-            sub_type = "axp20_mfd";                             /** sub type of pmu family, must have    */
-            i2c_bus = "i2c_bus_ao";                             /** attached i2c bus, must have          */
-            reg = <0x34>;                                       /** device i2c address, must have        */
-            soft_limit_to99 = <0>;                              /** optional                             */
-            ddr_voltage   = <1500000>;                          /** default voltage for DDR, optional    */
-            vddao_voltage = <1200000>;                          /** default voltage for AO, optional     */
-            board_battery = <&battery_parameter>;               /** battery parameter used, must have    */
-            status = "disable";                                 /** status of pmu, only one should be OK */
-        };
+//        axp202 { /* PMU for AXP */
+//            compatible = "axp_mfd";                             /* for driver probe, must have          */
+//            sub_type = "axp20_mfd";                             /** sub type of pmu family, must have    */
+//            i2c_bus = "i2c_bus_ao";                             /** attached i2c bus, must have          */
+//            reg = <0x34>;                                       /** device i2c address, must have        */
+//            soft_limit_to99 = <0>;                              /** optional                             */
+//            ddr_voltage   = <1500000>;                          /** default voltage for DDR, optional    */
+//            vddao_voltage = <1200000>;                          /** default voltage for AO, optional     */
+//            board_battery = <&battery_parameter>;               /** battery parameter used, must have    */
+//            status = "disable";                                 /** status of pmu, only one should be OK */
+//        };
 //$$ DEVICE = "Pmu_aml1212"
 //$$ L2 PROP_STR = "sub_type"
 //$$ L2 PROP_STR = "i2c_bus"
@@ -703,17 +719,17 @@ sdio{
 //$$ L2 PROP_U32 = "vddao_voltage"
 //$$ L2 PROP_CHOICE "battery_parameter_match" = "board_battery"
 //$$ L2 PROP_STR = "status"
-        aml1212{                                                /* PMU for AML1212, see comment above   */
-            compatible = "aml_pmu";                             /* for driver probe, must have          */
-            sub_type = "aml1212";                               /** sub type of pmu family, must have    */
-            i2c_bus = "i2c_bus_ao";                             /** attached i2c bus, must have          */
-            reg = <0x35>;                                       /** device i2c address, must have        */
-            soft_limit_to99 = <0>;                              /** optional                             */
-            ddr_voltage   = <1500000>;                          /** default voltage for DDR, optional    */
-            vddao_voltage = <1200000>;                          /** default voltage for AO, optional     */
-            board_battery = <&battery_parameter>;               /** battery parameter used, must have    */
-            status = "disable";                                 /** status of pmu, only one should be OK */
-        };
+//        aml1212{                                                /* PMU for AML1212, see comment above   */
+//            compatible = "aml_pmu";                             /* for driver probe, must have          */
+//            sub_type = "aml1212";                               /** sub type of pmu family, must have    */
+//            i2c_bus = "i2c_bus_ao";                             /** attached i2c bus, must have          */
+//            reg = <0x35>;                                       /** device i2c address, must have        */
+//            soft_limit_to99 = <0>;                              /** optional                             */
+//            ddr_voltage   = <1500000>;                          /** default voltage for DDR, optional    */
+//            vddao_voltage = <1200000>;                          /** default voltage for AO, optional     */
+//            board_battery = <&battery_parameter>;               /** battery parameter used, must have    */
+//            status = "disable";                                 /** status of pmu, only one should be OK */
+//        };
 //$$ DEVICE = "Pmu_rn5t618"
 //$$ L2 PROP_STR = "sub_type"
 //$$ L2 PROP_STR = "i2c_bus"
@@ -806,6 +822,7 @@ sdio{
 //$$ L2 PROP_U32 2= "bl_level_default_uboot_kernel"
 //$$ L2 PROP_U32 2= "bl_level_middle_mapping"
 //$$ L2 PROP_U32 2= "bl_level_max_min"
+//$$ L2 PROP_U32 = "bl_power_on_delay"
 //$$ L2 PROP_U32 = "bl_ctrl_method"
 //$$ L2 PROP_STR = "bl_gpio_port"
 //$$ L2 PROP_U32 2 = "bl_gpio_dim_max_min"
@@ -830,6 +847,7 @@ sdio{
 		bl_level_max_min=<255 10>;	/** brightness level max & min, must match the rootfs setting*/
 		
 		/* backlight power ctrl */
+		bl_power_on_delay=<100>; /** delay time before backlight power on(unit: ms) */
 		bl_ctrl_method=<3>;	/** backlight control method(0=gpio, 1=pwm_negative, 2=pwm_positive, 3=pwm_combo. decided by hardware design) */
 		
 		bl_gpio_port="GPIODV_28";	/** backlight control gpio port */
@@ -868,13 +886,11 @@ sdio{
 //$$ L4 PROP_U32 = "clock_spread_spectrum"
 //$$ L4 PROP_U32 = "clock_auto_generation"
 //$$ L4 PROP_U32 3 = "clk_pll_div_clk_ctrl"
-//$$ L4 PROP_U32 3 = "mipi_dsi_lane_speed_user_min_max"
 //$$ L4 PROP_U32 = "lvds_vswing"
 //$$ L4 PROP_U32 2 = "lvds_user_repack"
 //$$ L4 PROP_U32 3 = "edp_user_link_rate_lane_count"
 //$$ L4 PROP_U32 2 = "edp_link_adaptive_vswing"
 //$$ L4 PROP_U32 2 = "rgb_base_coeff"
-//$$ L4 PROP_U32 2 = "video_on_pixel_line"
 
 //$$ L2 PROP_STR 3 = "power_on_uboot"
 //$$ L2 PROP_STR 3 = "power_on_step_1"
@@ -937,7 +953,7 @@ sdio{
 
 		/* recommend settings, you can modify them if needed. */
 		valid_hvsync_de=<1 1>;	/** hvsync_signal_valid, DE_signal_valid : (0=disable signal, 1=enable signal) */
-		hsign_hoffset_vsign_voffset=<1 0 1 0>;	/** hsign, hoffset, vsign, voffset :("sign-offset" is a pair. sign: 0 for positive, 1 for negative) */
+		hsign_hoffset_vsign_voffset=<0 0 0 0>;	/** hsign, hoffset, vsign, voffset :("sign-offset" is a pair. sign: 0=positive, 1=negative) */
 
 		dither_user_ctrl=<0 0x000>;	/**  dither_user(0=auto setting, 1=user define), dither_ctrl(user defined dither control, only valid when user_define=1) */
 		vadj_brightness_contrast_saturation=<0x0 0x80 0x100>;	/** video adjust brightness, contrast, saturation */
@@ -955,16 +971,14 @@ sdio{
 					223 224 225 226 228 229 230 231 232 233 234 235 236 237 238 239 240 241 242 243 244 245 246 247 248 249 250 251 252 253 254 255>;
 
 		/* default settings, don't modify them unless there is display problem */
-		clock_spread_spectrum=<0>;	/** ss_level(0=disable, 1=0.5%, 2=1%, 3=2%, 4=3%, 5=4%, 6=5%) */
+		clock_spread_spectrum=<0>;	/** ss_level(0=disable, 1=0.5%, 2=1%, 3=1.5%, 4=2%) */
 		clock_auto_generation=<1>;	/** clk_auto_generation(0=use customer clock parameters, as clk_pll_div_clk_ctrl defined, 1=auto generate clock parameters by lcd_clock) */
 		clk_pll_div_clk_ctrl=<0x100042b 0x18833 0x03a82102>;	/** pll_ctrl, div_ctrl, clk_ctrl : (only valid when clk_auto_generation=0) */
-		mipi_dsi_lane_speed_user_min_max=<0 200 1000>; /** mipi_lane_speed_user(0=auto setting, 1=user define), speed_min,spend_max(unit in MHz, only valid when mipi_lane_speed_user=1)*/
 		lvds_vswing=<1>;	/** lvds_vswing_level(default level=1, support level 0,1,2,3,4) */
 		lvds_user_repack=<0 0>;	/** lvds_repack_user(0=auto setting, 1=user define), lvds_repack(0=JEIDA mode data mapping, 1=VESA mode data mapping. only valid when lvds_repack_user=1) */
 		edp_user_link_rate_lane_count=<1 1 4>;	/** edp_user(0=auto setting, 1=user define), link_rate(0=1.62G, 1=2.7G, only valid when edp_user=1), lane_count(support 1,2,4, only valid when edp_user=1) */
 		edp_link_adaptive_vswing=<0 0>;	/** adaptive(0=fixed user defined vswing, 1=auto setting vswing by training), vswing(support level 0,1,2,3, user defined vswing, only valid when adaptive=0) */
 		rgb_base_coeff=<0xf0 0x74a>;	/** rgb_base, rgb_coeff */
-		video_on_pixel_line=<120 32>;  /** video_on_pixel, video_on_line */  
 
 		//lcd power ctrl	//support up to 15 steps for each sequence
 		power_on_uboot="n","n","n";	/** only for uboot, ahead of lcd_power_on, no need config delay */
@@ -1014,20 +1028,20 @@ sdio{
 //$$ L2 PROP_U32 2 = "hsync_width_backporch"
 //$$ L2 PROP_U32 2 = "vsync_width_backporch"
 //$$ L2 PROP_U32 2 = "pol_hsync_vsync"		
-	lcd_LP097QX1:lcd_LP097QX1{	//k100
-		model_name="LP097QX1";	/** lcd model name */
-		interface="edp";		/** lcd_interface(mipi, lvds, edp, ttl) */
-		active_area=<197 147>;	/** lcd active_area or display_area horizontal size, vertical size : (unit in mm, you can find them on the home page of lcd spec) */
-		lcd_bits_option=<8 0>;	/** lcd_bits(6,8), bits_option(0=only support one mode as lcd_bits define, 1=both support 6/8bit) */
+//	lcd_LP097QX1:lcd_LP097QX1{	//k100
+//		model_name="LP097QX1";	/** lcd model name */
+//		interface="edp";		/** lcd_interface(mipi, lvds, edp, ttl) */
+//		active_area=<197 147>;	/** lcd active_area or display_area horizontal size, vertical size : (unit in mm, you can find them on the home page of lcd spec) */
+//		lcd_bits_option=<8 0>;	/** lcd_bits(6,8), bits_option(0=only support one mode as lcd_bits define, 1=both support 6/8bit) */
 		
-		resolution=<2048 1536>;	/** horizontal resolution, vertical resolution */
-		period=<2219 1560>;		/** horizontal period(htotal), vertical period(vtotal) */
+//		resolution=<2048 1536>;	/** horizontal resolution, vertical resolution */
+//		period=<2219 1560>;		/** horizontal period(htotal), vertical period(vtotal) */
 		
-		clock_hz_pol=<207700000 0>;	/** clock_hz(unit in Hz, both support clk and frame_rate, >200 regard as clk, <200 regard as frame_rate), clk_pol(only valid for TTL) */
-		hsync_width_backporch=<5 120>;	/** hsync_width, hsync_backporch(include hsync_width) */
-		vsync_width_backporch=<1 22>;	/** vsync_width, vsync_backporch(include vsync_width) */
-		pol_hsync_vsync=<0 0>;	/** hsync_polarity, vsync_polarity : (0=negative, 1=positive) */
-	};
+//		clock_hz_pol=<207700000 0>;	/** clock_hz(unit in Hz, both support clk and frame_rate, >200 regard as clk, <200 regard as frame_rate), clk_pol(only valid for TTL) */
+//		hsync_width_backporch=<5 120>;	/** hsync_width, hsync_backporch(include hsync_width) */
+//		vsync_width_backporch=<1 22>;	/** vsync_width, vsync_backporch(include vsync_width) */
+//		pol_hsync_vsync=<0 0>;	/** hsync_polarity, vsync_polarity : (0=negative, 1=positive) */
+//	};
 
 //$$ MATCH "lcd_model_config_match" = <&lcd_B080XAN01>
 //$$ L2 PROP_STR = "model_name"
@@ -1041,8 +1055,8 @@ sdio{
 //$$ L2 PROP_U32 2 = "vsync_width_backporch"
 //$$ L2 PROP_U32 2 = "pol_hsync_vsync"
 //$$ L2 PROP_U32 = "dsi_lane_num"
-//$$ L2 PROP_U32 = "dsi_bit_rate_min_max"
-//$$ L2 PROP_U32 = "dsi_sleep_out_display_on_delay"
+//$$ L2 PROP_U32 2 = "dsi_bit_rate_min_max"
+//$$ L2 PROP_U32 2 = "dsi_sleep_out_display_on_delay"
 	lcd_B080XAN01:lcd_B080XAN01{	//k101
 		model_name="B080XAN01";	/** lcd model name */
 		interface="mipi";		/** lcd_interface(mipi, lvds, edp, ttl) */
@@ -1056,10 +1070,10 @@ sdio{
 		hsync_width_backporch=<64 120>;	/** hsync_width, hsync_backporch(include hsync_width) */
 		vsync_width_backporch=<50 80>;	/** vsync_width, vsync_backporch(include vsync_width) */
 		pol_hsync_vsync=<0 0>;	/** hsync_polarity, vsync_polarity : (0=negative, 1=positive) */
-		
-    dsi_lane_num=<4>;/** mipi dsi data lane number */
-    dsi_bit_rate_min_max=<500 600>;/** range of mipi dsi data lane bit rate(unit: MHz) */
-    dsi_sleep_out_display_on_delay=<20 20>; /** mipi dsi basic delay: (unit: ms) */
+
+        dsi_lane_num=<4>;/** mipi dsi data lane number */
+        dsi_bit_rate_min_max=<500 600>;/** range of mipi dsi data lane bit rate(unit: MHz) */
+        dsi_sleep_out_display_on_delay=<20 20>; /** mipi dsi basic delay: (unit: ms) */
 	};
 
 //$$ MATCH "lcd_model_config_match" = <&lcd_LD070WX4>
@@ -1076,39 +1090,39 @@ sdio{
 //$$ L2 PROP_U32 = "vsync_horizontal_phase"
 //$$ L2 PROP_U32 = "dsi_lane_num"
 //$$ L2 PROP_U32 2 = "dsi_bit_rate_min_max"
-//$$ L2 PROP_U32 2 = "dsi_transfer_mode"
-//$$ L2 PROP_U32 2 = "dsi_power_on_cmd"
+//$$ L2 PROP_U32 = "dsi_transfer_mode"
+//$$ L2 PROP_U32 18 = "dsi_power_on_cmd"
 //$$ L2 PROP_U32 2 = "dsi_sleep_out_display_on_delay"
-lcd_LD070WX4:lcd_LD070WX4{
-		model_name="LD070WX4";	/** lcd model name */
-		interface="mipi";		/** lcd_interface(mipi, lvds, edp, ttl) */
-		active_area=<94 151>;		/** lcd active_area or display_area horizontal size, vertical size : (unit in mm, you can find them on the home page of lcd spec) */
-		lcd_bits_option=<8 0>;		/** lcd_bits(6,8), bits_option(0=only support one mode as lcd_bits define, 1=both support 6/8bit) */
+//lcd_LD070WX4:lcd_LD070WX4{
+//		model_name="LD070WX4";	/** lcd model name */
+//		interface="mipi";		/** lcd_interface(mipi, lvds, edp, ttl) */
+//		active_area=<94 151>;		/** lcd active_area or display_area horizontal size, vertical size : (unit in mm, you can find them on the home page of lcd spec) */
+//		lcd_bits_option=<8 0>;		/** lcd_bits(6,8), bits_option(0=only support one mode as lcd_bits define, 1=both support 6/8bit) */
 
-		resolution=<800 1280>;	/** horizontal resolution, vertical resolution */
-		period=<864 1315>;		/** horizontal period(htotal), vertical period(vtotal) */
+//		resolution=<800 1280>;	/** horizontal resolution, vertical resolution */
+//		period=<864 1315>;		/** horizontal period(htotal), vertical period(vtotal) */
 
-		clock_hz_pol=<56800000 0>;	/** clock_hz(unit in Hz, both support clk and frame_rate, >200 regard as clk, <200 regard as frame_rate), clk_pol(only valid for TTL) */
-		hsync_width_backporch=<4 48>;	/** hsync_width, hsync_backporch(include hsync_width) */
-		vsync_width_backporch=<2 23>;	/** vsync_width, vsync_backporch(include vsync_width) */
-		pol_hsync_vsync=<0 0>;	/** hsync_polarity, vsync_polarity : (0=negative, 1=positive) */
-		vsync_horizontal_phase=<1 4>; /** adj_sign(0=positive, 1=negative), adj_value. default is <0 0> */
-		
-		dsi_lane_num=<4>;/** mipi dsi data lane number */
-		dsi_bit_rate_min_max=<400 500>;/** range of mipi dsi data lane bit rate(unit: MHz) */
-		dsi_transfer_mode=<0>;/** mipi dsi transfer mode: (0=command mode, 1=video mode) */
-		dsi_power_on_cmd =<  0x01  0x0
-										 0xFF  0x20     
-										 0xAE  0x0B 
-										 0xEE  0xEA 
-										 0xEF  0x5F 
-										 0xF2  0x68 
-										 0xEE  0x0 
-										 0xEF  0x0 
-										 0xFF  0xFF
-           				>;/** special power on command, 2 data is a pair(reg, value), if the first valu is 0xff, second value is delay time(unit: ms), ending flag is 0xff,0xff.*/
-   dsi_sleep_out_display_on_delay=<200 100>; /** mipi dsi basic delay: (unit: ms) */
-	};
+//		clock_hz_pol=<56800000 0>;	/** clock_hz(unit in Hz, both support clk and frame_rate, >200 regard as clk, <200 regard as frame_rate), clk_pol(only valid for TTL) */
+//		hsync_width_backporch=<4 48>;	/** hsync_width, hsync_backporch(include hsync_width) */
+//		vsync_width_backporch=<2 23>;	/** vsync_width, vsync_backporch(include vsync_width) */
+//		pol_hsync_vsync=<0 0>;	/** hsync_polarity, vsync_polarity : (0=negative, 1=positive) */
+//		vsync_horizontal_phase=<1 4>; /** adj_sign(0=positive, 1=negative), adj_value. default is <0 0> */
+
+//        dsi_lane_num=<4>;/** mipi dsi data lane number */
+//        dsi_bit_rate_min_max=<400 500>;/** range of mipi dsi data lane bit rate(unit: MHz) */
+//        dsi_transfer_mode=<0>;/** mipi dsi transfer mode: (0=command mode, 1=video mode) */
+//        dsi_power_on_cmd =< 0x01  0x0
+//                            0xFF  0x20
+//                            0xAE  0x0B 
+//                            0xEE  0xEA 
+//                            0xEF  0x5F 
+//                            0xF2  0x68 
+//                            0xEE  0x0 
+//                            0xEF  0x0 
+//                            0xFF  0xFF
+//                          >;/** special power on command, 2 data is a pair(reg, value), if the first valu is 0xff, second value is delay time(unit: ms), ending flag is 0xff,0xff.*/
+//        dsi_sleep_out_display_on_delay=<200 100>; /** mipi dsi basic delay: (unit: ms) */
+//	};
 
 
 //$$ MATCH "lcd_model_config_match" = <&lcd_CLAP070NJ02>
@@ -1122,20 +1136,20 @@ lcd_LD070WX4:lcd_LD070WX4{
 //$$ L2 PROP_U32 2 = "hsync_width_backporch"
 //$$ L2 PROP_U32 2 = "vsync_width_backporch"
 //$$ L2 PROP_U32 2 = "pol_hsync_vsync"
-	lcd_CLAP070NJ02:lcd_CLAP070NJ02{	//g33
-		model_name="CLAP070NJ02";	/** lcd model name */
-		interface="ttl";			/** lcd_interface(mipi, lvds, edp, ttl) */
-		active_area=<154 86>;		/** lcd active_area or display_area horizontal size, vertical size : (unit in mm, you can find them on the home page of lcd spec) */
-		lcd_bits_option=<8 1>;		/** lcd_bits(6,8), bits_option(0=only support one mode as lcd_bits define, 1=both support 6/8bit) */
+//	lcd_CLAP070NJ02:lcd_CLAP070NJ02{	//g33
+//		model_name="CLAP070NJ02";	/** lcd model name */
+//		interface="ttl";			/** lcd_interface(mipi, lvds, edp, ttl) */
+//		active_area=<154 86>;		/** lcd active_area or display_area horizontal size, vertical size : (unit in mm, you can find them on the home page of lcd spec) */
+//		lcd_bits_option=<8 1>;		/** lcd_bits(6,8), bits_option(0=only support one mode as lcd_bits define, 1=both support 6/8bit) */
 		
-		resolution=<1024 600>;	/** horizontal resolution, vertical resolution */
-		period=<1344 635>;		/** horizontal period(htotal), vertical period(vtotal) */
+//		resolution=<1024 600>;	/** horizontal resolution, vertical resolution */
+//		period=<1344 635>;		/** horizontal period(htotal), vertical period(vtotal) */
 		
-		clock_hz_pol=<42700000 0>;	/** clock_hz(unit in Hz, both support clk and frame_rate, >200 regard as clk, <200 regard as frame_rate), clk_pol(only valid for TTL) */
-		hsync_width_backporch=<10 160>;	/** hsync_width, hsync_backporch(include hsync_width) */
-		vsync_width_backporch=<5 23>;	/** vsync_width, vsync_backporch(include vsync_width) */
-		pol_hsync_vsync=<0 0>;	/** hsync_polarity, vsync_polarity : (0=negative, 1=positive) */
-	};
+//		clock_hz_pol=<42700000 0>;	/** clock_hz(unit in Hz, both support clk and frame_rate, >200 regard as clk, <200 regard as frame_rate), clk_pol(only valid for TTL) */
+//		hsync_width_backporch=<10 160>;	/** hsync_width, hsync_backporch(include hsync_width) */
+//		vsync_width_backporch=<5 23>;	/** vsync_width, vsync_backporch(include vsync_width) */
+//		pol_hsync_vsync=<0 0>;	/** hsync_polarity, vsync_polarity : (0=negative, 1=positive) */
+//	};
 
 //$$ MATCH "lcd_model_config_match" = <&lcd_TN070TN92>
 //$$ L2 PROP_STR = "model_name"
@@ -1148,20 +1162,20 @@ lcd_LD070WX4:lcd_LD070WX4{
 //$$ L2 PROP_U32 2 = "hsync_width_backporch"
 //$$ L2 PROP_U32 2 = "vsync_width_backporch"
 //$$ L2 PROP_U32 2 = "pol_hsync_vsync"
-	lcd_TN070TN92:lcd_TN070TN92{	//800*480
-		model_name="TN070TN92";	/** lcd model name */
-		interface="ttl";		/** lcd_interface(mipi, lvds, edp, ttl) */
-		active_area=<154 86>;	/** lcd active_area or display_area horizontal size, vertical size : (unit in mm, you can find them on the home page of lcd spec) */
-		lcd_bits_option=<8 1>;	/** lcd_bits(6,8), bits_option(0=only support one mode as lcd_bits define, 1=both support 6/8bit) */
+//	lcd_TN070TN92:lcd_TN070TN92{	//800*480
+//		model_name="TN070TN92";	/** lcd model name */
+//		interface="ttl";		/** lcd_interface(mipi, lvds, edp, ttl) */
+//		active_area=<154 86>;	/** lcd active_area or display_area horizontal size, vertical size : (unit in mm, you can find them on the home page of lcd spec) */
+//		lcd_bits_option=<8 1>;	/** lcd_bits(6,8), bits_option(0=only support one mode as lcd_bits define, 1=both support 6/8bit) */
 		
-		resolution=<800 480>;	/** horizontal resolution, vertical resolution */
-		period=<1056 525>;		/** horizontal period(htotal), vertical period(vtotal) */
+//		resolution=<800 480>;	/** horizontal resolution, vertical resolution */
+//		period=<1056 525>;		/** horizontal period(htotal), vertical period(vtotal) */
 		
-		clock_hz_pol=<33300000 0>;	/** clock_hz(unit in Hz, both support clk and frame_rate, >200 regard as clk, <200 regard as frame_rate), clk_pol(only valid for TTL) */
-		hsync_width_backporch=<10 46>;	/** hsync_width, hsync_backporch(include hsync_width) */
-		vsync_width_backporch=<5 23>;	/** vsync_width, vsync_backporch(include vsync_width) */
-		pol_hsync_vsync=<0 0>;	/** hsync_polarity, vsync_polarity : (0=negative, 1=positive) */
-	};
+//		clock_hz_pol=<33300000 0>;	/** clock_hz(unit in Hz, both support clk and frame_rate, >200 regard as clk, <200 regard as frame_rate), clk_pol(only valid for TTL) */
+//		hsync_width_backporch=<10 46>;	/** hsync_width, hsync_backporch(include hsync_width) */
+//		vsync_width_backporch=<5 23>;	/** vsync_width, vsync_backporch(include vsync_width) */
+//		pol_hsync_vsync=<0 0>;	/** hsync_polarity, vsync_polarity : (0=negative, 1=positive) */
+//	};
 
 //$$ MATCH "lcd_model_config_match" = <&lcd_LP097X02>
 //$$ L2 PROP_STR = "model_name"
@@ -1174,20 +1188,20 @@ lcd_LD070WX4:lcd_LD070WX4{
 //$$ L2 PROP_U32 2 = "hsync_width_backporch"
 //$$ L2 PROP_U32 2 = "vsync_width_backporch"
 //$$ L2 PROP_U32 2 = "pol_hsync_vsync"	
-	lcd_LP097X02:lcd_LP097X02{	//g24
-		model_name="LP097X02";	/** lcd model name */
-		interface="lvds";		/** lcd_interface(mipi, lvds, edp, ttl) */
-		active_area=<197 147>;	/** lcd active_area or display_area horizontal size, vertical size : (unit in mm, you can find them on the home page of lcd spec) */
-		lcd_bits_option=<6 0>;	/** lcd_bits(6,8), bits_option(0=only support one mode as lcd_bits define, 1=both support 6/8bit) */
+//	lcd_LP097X02:lcd_LP097X02{	//g24
+//		model_name="LP097X02";	/** lcd model name */
+//		interface="lvds";		/** lcd_interface(mipi, lvds, edp, ttl) */
+//		active_area=<197 147>;	/** lcd active_area or display_area horizontal size, vertical size : (unit in mm, you can find them on the home page of lcd spec) */
+//		lcd_bits_option=<6 0>;	/** lcd_bits(6,8), bits_option(0=only support one mode as lcd_bits define, 1=both support 6/8bit) */
 		
-		resolution=<1024 768>;	/** horizontal resolution, vertical resolution */
-		period=<2084 810>;		/** horizontal period(htotal), vertical period(vtotal) */
+//		resolution=<1024 768>;	/** horizontal resolution, vertical resolution */
+//		period=<2084 810>;		/** horizontal period(htotal), vertical period(vtotal) */
 		
-		clock_hz_pol=<85700000 0>;	/** clock_hz(unit in Hz, both support clk and frame_rate, >200 regard as clk, <200 regard as frame_rate), clk_pol(only valid for TTL) */
-		hsync_width_backporch=<10 70>;	/** hsync_width, hsync_backporch(include hsync_width) */
-		vsync_width_backporch=<3 30>;	/** vsync_width, vsync_backporch(include vsync_width) */
-		pol_hsync_vsync=<0 0>;	/** hsync_polarity, vsync_polarity : (0=negative, 1=positive) */
-	};
+//		clock_hz_pol=<85700000 0>;	/** clock_hz(unit in Hz, both support clk and frame_rate, >200 regard as clk, <200 regard as frame_rate), clk_pol(only valid for TTL) */
+//		hsync_width_backporch=<10 70>;	/** hsync_width, hsync_backporch(include hsync_width) */
+//		vsync_width_backporch=<3 30>;	/** vsync_width, vsync_backporch(include vsync_width) */
+//		pol_hsync_vsync=<0 0>;	/** hsync_polarity, vsync_polarity : (0=negative, 1=positive) */
+//	};
 
 //$$ MATCH "lcd_model_config_match" = <&lcd_CLAA101FP05XG>
 //$$ L2 PROP_STR = "model_name"
@@ -1201,26 +1215,26 @@ lcd_LD070WX4:lcd_LD070WX4{
 //$$ L2 PROP_U32 2 = "vsync_width_backporch"
 //$$ L2 PROP_U32 2 = "pol_hsync_vsync"
 //$$ L2 PROP_U32 = "dsi_lane_num"
-//$$ L2 PROP_U32 2 = "pclk_lanebyteclk_factor"
+//$$ L2 PROP_U32 = "pclk_lanebyteclk_factor"
 //$$ L2 PROP_U32 2 = "dsi_bit_rate_min_max"
-	lcd_CLAA101FP05XG:lcd_CLAA101FP05XG{
-		model_name="CLAA101FP05XG";	/** lcd model name */
-		interface="mipi";		/** lcd_interface(mipi, lvds, edp, ttl) */
-		active_area=<216 135>;		/** lcd active_area or display_area horizontal size, vertical size : (unit in mm, you can find them on the home page of lcd spec) */
-		lcd_bits_option=<8 1>;		/** lcd_bits(6,8), bits_option(0=only support one mode as lcd_bits define, 1=both support 6/8bit) */
+//	lcd_CLAA101FP05XG:lcd_CLAA101FP05XG{
+//		model_name="CLAA101FP05XG";	/** lcd model name */
+//		interface="mipi";		/** lcd_interface(mipi, lvds, edp, ttl) */
+//		active_area=<216 135>;		/** lcd active_area or display_area horizontal size, vertical size : (unit in mm, you can find them on the home page of lcd spec) */
+//		lcd_bits_option=<8 1>;		/** lcd_bits(6,8), bits_option(0=only support one mode as lcd_bits define, 1=both support 6/8bit) */
 
-		resolution=<1920 1200>;	/** horizontal resolution, vertical resolution */
-		period=<2080 1235>;		/** horizontal period(htotal), vertical period(vtotal) */
+//		resolution=<1920 1200>;	/** horizontal resolution, vertical resolution */
+//		period=<2080 1235>;		/** horizontal period(htotal), vertical period(vtotal) */
 
-		clock_hz_pol=<154128000 0>;	/** clock_hz(unit in Hz, both support clk and frame_rate, >200 regard as clk, <200 regard as frame_rate), clk_pol(only valid for TTL) */
-		hsync_width_backporch=<32 80>;	/** hsync_width, hsync_backporch(include hsync_width) */
-		vsync_width_backporch=<6 26>;	/** vsync_width, vsync_backporch(include vsync_width) */
-		pol_hsync_vsync=<0 0>;	/** hsync_polarity, vsync_polarity : (0=negative, 1=positive) */
-		
-    dsi_lane_num=<4>;/** mipi dsi data lane number */
-    dsi_bit_rate_min_max=<900 1000>;/** range of mipi dsi data lane bit rate(unit: MHz) */
-    pclk_lanebyteclk_factor =<15>;/** special adjust, default is 0 */
-	};
+//		clock_hz_pol=<154128000 0>;	/** clock_hz(unit in Hz, both support clk and frame_rate, >200 regard as clk, <200 regard as frame_rate), clk_pol(only valid for TTL) */
+//		hsync_width_backporch=<32 80>;	/** hsync_width, hsync_backporch(include hsync_width) */
+//		vsync_width_backporch=<6 26>;	/** vsync_width, vsync_backporch(include vsync_width) */
+//		pol_hsync_vsync=<0 0>;	/** hsync_polarity, vsync_polarity : (0=negative, 1=positive) */
+
+//        dsi_lane_num=<4>;/** mipi dsi data lane number */
+//        dsi_bit_rate_min_max=<900 1000>;/** range of mipi dsi data lane bit rate(unit: MHz) */
+//        pclk_lanebyteclk_factor =<15>;/** special adjust, default is 0 */
+//	};
 
 //$$ DEVICE="lcd_extern"
 //$$ L2 PROP_STR = "status"
@@ -1253,36 +1267,36 @@ lcd_LD070WX4:lcd_LD070WX4{
 //$$ L2 PROP_STR = "status"
 //$$ L2 PROP_U32 = "address"
 //$$ L2 PROP_STR = "i2c_bus"
-        stk831x{
-            dev_name = "stk831x";
-            status = "okay";
-            address = <0x3d>;
-            i2c_bus = "i2c_bus_b";
-        };
+//        stk831x{
+//            dev_name = "stk831x";
+//            status = "okay";
+//            address = <0x3d>;
+//            i2c_bus = "i2c_bus_b";
+//        };
 
 //$$ DEVICE="mma7660"
 //$$ L2 PROP_STR = "status"
 //$$ L2 PROP_U32 = "address"
 //$$ L2 PROP_STR = "i2c_bus"
-        mma7660{
-            dev_name = "mma7660";
-            status = "okay";
-            address = <0x4c>;
-            i2c_bus = "i2c_bus_b";
-        };
+//        mma7660{
+//            dev_name = "mma7660";
+//            status = "okay";
+//            address = <0x4c>;
+//            i2c_bus = "i2c_bus_b";
+//        };
 
 //$$ DEVICE="mma8452"
 //$$ L2 PROP_STR = "status"
 //$$ L2 PROP_U32 = "address"
 //$$ L2 PROP_STR = "i2c_bus"
 //$$ L2 PROP_U32 = "acc_dir"
-        mma8452{
-            dev_name = "mma8452";
-            status = "okay";
-            address = <0x1c>;
-            i2c_bus = "i2c_bus_b";
-            acc_dir = <0x0101>;
-        };
+//        mma8452{
+//            dev_name = "mma8452";
+//            status = "okay";
+//            address = <0x1c>;
+//            i2c_bus = "i2c_bus_b";
+//            acc_dir = <0x0101>;
+//        };
 
 //$$ DEVICE="mma865x"
 //$$ L2 PROP_STR = "status"
@@ -1301,12 +1315,12 @@ lcd_LD070WX4:lcd_LD070WX4{
 //$$ L2 PROP_STR = "status"
 //$$ L2 PROP_U32 = "address"
 //$$ L2 PROP_STR = "i2c_bus"
-        afa750{
-            dev_name = "afa750";
-            status = "okay";
-            address = <0x3c>;
-            i2c_bus = "i2c_bus_b";
-        };
+//        afa750{
+//            dev_name = "afa750";
+//            status = "okay";
+//            address = <0x3c>;
+//            i2c_bus = "i2c_bus_b";
+//        };
 };
 
 /// ***************************************************************************************
@@ -1476,28 +1490,6 @@ lcd_LD070WX4:lcd_LD070WX4{
 			status = "okay";
 		};
 
-///	-	ov5640
-//$$ DEVICE="ov5640"
-//$$ L2 PROP_STR = "status"
-//$$ L2 PROP_U32 = "front_back"
-//$$ L2 PROP_STR = "i2c_bus"
-//$$ L2 PROP_STR = "gpio_pwdn"
-//$$ L2 PROP_STR = "gpio_rst"
-//$$ L2 PROP_U32 = "mirror_flip"
-//$$ L2 PROP_U32 = "vertical_flip"
-//$$ L2 PROP_STR = "bt_path"
-		cam_1{
-			cam_name = "ov5640";
-			front_back = <0>;
-			i2c_bus = "i2c_bus_d";
-			gpio_pwdn = "GPIOH_6";
-			gpio_rst = "GPIOH_4";
-			mirror_flip = <1>;
-			vertical_flip = <0>;	
-			bt_path = "gpio";
-			status = "okay";	
-		};
-
 ///	-	gc2035
 //$$ DEVICE="gc2035"
 //$$ L2 PROP_STR = "status"
@@ -1508,7 +1500,7 @@ lcd_LD070WX4:lcd_LD070WX4{
 //$$ L2 PROP_U32 = "mirror_flip"
 //$$ L2 PROP_U32 = "vertical_flip"
 //$$ L2 PROP_STR = "bt_path"
-        	cam_2{
+        	cam_1{
 			cam_name = "gc2035";
 			front_back = <0>;
 			i2c_bus = "i2c_bus_d";
@@ -1520,6 +1512,28 @@ lcd_LD070WX4:lcd_LD070WX4{
 			status = "okay";
 		};
 
+///	-	ov5640
+//$$ DEVICE="ov5640"
+//$$ L2 PROP_STR = "status"
+//$$ L2 PROP_U32 = "front_back"
+//$$ L2 PROP_STR = "i2c_bus"
+//$$ L2 PROP_STR = "gpio_pwdn"
+//$$ L2 PROP_STR = "gpio_rst"
+//$$ L2 PROP_U32 = "mirror_flip"
+//$$ L2 PROP_U32 = "vertical_flip"
+//$$ L2 PROP_STR = "bt_path"
+//		cam_2{
+//			cam_name = "ov5640";
+//			front_back = <0>;
+//			i2c_bus = "i2c_bus_d";
+//			gpio_pwdn = "GPIOH_6";
+//			gpio_rst = "GPIOH_4";
+//			mirror_flip = <1>;
+//			vertical_flip = <0>;	
+//			bt_path = "gpio";
+//			status = "okay";	
+//		};
+
  ///	-	hm2057
 //$$ DEVICE="hm2057"
 //$$ L2 PROP_STR = "status"
@@ -1530,17 +1544,18 @@ lcd_LD070WX4:lcd_LD070WX4{
 //$$ L2 PROP_U32 = "mirror_flip"
 //$$ L2 PROP_U32 = "vertical_flip"
 //$$ L2 PROP_STR = "bt_path"    
-            	 cam_3{
-			cam_name = "hm2057";
-			front_back = <0>;
-			i2c_bus = "i2c_bus_d";
-			gpio_pwdn = "GPIOH_5";
-			gpio_rst = "GPIOH_4";
-			mirror_flip = <0>;
-			vertical_flip = <0>;	
-			bt_path = "gpio";
-			status = "okay";
-		};
+//            	 cam_3{
+//			cam_name = "hm2057";
+//			front_back = <0>;
+//			i2c_bus = "i2c_bus_d";
+//			gpio_pwdn = "GPIOH_5";
+//			gpio_rst = "GPIOH_4";
+//			mirror_flip = <0>;
+//			vertical_flip = <0>;	
+//			bt_path = "gpio";
+//			status = "okay";
+//		};
+
 //$$ DEVICE="sp0a19"
 //$$ L2 PROP_STR = "status"
 //$$ L2 PROP_U32 = "front_back"
@@ -1550,17 +1565,18 @@ lcd_LD070WX4:lcd_LD070WX4{
 //$$ L2 PROP_U32 = "mirror_flip"
 //$$ L2 PROP_U32 = "vertical_flip"
 //$$ L2 PROP_STR = "bt_path"
-        cam_4{
-			cam_name = "sp0a19";
-			front_back = <0>;
-			i2c_bus = "i2c_bus_d";
-			gpio_pwdn = "GPIOH_6";
-			gpio_rst = "GPIOH_4";
-			mirror_flip = <0>;
-			vertical_flip = <0>;	
-			bt_path = "gpio";
-			status = "okay";
-		};
+//        cam_4{
+//			cam_name = "sp0a19";
+//			front_back = <0>;
+//			i2c_bus = "i2c_bus_d";
+//			gpio_pwdn = "GPIOH_6";
+//			gpio_rst = "GPIOH_4";
+//			mirror_flip = <0>;
+//			vertical_flip = <0>;	
+//			bt_path = "gpio";
+//			status = "okay";
+//		};
+
 ///	-	hm5065
 //$$ DEVICE="hm5065"
 //$$ L2 PROP_STR = "status"
@@ -1571,17 +1587,17 @@ lcd_LD070WX4:lcd_LD070WX4{
 //$$ L2 PROP_U32 = "mirror_flip"
 //$$ L2 PROP_U32 = "vertical_flip"
 //$$ L2 PROP_STR = "bt_path"
-		cam_5{
-			cam_name = "hm5065";
-			front_back = <0>;
-			i2c_bus = "i2c_bus_d";
-			gpio_pwdn = "GPIOH_5";
-			gpio_rst = "GPIOH_4";
-			mirror_flip = <0>;
-			vertical_flip = <0>;	
-			bt_path = "gpio";
-			status = "okay";
-		};
+//		cam_5{
+//			cam_name = "hm5065";
+//			front_back = <0>;
+//			i2c_bus = "i2c_bus_d";
+//			gpio_pwdn = "GPIOH_5";
+//			gpio_rst = "GPIOH_4";
+//			mirror_flip = <0>;
+//			vertical_flip = <0>;	
+//			bt_path = "gpio";
+//			status = "okay";
+//		};
 
 ///	-    sp1628
 //$$ DEVICE="sp1628"
@@ -1593,17 +1609,17 @@ lcd_LD070WX4:lcd_LD070WX4{
 //$$ L2 PROP_U32 = "mirror_flip"
 //$$ L2 PROP_U32 = "vertical_flip"
 //$$ L2 PROP_STR = "bt_path"
-		cam_6{
-			cam_name = "sp1628";
-			front_back = <1>;
-			i2c_bus = "i2c_bus_d";
-			gpio_pwdn = "GPIOH_6";
-			gpio_rst = "GPIOH_4";
-			mirror_flip = <0>;
-			vertical_flip = <0>;	
-			bt_path = "gpio";
-			status = "okay";
-		};
+//		cam_6{
+//			cam_name = "sp1628";
+//			front_back = <1>;
+//			i2c_bus = "i2c_bus_d";
+//			gpio_pwdn = "GPIOH_6";
+//			gpio_rst = "GPIOH_4";
+//			mirror_flip = <0>;
+//			vertical_flip = <0>;	
+//			bt_path = "gpio";
+//			status = "okay";
+//		};
 
 	};	
 
@@ -1666,6 +1682,7 @@ lcd_LD070WX4:lcd_LD070WX4{
             dev_name = "wifi_power";
             status = "okay";
             power_gpio = "GPIOAO_6";
+            power_gpio2 = "GPIOX_11";
 	};  
     
 /// ***************************************************************************************
@@ -1730,11 +1747,12 @@ lcd_LD070WX4:lcd_LD070WX4{
 //$$ L2 PROP_U32 = "idle_interval"
 	thermal{
 		compatible = "amlogic-thermal";
-		#thermal-cells=<3>;
+		#thermal-cells=<7>;
 		dev_name = "aml_thermal";
-		trip_point=<50 1200000 1200000
-			    70  800000 800000
-			    110 0xffffffff 0xffffffff>;
+		trip_point=<60 1608001 1608001 511 511 2 3
+			    70 1200001 1200001 435 435 2 3
+			    80  800001 800001  328 328 1 1
+			    110 0xffffffff 0xffffffff 0xffffffff 0xffffffff 0xffffffff 0xffffffff>;
 		cpu_cali_a=<0>;
 		idle_interval=<1000>;
 

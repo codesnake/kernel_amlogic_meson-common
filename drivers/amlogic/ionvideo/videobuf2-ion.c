@@ -205,17 +205,23 @@ static int vb2_ion_map_dmabuf(void *mem_priv) {
 
     if (buffer->flags & ION_FLAG_CACHED)
         mtype = MT_MEMORY;
+#if 0
     buf->vaddr = __arm_ioremap(buffer->priv_phys, buffer->size, mtype);
 
     return buf->vaddr ? 0 : -EFAULT;
+#else
+    return 0;
+#endif
 }
 
 static void vb2_ion_unmap_dmabuf(void *mem_priv) {
     struct vb2_ion_buf *buf = mem_priv;
 
+#if 0
     __arm_iounmap(buf->vaddr);
 
     buf->vaddr = NULL;
+#endif
 }
 
 static void vb2_ion_detach_dmabuf(void *mem_priv) {

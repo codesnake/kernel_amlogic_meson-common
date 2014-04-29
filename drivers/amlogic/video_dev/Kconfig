@@ -12,7 +12,8 @@ config V4L_AMLOGIC_VIDEO
 config V4L_AMLOGIC_VIDEO2
 	tristate "Amlogic v4l video2 device support"
 	select VIDEO_DEV
-	select VIDEO_V4L2
+	select VIDEOBUF_GEN
+	select VIDEO_V4L2_COMMON
 	select VIDEOBUF_RESOURCE
 	select AM_GE2D
     	default n

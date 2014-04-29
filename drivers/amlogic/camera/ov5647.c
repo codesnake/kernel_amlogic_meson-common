@@ -24,12 +24,11 @@
 #include <linux/version.h>
 #include <linux/mutex.h>
 #include <linux/videodev2.h>
-#include <linux/dma-mapping.h>
-#include <linux/interrupt.h>
+
 #include <linux/kthread.h>
 #include <linux/highmem.h>
 #include <linux/freezer.h>
-#include <media/videobuf-res.h>
+#include "../ionvideo/videobuf2-ion.h"///to be replace
 #include <media/v4l2-device.h>
 #include <media/v4l2-ioctl.h>
 #include <linux/wakelock.h>
@@ -533,14 +532,14 @@ static struct ov5647_fmt formats[] = {
 	}
 };
 
-static struct ov5647_fmt *get_format(struct v4l2_format *f)
+static const struct ov5647_fmt *__get_format(u32 pixelfmt)
 {
-	struct ov5647_fmt *fmt;
+	const struct ov5647_fmt *fmt;
 	unsigned int k;
 
 	for (k = 0; k < ARRAY_SIZE(formats); k++) {
 		fmt = &formats[k];
-		if (fmt->fourcc == f->fmt.pix.pixelformat)
+		if (fmt->fourcc == pixelfmt)
 			break;
 	}
 
@@ -549,18 +548,17 @@ static struct ov5647_fmt *get_format(struct v4l2_format *f)
 
 	return &formats[k];
 }
-
-struct sg_to_addr {
-	int pos;
-	struct scatterlist *sg;
+static const struct ov5647_fmt *get_format(struct v4l2_format *f)
+{
+	return __get_format(f->fmt.pix.pixelformat);
 };
 
 /* buffer for one video frame */
 struct ov5647_buffer {
 	/* common v4l buffer stuff -- must be first */
-	struct videobuf_buffer vb;
-
-	struct ov5647_fmt        *fmt;
+	struct vb2_buffer 		vb;
+	struct list_head		list;
+	const struct ov5647_fmt        	*fmt;
 	
 	unsigned int canvas_id;
 };
@@ -589,76 +587,60 @@ static LIST_HEAD(ov5647_devicelist);
 struct ov5647_fh;
 
 struct ov5647_device {
-	struct list_head			ov5647_devicelist;
-	struct v4l2_subdev			sd;
-	struct v4l2_device			v4l2_dev;
+        struct list_head	ov5647_devicelist;
+        struct v4l2_subdev	sd;
+        struct v4l2_device	v4l2_dev;
+        struct video_device     vdev;
 
-	spinlock_t                 slock;
-	struct mutex				mutex;
+        spinlock_t              slock;
+        struct mutex		mutex;
 
-	int                        users;
+        int                     users;
 
-	/* various device info */
-	struct video_device        *vdev;
 
-	struct ov5647_dmaqueue       vidq;
+        struct ov5647_dmaqueue  vidq;
 
-	/* Several counters */
-	unsigned long              jiffies;
+        /* Several counters */
+        unsigned long           jiffies;
 
-	/* Input Number */
-	int			   input;
+        /* Input Number */
+        int	                input;
 
-	struct ov5647_fh           *dev;
+        /* platform device data from board initting. */
+        aml_cam_info_t          cam_info;
 
-	/* platform device data from board initting. */
-	aml_cam_info_t cam_info;
-	
-	cam_parameter_t *cam_para;
-	
-	para_index_t pindex;
-	
-	struct vdin_v4l2_ops_s *vops;
-	
-	fe_arg_t fe_arg;
-	
-	vdin_arg_t vdin_arg;
-	/* wake lock */
-	struct wake_lock	wake_lock;
-	/* ae status */
-	bool ae_on;
-	
-	camera_priv_data_t camera_priv_data;
-	
-	configure_t *configure;
-	/* Control 'registers' */
-	int 			   qctl_regs[ARRAY_SIZE(ov5647_qctrl)];
+        cam_parameter_t         *cam_para;
+
+        para_index_t            pindex;
+
+        struct vdin_v4l2_ops_s *vops;
+        unsigned int            is_vdin_start;
+
+        fe_arg_t                fe_arg;
+
+        vdin_arg_t              vdin_arg;
+        /* wake lock */
+        struct wake_lock	wake_lock;
+        /* ae status */
+        bool                    ae_on;
+
+        camera_priv_data_t      camera_priv_data;
+
+        configure_t             *configure;
+        /* Control 'registers' */
+        int 		        qctl_regs[ARRAY_SIZE(ov5647_qctrl)];
+
+        /* video capture */
+        const struct ov5647_fmt *fmt;
+        unsigned int            width, height;
+        struct vb2_queue        vb_vidq;
+
+        //struct videobuf_res_privdata res;
 };
 
 static inline struct ov5647_device *to_dev(struct v4l2_subdev *sd)
 {
 	return container_of(sd, struct ov5647_device, sd);
-}
-
-struct ov5647_fh {
-	struct ov5647_device            *dev;
-
-	/* video capture */
-	struct ov5647_fmt            *fmt;
-	unsigned int               width, height;
-	struct videobuf_queue      vb_vidq;
-
-	struct videobuf_res_privdata res;
-
-	enum v4l2_buf_type         type;
-	int			   input; 	/* Input Number on bars */
-	int  stream_on;
-	unsigned int		f_flags;
-};
-
-static inline struct ov5647_fh *to_fh(struct ov5647_device *dev)
-{
-	return dev->dev;
 }
 
 /* ------------------------------------------------------------------
@@ -1194,8 +1176,96 @@ struct aml_camera_i2c_fig_s OV5647_preview_720P_script[] = {
 };
 
 struct aml_camera_i2c_fig_s OV5647_960P_script_mipi[] = {
-        {0x4800, 0x24},
-	{0xffff, 0xff},
+    { 0x4800, 0x24},
+    { 0x0100, 0x00},
+    { 0x0103, 0x01},
+    { 0x3035, 0x11},
+    { 0x3036, 0x46},
+    { 0x303c, 0x11},
+    { 0x3821, 0x07},
+    { 0x3820, 0x41},
+    { 0x370c, 0x03},
+    { 0x3612, 0x59},
+    { 0x3618, 0x00},
+    { 0x5000, 0x06},
+    { 0x5003, 0x08},
+    { 0x5a00, 0x08},
+    { 0x3000, 0xff},
+    { 0x3001, 0xff},
+    { 0x3002, 0xff},
+    { 0x301d, 0xf0},
+    { 0x3a18, 0x00},
+    { 0x3a19, 0xf8},
+    { 0x3c01, 0x80},
+    { 0x3b07, 0x0c},
+    { 0x380c, 0x07},
+    { 0x380d, 0x68},
+    { 0x380e, 0x03},
+    { 0x380f, 0xd8},
+    { 0x3814, 0x31},
+    { 0x3815, 0x31},
+    { 0x3708, 0x64},
+    { 0x3709, 0x52},
+    { 0x3808, 0x05},
+    { 0x3809, 0x00},
+    { 0x380a, 0x03},
+    { 0x380b, 0xc0},
+    { 0x3800, 0x00},
+    { 0x3801, 0x18},
+    { 0x3802, 0x00},
+    { 0x3803, 0x0e},
+    { 0x3804, 0x0a},
+    { 0x3805, 0x27},
+    { 0x3806, 0x07},
+    { 0x3807, 0x95},
+    { 0x3630, 0x2e},
+    { 0x3632, 0xe2},
+    { 0x3633, 0x23},
+    { 0x3634, 0x44},
+    { 0x3620, 0x64},
+    { 0x3621, 0xe0},
+    { 0x3600, 0x37},
+    { 0x3704, 0xa0},
+    { 0x3703, 0x5a},
+    { 0x3715, 0x78},
+    { 0x3717, 0x01},
+    { 0x3731, 0x02},
+    { 0x370b, 0x60},
+    { 0x3705, 0x1a},
+    { 0x3f05, 0x02},
+    { 0x3f06, 0x10},
+    { 0x3f01, 0x0a},
+    { 0x3a08, 0x01},
+    { 0x3a09, 0x27},
+    { 0x3a0a, 0x00},
+    { 0x3a0b, 0xf6},
+    { 0x3a0d, 0x04},
+    { 0x3a0e, 0x03},
+    { 0x3a0f, 0x58},
+    { 0x3a10, 0x50},
+    { 0x3a1b, 0x58},
+    { 0x3a1e, 0x50},
+    { 0x3a11, 0x60},
+    { 0x3a1f, 0x28},
+    { 0x4001, 0x02},
+    { 0x4004, 0x02},
+    { 0x4000, 0x09},
+    { 0x0100, 0x01},
+    { 0x3000, 0x00},
+    { 0x3001, 0x00},
+    { 0x3002, 0x00},
+    { 0x3017, 0xe0},
+    { 0x301c, 0xfc},
+    { 0x3636, 0x06},
+    { 0x3016, 0x08},
+    { 0x3827, 0xec},
+    { 0x4800, 0x24},
+    { 0x3018, 0x44},
+    { 0x3035, 0x21},
+    { 0x3106, 0xf5},
+    { 0x3034, 0x1a},
+    { 0x301c, 0xf8},
+	  { 0xffff, 0xff},
 };
 struct aml_camera_i2c_fig_s OV5647_preview_960P_script[] = {
 	{0x0100,0x00},  
@@ -2097,7 +2167,7 @@ static resolution_param_t  prev_resolution_array[] = {
 
 static resolution_param_t  capture_resolution_array[] = {
 	{
-		.frmsize			= {2592, 1944},
+		.frmsize			= {2592, 1936},
 		.active_frmsize		= {2592, 1944},
 		.active_fps			= 15,
 		.size_type			= SIZE_2592X1944,
@@ -2252,8 +2322,12 @@ static bool OV5647_set_aet_new_step(void *priv, unsigned int new_step, bool exp_
 
 
 static bool OV5647_check_mains_freq(void *priv){// when the fr change,we need to change the aet table
+#if 0
     int detection; 
     struct i2c_adapter *adapter;
+#endif
+    priv = priv;
+
     return true;
 }
 
@@ -2660,8 +2734,8 @@ void OV5647_set_param_wb(struct ov5647_device *dev,enum  camera_wb_flip_e para)/
             dev->cam_para->cam_command = CAM_COMMAND_AWB;
         }else{
             dev->cam_para->cam_command = CAM_COMMAND_MWB;
-            memcpy(dev->cam_para->xml_wb_manual->reg_map,dev->configure->wb.wb[index].export,WB_MAX * sizeof(int));
         }
+	memcpy(dev->cam_para->xml_wb_manual->reg_map,dev->configure->wb.wb[index].export,WB_MAX * sizeof(int));
         printk("set wb :%d\n",index);
         dev->fe_arg.port = TVIN_PORT_ISP;
         dev->fe_arg.index = 0;
@@ -3113,7 +3187,7 @@ static int convert_canvas_index(unsigned int v4l2_format, unsigned int start_can
 static int ov5647_setting(struct ov5647_device *dev,int PROP_ID,int value )
 {
 	int ret=0;
-	struct ov5647_fh *fh = to_fh(dev);
+        struct vb2_queue *q = &dev->vb_vidq;
 	struct i2c_client *client = v4l2_get_subdevdata(&dev->sd);
 	switch(PROP_ID)  {
 	case V4L2_CID_BRIGHTNESS:
@@ -3139,7 +3213,7 @@ static int ov5647_setting(struct ov5647_device *dev,int PROP_ID,int value )
 		if(ov5647_qctrl[4].default_value!=value){
 			printk(KERN_INFO " set camera  white_balance=%d. \n ",value);
 			ov5647_qctrl[4].default_value=value;
-			if(fh->stream_on)
+			if(vb2_is_streaming(q))
 				OV5647_set_param_wb(dev,value);
 		}
 		break;
@@ -3147,7 +3221,7 @@ static int ov5647_setting(struct ov5647_device *dev,int PROP_ID,int value )
 		if(ov5647_qctrl[5].default_value!=value){
 			ov5647_qctrl[5].default_value=value;
 			printk(KERN_INFO " set camera  exposure=%d. \n ",value);
-			if(fh->stream_on) {
+			if(vb2_is_streaming(q)) {
 				OV5647_set_param_exposure(dev,value);
 			}
 		}
@@ -3162,7 +3236,7 @@ static int ov5647_setting(struct ov5647_device *dev,int PROP_ID,int value )
 	case V4L2_CID_COLORFX:
 		if(ov5647_qctrl[6].default_value!=value){
 			ov5647_qctrl[6].default_value=value;
-			if(fh->stream_on)
+			if(vb2_is_streaming(q))
 				OV5647_set_param_effect(dev,value);
 		}
 		break;
@@ -3191,7 +3265,7 @@ static int ov5647_setting(struct ov5647_device *dev,int PROP_ID,int value )
 		if(ov5647_qctrl[13].default_value!=value){
 			ov5647_qctrl[13].default_value=value;
 			printk(" set camera  focus zone =%d. \n ",value);
-			if(fh->stream_on) {
+			if(vb2_is_streaming(q)) {
 				set_focus_zone(dev, value);
 			}
 		}
@@ -3200,7 +3274,7 @@ static int ov5647_setting(struct ov5647_device *dev,int PROP_ID,int value )
 		printk("V4L2_CID_FOCUS_AUTO\n");
 		if(ov5647_qctrl[8].default_value!=value){
 			ov5647_qctrl[8].default_value=value;
-			if(fh->stream_on) {
+			if(vb2_is_streaming(q)) {
 				OV5647_AutoFocus(dev,value);
 			}
 		}
@@ -3219,47 +3293,39 @@ static int ov5647_setting(struct ov5647_device *dev,int PROP_ID,int value )
 /* ------------------------------------------------------------------
 	DMA and thread functions
    ------------------------------------------------------------------*/
-
-#define TSTAMP_MIN_Y	24
-#define TSTAMP_MAX_Y	(TSTAMP_MIN_Y + 15)
-#define TSTAMP_INPUT_X	10
-#define TSTAMP_MIN_X	(54 + TSTAMP_INPUT_X)
-
-static void ov5647_fillbuff(struct ov5647_fh *fh, struct ov5647_buffer *buf)
+extern int vm_fill_buffer2(struct vb2_buffer *vb, vm_output_para_t *para);
+static void ov5647_fillbuff(struct ov5647_device *dev, struct ov5647_buffer *buf)
 {
-	struct ov5647_device *dev = fh->dev;
-	//void *vbuf = videobuf_to_vmalloc(&buf->vb);
-	void *vbuf = (void *)videobuf_to_res(&buf->vb);
+	void *vbuf = vb2_plane_cookie(&buf->vb, 0);
 	vm_output_para_t para = {0};
 	dprintk(dev,1,"%s\n", __func__);
 	if (!vbuf)
 		return;
 	/*  0x18221223 indicate the memory type is MAGIC_VMAL_MEM*/
 	if(buf->canvas_id == 0)
-		buf->canvas_id = convert_canvas_index(fh->fmt->fourcc, OV5647_RES0_CANVAS_INDEX+buf->vb.i*3);
+	buf->canvas_id = convert_canvas_index(dev->fmt->fourcc, OV5647_RES0_CANVAS_INDEX+buf->vb.v4l2_buf.index*3);
 	para.mirror = ov5647_qctrl[2].default_value&3;// not set
-	para.v4l2_format = fh->fmt->fourcc;
+	para.v4l2_format = dev->fmt->fourcc;
 	para.v4l2_memory = MAGIC_RE_MEM;//0x18221223;
 	para.zoom = ov5647_qctrl[10].default_value;
 	para.angle = ov5647_qctrl[11].default_value;
 	para.vaddr = (unsigned)vbuf;
 	para.ext_canvas = buf->canvas_id;
-	para.width = buf->vb.width;
-	para.height = (buf->vb.height==1080)?1088:buf->vb.height;
-	vm_fill_buffer(&buf->vb,&para);
-	buf->vb.state = VIDEOBUF_DONE;
+	para.width = dev->width;
+	para.height = dev->height;
+	vm_fill_buffer2(&buf->vb, &para);
 }
 
-static void ov5647_thread_tick(struct ov5647_fh *fh)
+static void ov5647_thread_tick(struct ov5647_device *dev)
 {
 	struct ov5647_buffer *buf;
-	struct ov5647_device *dev = fh->dev;
 	struct ov5647_dmaqueue *dma_q = &dev->vidq;
+	struct vb2_queue *q = &dev->vb_vidq;
 
 	unsigned long flags = 0;
 
 	dprintk(dev, 1, "Thread tick\n");
-	if(!fh->stream_on){
+	if(!vb2_is_streaming(q)){
 		dprintk(dev, 1, "sensor doesn't stream on\n");
 		return ;
 	}
@@ -3267,44 +3333,29 @@ static void ov5647_thread_tick(struct ov5647_fh *fh)
 	spin_lock_irqsave(&dev->slock, flags);
 	if (list_empty(&dma_q->active)) {
 		dprintk(dev, 1, "No active queue to serve\n");
-		goto unlock;
+		spin_unlock_irqrestore(&dev->slock, flags);
+		return;
 	}
 
-    buf = list_entry(dma_q->active.next,
-            struct ov5647_buffer, vb.queue);
+    buf = list_entry(dma_q->active.next, struct ov5647_buffer, list);
     dprintk(dev, 1, "%s\n", __func__);
     dprintk(dev, 1, "list entry get buf is %x\n",(unsigned)buf);
 
-    if(!(fh->f_flags & O_NONBLOCK)){
-        /* Nobody is waiting on this buffer, return */
-        if (!waitqueue_active(&buf->vb.done))
-            goto unlock;
-    }
-    buf->vb.state = VIDEOBUF_ACTIVE;
-
-	list_del(&buf->vb.queue);
-
-	do_gettimeofday(&buf->vb.ts);
+	list_del(&buf->list);
 
 	/* Fill buffer */
 	spin_unlock_irqrestore(&dev->slock, flags);
-	ov5647_fillbuff(fh, buf);
+	v4l2_get_timestamp(&buf->vb.v4l2_buf.timestamp);
+	ov5647_fillbuff(dev, buf);
 	dprintk(dev, 1, "filled buffer %p\n", buf);
 
-	wake_up(&buf->vb.done);
-	dprintk(dev, 2, "[%p/%d] wakeup\n", buf, buf->vb. i);
-	return;
-unlock:
-	spin_unlock_irqrestore(&dev->slock, flags);
+	vb2_buffer_done(&buf->vb, VB2_BUF_STATE_DONE);
+	dprintk(dev, 2, "[%p/%d] wakeup\n", buf, buf->vb.v4l2_buf.index);
 	return;
 }
 
-#define frames_to_ms(frames)					\
-	((frames * WAKE_NUMERATOR * 1000) / WAKE_DENOMINATOR)
-
-static void ov5647_sleep(struct ov5647_fh *fh)
+static void ov5647_sleep(struct ov5647_device *dev)
 {
-	struct ov5647_device *dev = fh->dev;
 	struct ov5647_dmaqueue *dma_q = &dev->vidq;
 
 	DECLARE_WAITQUEUE(wait, current);
@@ -3319,7 +3370,7 @@ static void ov5647_sleep(struct ov5647_fh *fh)
 	/* Calculate time to wake up */
 	//timeout = msecs_to_jiffies(frames_to_ms(1));
 
-	ov5647_thread_tick(fh);
+	ov5647_thread_tick(dev);
 
 	schedule_timeout_interruptible(1);//if fps > 25 , 2->1
 
@@ -3330,15 +3381,14 @@ stop_task:
 
 static int ov5647_thread(void *data)
 {
-	struct ov5647_fh  *fh = data;
-	struct ov5647_device *dev = fh->dev;
+	struct ov5647_device *dev = data;
 
 	dprintk(dev, 1, "thread started\n");
 
 	set_freezable();
 
 	for (;;) {
-		ov5647_sleep(fh);
+		ov5647_sleep(dev);
 
 		if (kthread_should_stop())
 			break;
@@ -3347,188 +3397,310 @@ static int ov5647_thread(void *data)
 	return 0;
 }
 
-static int ov5647_start_thread(struct ov5647_fh *fh)
+static int ov5647_start_generating(struct ov5647_device *dev)
 {
-	struct ov5647_device *dev = fh->dev;
-	struct ov5647_dmaqueue *dma_q = &dev->vidq;
+        struct ov5647_dmaqueue *dma_q = &dev->vidq;
+        vdin_parm_t para;
+        int ret = 0 ;
 
-	dma_q->frame = 0;
-	dma_q->ini_jiffies = jiffies;
+        dma_q->frame = 0;
+        dma_q->ini_jiffies = jiffies;
 
-	dprintk(dev, 1, "%s\n", __func__);
+        dprintk(dev, 1, "%s\n", __func__);
 
-	dma_q->kthread = kthread_run(ov5647_thread, fh, "ov5647");
+        //start_tvin_service
+        if (capture_proc) {
+                if (dev->is_vdin_start)
+                        goto start;
+        }
 
-	if (IS_ERR(dma_q->kthread)) {
-		v4l2_err(&dev->v4l2_dev, "kernel_thread() failed\n");
-		return PTR_ERR(dma_q->kthread);
-	}
-	/* Wakes thread */
-	wake_up_interruptible(&dma_q->wq);
+        memset( &para, 0, sizeof( para ));
+        if (CAM_MIPI == dev->cam_info.interface) {
+                para.isp_fe_port  = TVIN_PORT_MIPI;
+        } else {
+                para.isp_fe_port  = TVIN_PORT_CAMERA;
+        }
+        para.port  = TVIN_PORT_ISP;
+        para.fmt = TVIN_SIG_FMT_MAX;
+        para.frame_rate = ov5647_frmintervals_active.denominator;
+        para.h_active = ov5647_h_active;
+        para.v_active = ov5647_v_active;
+        if(ov5647_work_mode != CAMERA_CAPTURE){
+                para.skip_count = 8;
+                para.dest_hactive = dest_hactive;
+                para.dest_vactive = dest_vactive;
+        }else{
+                para.dest_hactive = 0;
+                para.dest_vactive = 0;
+        }
+        dev->cam_para->cam_mode = ov5647_work_mode;
+        para.hsync_phase = 1;
+        para.vsync_phase  = 1;
+        para.hs_bp = 0;
+        para.vs_bp = 2;
+        para.cfmt = dev->cam_info.bayer_fmt;
+        para.dfmt = TVIN_NV21;
+        para.scan_mode = TVIN_SCAN_MODE_PROGRESSIVE;
+        para.bt_path = dev->cam_info.bt_path;
+        current_fmt = 0;
+        if(dev->cam_para == NULL)
+                return -EINVAL;
+        if(update_fmt_para(ov5647_h_active,ov5647_v_active,dev->cam_para,&dev->pindex,dev->configure) != 0)
+                return -EINVAL;
+        para.reserved = (int)(dev->cam_para);
+        if (CAM_MIPI == dev->cam_info.interface)
+        {
+                para.csi_hw_info.lanes = 2;
+                para.csi_hw_info.channel = 1;
+                para.csi_hw_info.mode = 1;
+                para.csi_hw_info.clock_lane_mode = 1; // 0 clock gate 1: always on
+                para.csi_hw_info.active_pixel = ov5647_h_active;
+                para.csi_hw_info.active_line = ov5647_v_active;
+                para.csi_hw_info.frame_size=0;
+                para.csi_hw_info.ui_val = 2; //ns
+                para.csi_hw_info.urgent = 1;
+                para.csi_hw_info.clk_channel = dev->cam_info.clk_channel; //clock channel a or b
+        }
+        if(dev->configure->aet_valid == 1){
+                dev->cam_para->xml_scenes->ae.aet_fmt_gain = (dev->camera_priv_data).sensor_aet_info->format_transfer_parameter;
+        }
+        else
+                dev->cam_para->xml_scenes->ae.aet_fmt_gain = 100;
+        printk("aet_fmt_gain:%d\n",dev->cam_para->xml_scenes->ae.aet_fmt_gain);
+        printk("ov5647,h=%d, v=%d, dest_h:%d, dest_v:%d,frame_rate=%d,\n",
+                        ov5647_h_active, ov5647_v_active, para.dest_hactive,para.dest_vactive,ov5647_frmintervals_active.denominator);
+        if(ret == 0){
+                dev->vops->start_tvin_service(0,&para);
+                dev->is_vdin_start      = 1;
 
-	dprintk(dev, 1, "returning from %s\n", __func__);
-	return 0;
+        }
+        /*** 		set cm2 		***/
+        dev->vdin_arg.cmd = VDIN_CMD_SET_CM2;
+        dev->vdin_arg.cm2 = dev->configure->cm.export;
+        dev->vops->tvin_vdin_func(0,&dev->vdin_arg);
+
+        OV5647_set_param_wb(dev,ov5647_qctrl[4].default_value);
+        OV5647_set_param_exposure(dev,ov5647_qctrl[5].default_value);
+        OV5647_set_param_effect(dev,ov5647_qctrl[6].default_value);
+        OV5647_AutoFocus(dev, ov5647_qctrl[8].default_value);
+        ////already start tvin service.
+
+start:
+        dma_q->kthread = kthread_run(ov5647_thread, dev, "%s",
+                        dev->v4l2_dev.name);
+
+        if (IS_ERR(dma_q->kthread)) {
+                v4l2_err(&dev->v4l2_dev, "kernel_thread() failed\n");
+                return PTR_ERR(dma_q->kthread);
+        }
+        /* Wakes thread */
+        wake_up_interruptible(&dma_q->wq);
+
+        dprintk(dev, 1, "returning from %s\n", __func__);
+        return 0;
 }
 
-static void ov5647_stop_thread(struct ov5647_dmaqueue  *dma_q)
+static void ov5647_stop_generating(struct ov5647_device *dev)
 {
-	struct ov5647_device *dev = container_of(dma_q, struct ov5647_device, vidq);
+        struct ov5647_dmaqueue *dma_q = &dev->vidq;
+        int ret = 0 ;
 
-	dprintk(dev, 1, "%s\n", __func__);
-	/* shutdown control thread */
-	if (dma_q->kthread) {
-		kthread_stop(dma_q->kthread);
-		dma_q->kthread = NULL;
-	}
+        dprintk(dev, 1, "%s\n", __func__);
+        /* shutdown control thread */
+        if (dma_q->kthread) {
+                kthread_stop(dma_q->kthread);
+                dma_q->kthread = NULL;
+        }
+
+        /*
+         * Typical driver might need to wait here until dma engine stops.
+         * In this case we can abort imiedetly, so it's just a noop.
+         */
+        /* Release all active buffers */
+        while (!list_empty(&dma_q->active)) {
+                struct ov5647_buffer *buf;
+                buf = list_entry(dma_q->active.next, struct ov5647_buffer, list);
+                list_del(&buf->list);
+                vb2_buffer_done(&buf->vb, VB2_BUF_STATE_ERROR);
+                dprintk(dev, 2, "[%p/%d] done\n", buf, buf->vb.v4l2_buf.index);
+        }
+
+        //to be continued... stop_tvin_service
+        printk(KERN_INFO "stop tvin service\n ");
+        last_exp_h = 0;
+        last_exp_m = 0;
+        last_exp_l = 0;
+        last_ag_h = 0;
+        last_ag_l = 0;
+        last_vts_h = 0;
+        last_vts_l = 0;
+
+        if (capture_proc) {
+                printk("in capture process\n");
+                return ;
+        }
+        if(ret == 0 ){
+                dev->vops->stop_tvin_service(0);
+                dev->is_vdin_start      = 0;
+        }
+        dev->ae_on = false;
+
 }
 
 /* ------------------------------------------------------------------
 	Videobuf operations
    ------------------------------------------------------------------*/
-static int
-buffer_setup(struct videobuf_queue *vq, unsigned int *count, unsigned int *size)
+static int queue_setup(struct vb2_queue *vq, const struct v4l2_format *fmt,
+                                unsigned int *nbuffers, unsigned int *nplanes,
+                                unsigned int sizes[], void *alloc_ctxs[])
 {
-	struct videobuf_res_privdata *res = vq->priv_data;
-	struct ov5647_fh *fh  = container_of(res, struct ov5647_fh, res);
-	struct ov5647_device *dev  = fh->dev;
-    //int bytes = fh->fmt->depth >> 3 ;
-	int height = fh->height;
-	if(height==1080)
-		height = 1088;
-	*size = (fh->width*height*fh->fmt->depth)>>3;  
-	if (0 == *count)
-		*count = 32;
+        struct ov5647_device *dev = vb2_get_drv_priv(vq);
+        unsigned long size;
+        int width = dev->width;
+        int height = dev->height;
+				
+        if (fmt)
+                size = fmt->fmt.pix.sizeimage;
+        else
+                size = (width * height * dev->fmt->depth)>>3; 
 
-	while (*size * *count > vid_limit * 1024 * 1024)
-		(*count)--;
+        if (size == 0)
+                return -EINVAL;
 
-	dprintk(dev, 1, "%s, count=%d, size=%d\n", __func__,
-		*count, *size);
+        if (0 == *nbuffers)
+                *nbuffers = 32;
 
-	return 0;
+        while (size * *nbuffers > vid_limit * 1024 * 1024)
+                (*nbuffers)--;
+
+        *nplanes = 1;
+
+        sizes[0] = size;
+
+        /*
+         * videobuf2-vmalloc allocator is context-less so no need to set
+         * alloc_ctxs array.
+         */
+         //to be continued...
+
+        dprintk(dev, 1, "%s, count=%d, size=%ld\n", __func__,
+                *nbuffers, size);
+
+        return 0;
 }
 
-static void free_buffer(struct videobuf_queue *vq, struct ov5647_buffer *buf)
-{
-	struct videobuf_res_privdata *res = vq->priv_data;
-	struct ov5647_fh *fh  = container_of(res, struct ov5647_fh, res);
-	struct ov5647_device *dev  = fh->dev;
-
-	dprintk(dev, 1, "%s, state: %i\n", __func__, buf->vb.state);
-
-	videobuf_waiton(vq, &buf->vb, 0, 0);
-	if (in_interrupt())
-		BUG();
-
-	videobuf_res_free(vq, &buf->vb);
-	dprintk(dev, 1, "free_buffer: freed\n");
-	buf->vb.state = VIDEOBUF_NEEDS_INIT;
-}
 
 #define norm_maxw() 3000
 #define norm_maxh() 3000
-static int
-buffer_prepare(struct videobuf_queue *vq, struct videobuf_buffer *vb,
-						enum v4l2_field field)
+static int buffer_prepare(struct vb2_buffer *vb)
 {
-	struct videobuf_res_privdata *res = vq->priv_data;
-	struct ov5647_fh *fh  = container_of(res, struct ov5647_fh, res);
-	struct ov5647_device    *dev = fh->dev;
+	struct ov5647_device *dev = vb2_get_drv_priv(vb->vb2_queue);
 	struct ov5647_buffer *buf = container_of(vb, struct ov5647_buffer, vb);
-	int rc;
-    //int bytes = fh->fmt->depth >> 3 ;
-	dprintk(dev, 1, "%s, field=%d\n", __func__, field);
+	unsigned long size;
 
-	BUG_ON(NULL == fh->fmt);
+	dprintk(dev, 1, "%s, field=%d\n", __func__, vb->v4l2_buf.field);
 
-	if (fh->width  < 48 || fh->width  > norm_maxw() ||
-	    fh->height < 32 || fh->height > norm_maxh())
-		return -EINVAL;
+	BUG_ON(NULL == dev->fmt);
+        /*
+         * Theses properties only change when queue is idle, see s_fmt.
+         * The below checks should not be performed here, on each
+         * buffer_prepare (i.e. on each qbuf). Most of the code in this function
+         * should thus be moved to buffer_init and s_fmt.
+         */
+				if (dev->width  < 48 || dev->width  > norm_maxw() ||
+	    			dev->height < 32 || dev->height > norm_maxh())
+									return -EINVAL;
 
-	buf->vb.size = (fh->width*fh->height*fh->fmt->depth)>>3;
-	if (0 != buf->vb.baddr  &&  buf->vb.bsize < buf->vb.size)
-		return -EINVAL;
+				size = (dev->width*dev->height*dev->fmt->depth)>>3;
+	      if (vb2_plane_size(vb, 0) < size) {
+                dprintk(dev, 1, "%s data will not fit into plane (%lu < %lu)\n",
+                                __func__, vb2_plane_size(vb, 0), size);
+                return -EINVAL;
+        }
 
-	/* These properties only change when queue is idle, see s_fmt */
-	buf->fmt       = fh->fmt;
-	buf->vb.width  = fh->width;
-	buf->vb.height = fh->height;
-	buf->vb.field  = field;
+        vb2_set_plane_payload(&buf->vb, 0, size);
 
-	//precalculate_bars(fh);
+        buf->fmt = dev->fmt;
 
-	if (VIDEOBUF_NEEDS_INIT == buf->vb.state) {
-		rc = videobuf_iolock(vq, &buf->vb, NULL);
-		if (rc < 0)
-			goto fail;
-	}
-
-	buf->vb.state = VIDEOBUF_PREPARED;
-
-	return 0;
-
-fail:
-	free_buffer(vq, buf);
-	return rc;
+        return 0;
 }
 
-static void
-buffer_queue(struct videobuf_queue *vq, struct videobuf_buffer *vb)
+static void buffer_queue(struct vb2_buffer *vb)
 {
-	struct ov5647_buffer    *buf  = container_of(vb, struct ov5647_buffer, vb);
-	struct videobuf_res_privdata *res = vq->priv_data;
-	struct ov5647_fh *fh  = container_of(res, struct ov5647_fh, res);
-	struct ov5647_device       *dev  = fh->dev;
-	struct ov5647_dmaqueue *vidq = &dev->vidq;
+				struct ov5647_buffer    *buf  = container_of(vb, struct ov5647_buffer, vb);
+				struct ov5647_device    *dev  = vb2_get_drv_priv(vb->vb2_queue);
+				struct ov5647_dmaqueue 	*vidq = &dev->vidq;
+        unsigned long flags = 0;
 
-	dprintk(dev, 1, "%s\n", __func__);
-	buf->vb.state = VIDEOBUF_QUEUED;
-	list_add_tail(&buf->vb.queue, &vidq->active);
+        dprintk(dev, 1, "%s\n", __func__);
+
+        spin_lock_irqsave(&dev->slock, flags);
+        list_add_tail(&buf->list, &vidq->active);
+        spin_unlock_irqrestore(&dev->slock, flags);
 }
-
-static void buffer_release(struct videobuf_queue *vq,
-			   struct videobuf_buffer *vb)
+static int start_streaming(struct vb2_queue *vq, unsigned int count)
 {
-	struct ov5647_buffer   *buf  = container_of(vb, struct ov5647_buffer, vb);
-	struct videobuf_res_privdata *res = vq->priv_data;
-	struct ov5647_fh *fh  = container_of(res, struct ov5647_fh, res);
-	struct ov5647_device      *dev  = (struct ov5647_device *)fh->dev;
-
-	dprintk(dev, 1, "%s\n", __func__);
-
-	free_buffer(vq, buf);
+        struct ov5647_device *dev = vb2_get_drv_priv(vq);
+        dprintk(dev, 1, "%s\n", __func__);
+        return ov5647_start_generating(dev);
 }
 
-static struct videobuf_queue_ops ov5647_video_qops = {
-	.buf_setup      = buffer_setup,
-	.buf_prepare    = buffer_prepare,
-	.buf_queue      = buffer_queue,
-	.buf_release    = buffer_release,
+/* abort streaming and wait for last buffer */
+static int stop_streaming(struct vb2_queue *vq)
+{
+        struct ov5647_device *dev = vb2_get_drv_priv(vq);
+        dprintk(dev, 1, "%s\n", __func__);
+        ov5647_stop_generating(dev);
+        return 0;
+}
+
+static void ov5647_lock(struct vb2_queue *vq)
+{
+        struct ov5647_device *dev = vb2_get_drv_priv(vq);
+        mutex_lock(&dev->mutex);
+}
+
+static void ov5647_unlock(struct vb2_queue *vq)
+{
+        struct ov5647_device *dev = vb2_get_drv_priv(vq);
+        mutex_unlock(&dev->mutex);
+}
+
+
+static const struct vb2_ops ov5647_video_qops = {
+        .queue_setup            = queue_setup,
+        .buf_prepare            = buffer_prepare,
+        .buf_queue              = buffer_queue,
+        .start_streaming        = start_streaming,
+        .stop_streaming         = stop_streaming,
+        .wait_prepare           = ov5647_unlock,
+        .wait_finish            = ov5647_lock,
 };
-
 /* ------------------------------------------------------------------
 	IOCTL vidioc handling
    ------------------------------------------------------------------*/
 static int vidioc_querycap(struct file *file, void  *priv,
 					struct v4l2_capability *cap)
 {
-	struct ov5647_fh  *fh  = priv;
-	struct ov5647_device *dev = fh->dev;
+	struct ov5647_device *dev = video_drvdata(file);
 
 	strcpy(cap->driver, "ov5647");
 	strcpy(cap->card, "ov5647.canvas");
-	strlcpy(cap->bus_info, dev->v4l2_dev.name, sizeof(cap->bus_info));
+	snprintf(cap->bus_info, sizeof(cap->bus_info),
+           "platform:%s", dev->v4l2_dev.name);
 	cap->version = OV5647_CAMERA_VERSION;
-	cap->capabilities =	V4L2_CAP_VIDEO_CAPTURE |
-				V4L2_CAP_STREAMING     |
-				V4L2_CAP_READWRITE;
+	cap->device_caps = V4L2_CAP_VIDEO_CAPTURE | V4L2_CAP_STREAMING |
+                     V4L2_CAP_READWRITE | V4L2_CAP_VIDEO_M2M;
+        printk("ov5647 work in ion mode\n");
+        cap->capabilities = cap->device_caps | V4L2_CAP_DEVICE_CAPS;
+
 	return 0;
 }
 
 static int vidioc_enum_fmt_vid_cap(struct file *file, void  *priv,
 					struct v4l2_fmtdesc *f)
 {
-	struct ov5647_fmt *fmt;
+	const struct ov5647_fmt *fmt;
 
 	if (f->index >= ARRAY_SIZE(formats))
 		return -EINVAL;
@@ -3567,26 +3739,25 @@ static int vidioc_s_crop(struct file *file, void *fh,
 {
 	if (a->c.width == 0 && a->c.height == 0) {
 		printk("disable capture proc\n");
-		//capture_proc = 0;
+		capture_proc = 0;
 	} else {
 		printk("enable capture proc\n");
 		capture_proc = 1;
 	}
-		
+
 	return 0;
 }
 
 static int vidioc_g_fmt_vid_cap(struct file *file, void *priv,
 					struct v4l2_format *f)
 {
-	struct ov5647_fh *fh = priv;
+	struct ov5647_device *dev = video_drvdata(file);
 
-	f->fmt.pix.width        = fh->width;
-	f->fmt.pix.height       = fh->height;
-	f->fmt.pix.field        = fh->vb_vidq.field;
-	f->fmt.pix.pixelformat  = fh->fmt->fourcc;
+	f->fmt.pix.width        = dev->width;
+	f->fmt.pix.height       = dev->height;
+	f->fmt.pix.pixelformat  = dev->fmt->fourcc;
 	f->fmt.pix.bytesperline =
-		(f->fmt.pix.width * fh->fmt->depth) >> 3;
+		(f->fmt.pix.width * dev->fmt->depth) >> 3;
 	f->fmt.pix.sizeimage =
 		f->fmt.pix.height * f->fmt.pix.bytesperline;
 	return (0);
@@ -3595,9 +3766,8 @@ static int vidioc_g_fmt_vid_cap(struct file *file, void *priv,
 static int vidioc_try_fmt_vid_cap(struct file *file, void *priv,
 			struct v4l2_format *f)
 {
-	struct ov5647_fh  *fh  = priv;
-	struct ov5647_device *dev = fh->dev;
-	struct ov5647_fmt *fmt;
+	struct ov5647_device *dev = video_drvdata(file);
+	const struct ov5647_fmt *fmt;
 	enum v4l2_field field;
 	unsigned int maxw, maxh;
 
@@ -3632,80 +3802,64 @@ static int vidioc_try_fmt_vid_cap(struct file *file, void *priv,
 
 /*FIXME: This seems to be generic enough to be at videodev2 */
 static int vidioc_s_fmt_vid_cap(struct file *file, void *priv,
-					struct v4l2_format *f)
+                struct v4l2_format *f)
 {
-	struct ov5647_fh *fh = priv;
-	struct videobuf_queue *q = &fh->vb_vidq;
-	struct ov5647_device *dev = fh->dev;
-	resolution_param_t* res_param = NULL;
+        struct ov5647_device *dev = video_drvdata(file);
+        struct vb2_queue *q = &dev->vb_vidq;
+        int ret = 0;
+        resolution_param_t* res_param = NULL;
 
-    f->fmt.pix.width = (f->fmt.pix.width + (CANVAS_WIDTH_ALIGN-1) ) & (~(CANVAS_WIDTH_ALIGN-1));
-	if ((f->fmt.pix.pixelformat==V4L2_PIX_FMT_YVU420) ||
-            (f->fmt.pix.pixelformat==V4L2_PIX_FMT_YUV420)){
-    	f->fmt.pix.width = (f->fmt.pix.width + (CANVAS_WIDTH_ALIGN*2-1) ) & (~(CANVAS_WIDTH_ALIGN*2-1));
-    }
-	int ret = vidioc_try_fmt_vid_cap(file, fh, f);
-	if (ret < 0)
-		return ret;
-	
-	mutex_lock(&q->vb_lock);
+        f->fmt.pix.width = (f->fmt.pix.width + (CANVAS_WIDTH_ALIGN-1) ) & (~(CANVAS_WIDTH_ALIGN-1));
+        if ((f->fmt.pix.pixelformat==V4L2_PIX_FMT_YVU420) ||
+                        (f->fmt.pix.pixelformat==V4L2_PIX_FMT_YUV420)){
+                f->fmt.pix.width = (f->fmt.pix.width + (CANVAS_WIDTH_ALIGN*2-1) ) & (~(CANVAS_WIDTH_ALIGN*2-1));
+        }
+        
+        ret = vidioc_try_fmt_vid_cap(file, priv, f);
+        if (ret < 0)
+                return ret;
 
-	if (videobuf_queue_is_busy(&fh->vb_vidq)) {
-		dprintk(fh->dev, 1, "%s queue busy\n", __func__);
-		ret = -EBUSY;
-		goto out;
-	}
+        if (vb2_is_busy(q)) {
+                dprintk(dev, 1, "%s queue busy\n", __func__);
+                return -EBUSY;
+        }
 
-	fh->fmt           = get_format(f);
-	fh->width         = f->fmt.pix.width;
-	fh->height        = f->fmt.pix.height;
-	fh->vb_vidq.field = f->fmt.pix.field;
-	fh->type          = f->type;
-	if(f->fmt.pix.pixelformat==V4L2_PIX_FMT_RGB24){
-		ov5647_work_mode = CAMERA_CAPTURE;
-		/*res_param = get_resolution_param(dev, 1, fh->width,fh->height);
-		if (!res_param) {
-			printk("error, resolution param not get\n");
-			goto out;
-		}*/
-		// set_resolution_param(dev, res_param);
-	} else {
-		printk("preview resolution is %dX%d\n",fh->width,  fh->height);
-		if((fh->width == 1280 && fh->height == 720) || 
-			(fh->width == 1920 && fh->height == 1080)){
-			ov5647_work_mode = CAMERA_RECORD;
-			capture_proc = 0;
-		}else
-			ov5647_work_mode = CAMERA_PREVIEW;
-			
-		if (capture_proc == 0) {
-			printk("loading sensor setting\n");
-		        res_param = get_resolution_param(dev, 0, fh->width,fh->height);
-		        if (!res_param) {
-		            printk("error, resolution param not get\n");
-		            goto out;
-		        }
-		        set_resolution_param(dev, res_param);
-		        /** set target ***/
-		        if(t_index == -1){
-		            dest_hactive = 0;
-		            dest_vactive = 0;
-		        }
-		} else
-			capture_proc = 2;
-	}
-	ret = 0;
-out:
-	mutex_unlock(&q->vb_lock);
+        dev->fmt           = get_format(f);
+        dev->width         = f->fmt.pix.width;
+        dev->height        = f->fmt.pix.height;
+        if(f->fmt.pix.pixelformat==V4L2_PIX_FMT_RGB24){
+                ov5647_work_mode = CAMERA_CAPTURE;
+        } else {
+                printk("preview resolution is %dX%d\n",dev->width,  dev->height);
+                if (0 == capture_proc){
+                        ov5647_work_mode = CAMERA_RECORD;
+                }else {
+                        ov5647_work_mode = CAMERA_PREVIEW;
+                }
 
-	return ret;
+                if (0 == dev->is_vdin_start) {
+                        printk("loading sensor setting\n");
+                        res_param = get_resolution_param(dev, 0, dev->width,dev->height);
+                        if (!res_param) {
+                                printk("error, resolution param not get\n");
+                                return -EINVAL;
+                        }
+                        set_resolution_param(dev, res_param);
+                        /** set target ***/
+                        if(t_index == -1){
+                                dest_hactive = 0;
+                                dest_vactive = 0;
+                        }
+                }
+        }
+
+        return 0;
 }
 
 static int vidioc_g_parm(struct file *file, void *priv,
         struct v4l2_streamparm *parms)
 {
-    struct ov5647_fh *fh = priv;
-    struct ov5647_device *dev = fh->dev;
+    struct ov5647_device *dev = video_drvdata(file);
     struct v4l2_captureparm *cp = &parms->parm.capture;
 
     dprintk(dev,3,"vidioc_g_parm\n");
@@ -3721,180 +3875,20 @@ static int vidioc_g_parm(struct file *file, void *priv,
     return 0;
 }
 
-static int vidioc_reqbufs(struct file *file, void *priv,
-			  struct v4l2_requestbuffers *p)
-{
-	struct ov5647_fh  *fh = priv;
-
-	return (videobuf_reqbufs(&fh->vb_vidq, p));
-}
-
+//to be continued...
 static int vidioc_querybuf(struct file *file, void *priv, struct v4l2_buffer *p)
 {
-	struct ov5647_fh  *fh = priv;
+        struct ov5647_device *dev = video_drvdata(file);
 
-	int ret = videobuf_querybuf(&fh->vb_vidq, p);
+        int ret = vb2_ioctl_querybuf(file, priv, p);
 #if MESON_CPU_TYPE == MESON_CPU_TYPE_MESON8
-	if(ret == 0){
-		p->reserved  = convert_canvas_index(fh->fmt->fourcc, OV5647_RES0_CANVAS_INDEX+p->index*3);
-	}else{
-		p->reserved = 0;
-	}
+        if(ret == 0){
+                p->reserved  = convert_canvas_index(dev->fmt->fourcc, OV5647_RES0_CANVAS_INDEX+p->index*3);
+        }else{
+                p->reserved = 0;
+        }
 #endif		
-	return ret;
-}
-
-static int vidioc_qbuf(struct file *file, void *priv, struct v4l2_buffer *p)
-{
-	struct ov5647_fh *fh = priv;
-
-	return (videobuf_qbuf(&fh->vb_vidq, p));
-}
-
-static int vidioc_dqbuf(struct file *file, void *priv, struct v4l2_buffer *p)
-{
-	struct ov5647_fh  *fh = priv;
-
-	return (videobuf_dqbuf(&fh->vb_vidq, p,
-				file->f_flags & O_NONBLOCK));
-}
-
-#ifdef CONFIG_VIDEO_V4L1_COMPAT
-static int vidiocgmbuf(struct file *file, void *priv, struct video_mbuf *mbuf)
-{
-	struct ov5647_fh  *fh = priv;
-
-	return videobuf_cgmbuf(&fh->vb_vidq, mbuf, 8);
-}
-#endif
-
-static int vidioc_streamon(struct file *file, void *priv, enum v4l2_buf_type i)
-{
-	struct ov5647_fh  *fh = priv;
-	struct ov5647_device *dev = fh->dev;	
-	vdin_parm_t para;
-	int ret = 0 ;
-	
-	if (fh->type != V4L2_BUF_TYPE_VIDEO_CAPTURE)
-		return -EINVAL;
-	if (i != fh->type)
-		return -EINVAL;
-
-	if (capture_proc) {
-		printk("vidioc_streamon in capture process\n");
-		ret =  videobuf_streamon(&fh->vb_vidq);
-		if(ret == 0){
-			fh->stream_on        = 1;
-		}
-		if (capture_proc == 2)
-			capture_proc = 0;
-		return 0;
-	}
-
-    memset( &para, 0, sizeof( para ));
-    //para.port  = TVIN_PORT_CAMERA;
-
-    if (CAM_MIPI == dev->cam_info.interface) {
-            para.isp_fe_port  = TVIN_PORT_MIPI;
-    } else {
-            para.isp_fe_port  = TVIN_PORT_CAMERA;
-    }
-    para.port  = TVIN_PORT_ISP;    
-    para.fmt = TVIN_SIG_FMT_MAX;
-    para.frame_rate = ov5647_frmintervals_active.denominator;
-    para.h_active = ov5647_h_active;
-    para.v_active = ov5647_v_active;
-    if(ov5647_work_mode != CAMERA_CAPTURE){
-	para.skip_count = 8;
-        para.dest_hactive = dest_hactive;
-        para.dest_vactive = dest_vactive;
-    }else{
-        para.dest_hactive = 0;
-        para.dest_vactive = 0;		
-    }
-    dev->cam_para->cam_mode = ov5647_work_mode;
-    para.hsync_phase = 1;
-    para.vsync_phase  = 1;
-    para.hs_bp = 0;
-    para.vs_bp = 2;
-    para.cfmt = dev->cam_info.bayer_fmt;
-    para.dfmt = TVIN_NV21;
-    para.scan_mode = TVIN_SCAN_MODE_PROGRESSIVE;
-    para.bt_path = dev->cam_info.bt_path;
-    current_fmt = 0;
-    if(dev->cam_para == NULL)
-    	return -EINVAL;
-   	if(update_fmt_para(ov5647_h_active,ov5647_v_active,dev->cam_para,&dev->pindex,dev->configure) != 0)
-   		return -EINVAL;
-    para.reserved = (int)(dev->cam_para);
-    if (CAM_MIPI == dev->cam_info.interface)
-    {
-            para.csi_hw_info.lanes = 2;
-            para.csi_hw_info.channel = 1;
-            para.csi_hw_info.mode = 1;
-            para.csi_hw_info.clock_lane_mode = 1; // 0 clock gate 1: always on
-            para.csi_hw_info.active_pixel = ov5647_h_active;
-            para.csi_hw_info.active_line = ov5647_v_active;
-            para.csi_hw_info.frame_size=0;
-            para.csi_hw_info.ui_val = 2; //ns
-            para.csi_hw_info.urgent = 1;
-            para.csi_hw_info.clk_channel = dev->cam_info.clk_channel; //clock channel a or b
-    }
-    if(dev->configure->aet_valid == 1){
-        dev->cam_para->xml_scenes->ae.aet_fmt_gain = (dev->camera_priv_data).sensor_aet_info->format_transfer_parameter;        	
-    }
-    else
-        dev->cam_para->xml_scenes->ae.aet_fmt_gain = 100;
-    printk("aet_fmt_gain:%d\n",dev->cam_para->xml_scenes->ae.aet_fmt_gain);
-    printk("ov5647,h=%d, v=%d, dest_h:%d, dest_v:%d,frame_rate=%d,\n", 
-            ov5647_h_active, ov5647_v_active, para.dest_hactive,para.dest_vactive,ov5647_frmintervals_active.denominator);
-    ret =  videobuf_streamon(&fh->vb_vidq);
-    if(ret == 0){
-        dev->vops->start_tvin_service(0,&para);
-        fh->stream_on        = 1;
-    }
-    /*** 		set cm2 		***/
-	dev->vdin_arg.cmd = VDIN_CMD_SET_CM2;
-	dev->vdin_arg.cm2 = dev->configure->cm.export;
-	dev->vops->tvin_vdin_func(0,&dev->vdin_arg);
-
-    OV5647_set_param_wb(fh->dev,ov5647_qctrl[4].default_value);
-    OV5647_set_param_exposure(fh->dev,ov5647_qctrl[5].default_value);
-    OV5647_set_param_effect(fh->dev,ov5647_qctrl[6].default_value);
-    OV5647_AutoFocus(fh->dev, ov5647_qctrl[8].default_value);
-    return ret;
-}
-
-static int vidioc_streamoff(struct file *file, void *priv, enum v4l2_buf_type i)
-{
-	struct ov5647_fh  *fh = priv;
-	struct ov5647_device *dev = fh->dev;
-	int ret = 0 ;
-	printk(KERN_INFO " vidioc_streamoff+++ \n ");
-	last_exp_h = 0;
-	last_exp_m = 0;
-	last_exp_l = 0; 
-	last_ag_h = 0; 
-	last_ag_l = 0;
-	last_vts_h = 0; 
-	last_vts_l = 0;
-	if (fh->type != V4L2_BUF_TYPE_VIDEO_CAPTURE)
-		return -EINVAL;
-	if (i != fh->type)
-		return -EINVAL;
-		
-	ret = videobuf_streamoff(&fh->vb_vidq);
-	if (capture_proc) {
-		printk("vidioc_streamoff in capture process\n");
-		fh->stream_on        = 0;
-		return 0;
-	}
-	if(ret == 0 ){
-		dev->vops->stop_tvin_service(0);
-		fh->stream_on        = 0;
-	}
-	dev->ae_on = false;
-	return ret;
+        return ret;
 }
 
 char *res_size[]={
@@ -3977,24 +3971,24 @@ static int vidioc_enum_framesizes(struct file *file, void *fh,struct v4l2_frmsiz
                       ||(fmt->fourcc == V4L2_PIX_FMT_YUV420)
                       ||(fmt->fourcc == V4L2_PIX_FMT_YVU420)
          ){
-              printk("ov5647_prev_resolution[fsize->index]"
-                              "   before fsize->index== %d\n",fsize->index);//potti
+              //printk("ov5647_prev_resolution[fsize->index]"
+              //                "   before fsize->index== %d\n",fsize->index);//potti
               if (fsize->index >= ARRAY_SIZE(prev_resolution_array))
                       return -EINVAL;
               frmsize = &prev_resolution_array[fsize->index].frmsize;
-              printk("ov5647_prev_resolution[fsize->index]"
-                              "   after fsize->index== %d\n",fsize->index);
+              //printk("ov5647_prev_resolution[fsize->index]"
+              //                "   after fsize->index== %d\n",fsize->index);
               fsize->type = V4L2_FRMSIZE_TYPE_DISCRETE;
               fsize->discrete.width = frmsize->width;
               fsize->discrete.height = frmsize->height;
       } else if (fmt->fourcc == V4L2_PIX_FMT_RGB24){
-              printk("ov5647_pic_resolution[fsize->index]"
-                              "   before fsize->index== %d\n",fsize->index);
+              //printk("ov5647_pic_resolution[fsize->index]"
+              //                "   before fsize->index== %d\n",fsize->index);
               if (fsize->index >= ARRAY_SIZE(capture_resolution_array))
                       return -EINVAL;
               frmsize = &capture_resolution_array[fsize->index].frmsize;
-              printk("ov5647_pic_resolution[fsize->index]"
-                              "   after fsize->index== %d\n",fsize->index);
+              //printk("ov5647_pic_resolution[fsize->index]"
+              //                "   after fsize->index== %d\n",fsize->index);
               fsize->type = V4L2_FRMSIZE_TYPE_DISCRETE;
               fsize->discrete.width = frmsize->width;
               fsize->discrete.height = frmsize->height;
@@ -4002,72 +3996,31 @@ static int vidioc_enum_framesizes(struct file *file, void *fh,struct v4l2_frmsiz
       return ret;
 }
 
-static int vidioc_s_std(struct file *file, void *priv, v4l2_std_id *i)
-{
-	return 0;
-}
-
-/* only one input in this sample driver */
-static int vidioc_enum_input(struct file *file, void *priv,
-				struct v4l2_input *inp)
-{
-	//if (inp->index >= NUM_INPUTS)
-		//return -EINVAL;
-	inp->type = V4L2_INPUT_TYPE_CAMERA;
-	inp->std = V4L2_STD_525_60;
-	sprintf(inp->name, "Camera %u", inp->index);
-	return (0);
-}
-
-static int vidioc_g_input(struct file *file, void *priv, unsigned int *i)
-{
-	struct ov5647_fh *fh = priv;
-	struct ov5647_device *dev = fh->dev;
-
-	*i = dev->input;
-	return (0);
-}
-
-static int vidioc_s_input(struct file *file, void *priv, unsigned int i)
-{
-	struct ov5647_fh *fh = priv;
-	struct ov5647_device *dev = fh->dev;
-
-	//if (i >= NUM_INPUTS)
-		//return -EINVAL;
-
-	dev->input = i;
-	//precalculate_bars(fh);
-
-	return (0);
-}
-
-	/* --- controls ---------------------------------------------- */
+/* --- controls ---------------------------------------------- */
 static int vidioc_queryctrl(struct file *file, void *priv,
-			    struct v4l2_queryctrl *qc)
+                struct v4l2_queryctrl *qc)
 {
-	struct ov5647_fh *fh = priv;
-	struct ov5647_device *dev = fh->dev;
-	int i;
+        struct ov5647_device *dev = video_drvdata(file);
+        int i;
 
-	for (i = 0; i < ARRAY_SIZE(ov5647_qctrl); i++)
-		if (qc->id && qc->id == ov5647_qctrl[i].id) {
-			if (V4L2_CID_BACKLIGHT_COMPENSATION == ov5647_qctrl[i].id) {
-				if (dev->cam_info.flash_support) 
-					memcpy(qc, &(ov5647_qctrl[i]),sizeof(*qc));
-			} else {
-				memcpy(qc, &(ov5647_qctrl[i]),sizeof(*qc));
-			}
-			return (0);
-		}
-	return -EINVAL;
+        for (i = 0; i < ARRAY_SIZE(ov5647_qctrl); i++)
+                if (qc->id && qc->id == ov5647_qctrl[i].id) {
+                        if (V4L2_CID_BACKLIGHT_COMPENSATION == ov5647_qctrl[i].id) {
+                                if (dev->cam_info.flash_support)
+                                        memcpy(qc, &(ov5647_qctrl[i]),sizeof(*qc));
+                        } else {
+                                memcpy(qc, &(ov5647_qctrl[i]),sizeof(*qc));
+                        }
+                        return (0);
+                }
+
+        return -EINVAL;
 }
 
 static int vidioc_g_ctrl(struct file *file, void *priv,
 			 struct v4l2_control *ctrl)
 {
-	struct ov5647_fh *fh = priv;
-	struct ov5647_device *dev = fh->dev;
+	struct ov5647_device *dev = video_drvdata(file);
 	int i, status;
 	int ret = 0;
 
@@ -4135,8 +4088,7 @@ static int vidioc_g_ctrl(struct file *file, void *priv,
 static int vidioc_s_ctrl(struct file *file, void *priv,
 				struct v4l2_control *ctrl)
 {
-	struct ov5647_fh *fh = priv;
-	struct ov5647_device *dev = fh->dev;
+	struct ov5647_device *dev = video_drvdata(file);
 	int i;
 	for (i = 0; i < ARRAY_SIZE(ov5647_qctrl); i++)
 		if (ctrl->id == ov5647_qctrl[i].id) {
@@ -4159,14 +4111,20 @@ static int vidioc_s_ctrl(struct file *file, void *priv,
 static int ov5647_open(struct file *file)
 {
     struct ov5647_device *dev = video_drvdata(file);
-    struct ov5647_fh *fh = NULL;
-    resource_size_t mem_start = 0;
-    unsigned int mem_size = 0;
+
     int retval = 0;
     capture_proc = 0;
 #if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6
     switch_mod_gate_by_name("ge2d", 1);
-#endif		
+#endif
+#if 0
+#ifdef CONFIG_CMA
+    //ov5647 will using ION mode
+    retval = vm_init_buf(24*SZ_1M);
+    if(retval <0)
+        return -1;
+#endif
+#endif
     aml_cam_init(&dev->cam_info);
     printk("config path:%s\n",(dev->cam_info).config);
     if((dev->cam_info).config != NULL){
@@ -4211,49 +4169,24 @@ static int ov5647_open(struct file *file)
     }
 
     dprintk(dev, 1, "open %s type=%s users=%d\n",
-            video_device_node_name(dev->vdev),
+            video_device_node_name(&dev->vdev),
             v4l2_type_names[V4L2_BUF_TYPE_VIDEO_CAPTURE], dev->users);
 
-    /* init video dma queues */
-    INIT_LIST_HEAD(&dev->vidq.active);
-    init_waitqueue_head(&dev->vidq.wq);
-    spin_lock_init(&dev->slock);
     /* allocate + initialize per filehandle data */
-    fh = kzalloc(sizeof(*fh), GFP_KERNEL);
-    if (NULL == fh) {
-        dev->users--;
-        retval = -ENOMEM;
-    }
     mutex_unlock(&dev->mutex);
 
-    if (retval)
-        return retval;
-
     wake_lock(&(dev->wake_lock));
-    file->private_data = fh;
-    fh->dev      = dev;
 
-    fh->type     = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-    fh->fmt      = &formats[0];
-    fh->width    = 640;
-    fh->height   = 480;
-    fh->stream_on = 0 ;
-    fh->f_flags  = file->f_flags;
+    dev->fmt      = &formats[0];
+    dev->width    = 640;
+    dev->height   = 480;
+
     if( CAM_MIPI == dev->cam_info.interface){ //deprecated; this added for there is no 960p output for mipi
-        i_index = 2;
+        i_index = 3;
     }
+
     /* Resets frame counters */
     dev->jiffies = jiffies;
-
-    get_vm_buf_info(&mem_start, &mem_size, NULL);
-    fh->res.start = mem_start;
-    fh->res.end = mem_start+mem_size-1;
-    fh->res.magic = MAGIC_RE_MEM;
-    fh->res.priv = NULL;
-    videobuf_queue_res_init(&fh->vb_vidq, &ov5647_video_qops,
-    			NULL, &dev->slock, fh->type, V4L2_FIELD_INTERLACED,
-    			sizeof(struct ov5647_buffer), (void*)&fh->res, NULL);
-    ov5647_start_thread(fh);
     ov5647_have_open = 1;
     ov5647_work_mode = CAMERA_PREVIEW;
     dev->pindex.effect_index = 0;
@@ -4278,56 +4211,24 @@ static int ov5647_open(struct file *file)
     retval = class_create_file(cam_class,&class_attr_version_debug);
     dev->vops = get_vdin_v4l2_ops();
 	bDoingAutoFocusMode=false;
-    dev->dev = fh;
     cf = dev->configure;
     printk("open successfully\n");
-    return 0;
+    return v4l2_fh_open(file);
 }
 
-static ssize_t
-ov5647_read(struct file *file, char __user *data, size_t count, loff_t *ppos)
-{
-	struct ov5647_fh *fh = file->private_data;
-
-	if (fh->type == V4L2_BUF_TYPE_VIDEO_CAPTURE) {
-		return videobuf_read_stream(&fh->vb_vidq, data, count, ppos, 0,
-					file->f_flags & O_NONBLOCK);
-	}
-	return 0;
-}
-
-static unsigned int
-ov5647_poll(struct file *file, struct poll_table_struct *wait)
-{
-	struct ov5647_fh        *fh = file->private_data;
-	struct ov5647_device       *dev = fh->dev;
-	struct videobuf_queue *q = &fh->vb_vidq;
-
-	dprintk(dev, 1, "%s\n", __func__);
-
-	if (V4L2_BUF_TYPE_VIDEO_CAPTURE != fh->type)
-		return POLLERR;
-
-	return videobuf_poll_stream(file, q, wait);
-}
 
 static int ov5647_close(struct file *file)
 {
-    struct ov5647_fh         *fh = file->private_data;
-    struct ov5647_device *dev       = fh->dev;
-    struct ov5647_dmaqueue *vidq = &dev->vidq;
-    struct video_device  *vdev = video_devdata(file);
+    struct ov5647_device        *dev = video_drvdata(file);
     int i=0;
     ov5647_have_open = 0;
     capture_proc = 0;
-    ov5647_stop_thread(vidq);
-    videobuf_stop(&fh->vb_vidq);
-    if(fh->stream_on){
+
+    if (dev->is_vdin_start) {
         dev->vops->stop_tvin_service(0);
     }
-    videobuf_mmap_free(&fh->vb_vidq);
+    vb2_fop_release(file);
 
-    kfree(fh);
     if(dev->configure != NULL){
         if(dev->configure->aet_valid){
             for(i = 0; i < dev->configure->aet.sum; i++){
@@ -4352,8 +4253,6 @@ static int ov5647_close(struct file *file)
     dev->users--;
     mutex_unlock(&dev->mutex);
 
-    dprintk(dev, 1, "close called (dev=%s, users=%d)\n",
-            video_device_node_name(vdev), dev->users);
     //ov5647_h_active=800;
     //ov5647_v_active=600;
     ov5647_qctrl[0].default_value=0;
@@ -4388,75 +4287,67 @@ static int ov5647_close(struct file *file)
     class_remove_file(cam_class,&class_attr_resolution_debug);   
     class_remove_file(cam_class,&class_attr_version_debug);
     class_destroy(cam_class);
+#if 0
+//ov5647 will using ION mode
+#ifdef CONFIG_CMA
+    vm_deinit_buf();
+#endif
+#endif
     printk("close success\n");
     return 0;
 }
 
-static int ov5647_mmap(struct file *file, struct vm_area_struct *vma)
-{
-	struct ov5647_fh  *fh = file->private_data;
-	struct ov5647_device *dev = fh->dev;
-	int ret;
-
-	dprintk(dev, 1, "mmap called, vma=0x%08lx\n", (unsigned long)vma);
-
-	ret = videobuf_mmap_mapper(&fh->vb_vidq, vma);
-
-	dprintk(dev, 1, "vma start=0x%08lx, size=%ld, ret=%d\n",
-		(unsigned long)vma->vm_start,
-		(unsigned long)vma->vm_end-(unsigned long)vma->vm_start,
-		ret);
-
-	return ret;
-}
-
+//to be continued...
+//         .open           = v4l2_fh_open,
+//         .release        = vb2_fop_release,
 static const struct v4l2_file_operations ov5647_fops = {
 	.owner		= THIS_MODULE,
 	.open           = ov5647_open,
 	.release        = ov5647_close,
-	.read           = ov5647_read,
-	.poll		= ov5647_poll,
-	.ioctl          = video_ioctl2, /* V4L2 ioctl handler */
-	.mmap           = ov5647_mmap,
+	.read           = vb2_fop_read,
+	.poll						= vb2_fop_poll,
+	.unlocked_ioctl = video_ioctl2, /* V4L2 ioctl handler */
+  .mmap           = vb2_fop_mmap,
 };
-
+//to be continued...
 static const struct v4l2_ioctl_ops ov5647_ioctl_ops = {
-	.vidioc_querycap      = vidioc_querycap,
-	.vidioc_enum_fmt_vid_cap  = vidioc_enum_fmt_vid_cap,
-	.vidioc_g_fmt_vid_cap     = vidioc_g_fmt_vid_cap,
-	.vidioc_try_fmt_vid_cap   = vidioc_try_fmt_vid_cap,
-	.vidioc_s_fmt_vid_cap     = vidioc_s_fmt_vid_cap,
-	.vidioc_reqbufs       = vidioc_reqbufs,
-	.vidioc_querybuf      = vidioc_querybuf,
-	.vidioc_qbuf          = vidioc_qbuf,
-	.vidioc_dqbuf         = vidioc_dqbuf,
-	.vidioc_s_std         = vidioc_s_std,
-	.vidioc_enum_input    = vidioc_enum_input,
-	.vidioc_g_input       = vidioc_g_input,
-	.vidioc_s_input       = vidioc_s_input,
-	.vidioc_queryctrl     = vidioc_queryctrl,
-	.vidioc_querymenu     = vidioc_querymenu,
-	.vidioc_g_ctrl        = vidioc_g_ctrl,
-	.vidioc_s_ctrl        = vidioc_s_ctrl,
-	.vidioc_streamon      = vidioc_streamon,
-	.vidioc_streamoff     = vidioc_streamoff,
-	.vidioc_enum_framesizes = vidioc_enum_framesizes,
-	.vidioc_g_parm = vidioc_g_parm,
-	.vidioc_enum_frameintervals = vidioc_enum_frameintervals,
-	.vidioc_s_crop        = vidioc_s_crop,
-#ifdef CONFIG_VIDEO_V4L1_COMPAT
-	.vidiocgmbuf          = vidiocgmbuf,
+        .vidioc_querycap      = vidioc_querycap,
+        .vidioc_enum_fmt_vid_cap  = vidioc_enum_fmt_vid_cap,
+        .vidioc_g_fmt_vid_cap     = vidioc_g_fmt_vid_cap,
+        .vidioc_try_fmt_vid_cap   = vidioc_try_fmt_vid_cap,
+        .vidioc_s_fmt_vid_cap     = vidioc_s_fmt_vid_cap,
+        .vidioc_reqbufs       = vb2_ioctl_reqbufs,
+        .vidioc_create_bufs   = vb2_ioctl_create_bufs,
+        .vidioc_prepare_buf   = vb2_ioctl_prepare_buf,
+        .vidioc_querybuf      = vidioc_querybuf,
+        .vidioc_qbuf          = vb2_ioctl_qbuf,
+        .vidioc_dqbuf         = vb2_ioctl_dqbuf,
+#if 0
+        .vidioc_enum_input    = vidioc_enum_input,
+        .vidioc_g_input       = vidioc_g_input,
+        .vidioc_s_input       = vidioc_s_input,
+#endif
+        .vidioc_queryctrl     = vidioc_queryctrl,
+        .vidioc_querymenu     = vidioc_querymenu,
+        .vidioc_g_ctrl        = vidioc_g_ctrl,
+        .vidioc_s_ctrl        = vidioc_s_ctrl,
+        .vidioc_streamon      = vb2_ioctl_streamon,
+        .vidioc_streamoff     = vb2_ioctl_streamoff,
+        .vidioc_enum_framesizes = vidioc_enum_framesizes,
+        .vidioc_g_parm = vidioc_g_parm,
+        .vidioc_enum_frameintervals = vidioc_enum_frameintervals,
+        .vidioc_s_crop        = vidioc_s_crop,
+#if 0
+        .vidioc_subscribe_event = v4l2_ctrl_subscribe_event,
+        .vidioc_unsubscribe_event = v4l2_event_unsubscribe,
 #endif
 };
 
-static struct video_device ov5647_template = {
-	.name		= "ov5647_v4l",
-	.fops           = &ov5647_fops,
-	.ioctl_ops 	= &ov5647_ioctl_ops,
-	.release	= video_device_release,
-
-	.tvnorms              = V4L2_STD_525_60,
-	.current_norm         = V4L2_STD_NTSC_M,
+static const struct video_device ov5647_template = {
+        .name		= "ov5647_v4l",
+        .fops           = &ov5647_fops,
+        .ioctl_ops 	= &ov5647_ioctl_ops,
+        .release	= video_device_release_empty,
 };
 
 static int ov5647_g_chip_ident(struct v4l2_subdev *sd, struct v4l2_dbg_chip_ident *chip)
@@ -4501,7 +4392,6 @@ static ssize_t cam_info_store(struct device *dev,struct device_attribute *attr,c
 
 	struct ov5647_device *t;
         unsigned char n=0;
-        unsigned char ret=0;
         char *buf_orig, *ps, *token;
         char *parm[3] = {NULL};
 
@@ -4530,7 +4420,7 @@ static ssize_t cam_info_store(struct device *dev,struct device_attribute *attr,c
                 printk("substitude with %s interface\n", t->cam_info.interface?"mipi":"dvp");
         }else if ( 0 == strcmp(parm[0],"clk")){
                 t->cam_info.clk_channel = simple_strtol(parm[1],NULL,16);
-                printk("clk channel =%s\n", t->cam_info.interface?"clkB":"clkA");
+                printk("clk channel =%s\n", t->cam_info.clk_channel?"clkB":"clkA");
         }
 
         kfree(buf_orig);
@@ -4544,64 +4434,101 @@ static DEVICE_ATTR(cam_info, 0664, cam_info_show, cam_info_store);
 static int ov5647_probe(struct i2c_client *client,
 			const struct i2c_device_id *id)
 {
-	int err;
-	struct ov5647_device *t;
-	struct v4l2_subdev *sd;
-	aml_cam_info_t* plat_dat;
-	v4l_info(client, "chip found @ 0x%x (%s)\n",
-			client->addr << 1, client->adapter->name);
-	t = kzalloc(sizeof(*t), GFP_KERNEL);
-	if (t == NULL)
-		return -ENOMEM;
-	sd = &t->sd;
-	v4l2_i2c_subdev_init(sd, client, &ov5647_ops);
+        int ret;
+        struct ov5647_device *t;
+        struct video_device  *vfd;
+        struct v4l2_subdev *sd;
+        struct vb2_queue *q;
+        aml_cam_info_t* plat_dat;
 
-	plat_dat = (aml_cam_info_t*)client->dev.platform_data;
+        v4l_info(client, "chip found @ 0x%x (%s)\n",
+                        client->addr << 1, client->adapter->name);
+        t = kzalloc(sizeof(*t), GFP_KERNEL);
+        if (t == NULL)
+                return -ENOMEM;
+        sd = &t->sd;
+        v4l2_i2c_subdev_init(sd, client, &ov5647_ops);
 
-	/* Now create a video4linux device */
-	mutex_init(&t->mutex);
+        snprintf(t->v4l2_dev.name, sizeof(t->v4l2_dev.name),
+                        "%s", OV5647_CAMERA_MODULE_NAME);
+        ret = v4l2_device_register(NULL, &t->v4l2_dev);
+        if (ret)
+                goto free_dev;
 
-	/* Now create a video4linux device */
-	t->vdev = video_device_alloc();
-	if (t->vdev == NULL) {
-		kfree(t);
-		kfree(client);
-		return -ENOMEM;
-	}
-	memcpy(t->vdev, &ov5647_template, sizeof(*t->vdev));
+        /* initialize locks */
+        spin_lock_init(&t->slock);
 
-	video_set_drvdata(t->vdev, t);
-	
-	wake_lock_init(&(t->wake_lock),WAKE_LOCK_SUSPEND, "ov5647");
-	/* Register it */
-	if (plat_dat) {
-		memcpy(&t->cam_info, plat_dat, sizeof(aml_cam_info_t));
-		if(plat_dat->front_back>=0)  
-			video_nr=plat_dat->front_back;
-	}else {
-		printk("camera ov5647: have no platform data\n");
-		kfree(t);
-		kfree(client);
-		return -1;
-	}
-    printk("register device\n");	
-	err = video_register_device(t->vdev, VFL_TYPE_GRABBER, video_nr);
-	if (err < 0) {
-		video_device_release(t->vdev);
-		kfree(t);
-		return err;
-	}
-        device_create_file( &t->vdev->dev, &dev_attr_cam_info);
-	return 0;
+        /* initialize queue */
+        q = &t->vb_vidq;
+        q->type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+        q->io_modes = VB2_MMAP | VB2_USERPTR | VB2_DMABUF | VB2_READ;
+        q->drv_priv = t;
+        q->buf_struct_size = sizeof(struct ov5647_buffer);
+        q->ops = &ov5647_video_qops;
+        q->mem_ops = &vb2_ion_memops;
+        q->timestamp_type = V4L2_BUF_FLAG_TIMESTAMP_MONOTONIC;
+
+        ret = vb2_queue_init(q);
+        if (ret)
+                goto unreg_dev;
+
+
+        mutex_init(&t->mutex);
+        /* init video dma queues */
+        INIT_LIST_HEAD(&t->vidq.active);
+        init_waitqueue_head(&t->vidq.wq);
+
+        /* Now create a video4linux device */
+        vfd = &t->vdev;
+        memcpy(vfd, &ov5647_template, sizeof(*vfd));
+        vfd->v4l2_dev = &t->v4l2_dev;
+        vfd->queue = q;
+        set_bit(V4L2_FL_USE_FH_PRIO, &vfd->flags);
+
+        /*
+         * Provide a mutex to v4l2 core. It will be used to protect
+         * all fops and v4l2 ioctls.
+         */
+        vfd->lock = &t->mutex;
+        video_set_drvdata(vfd, t);
+        printk("register device\n");
+
+        /* Register it */
+        plat_dat = (aml_cam_info_t*)client->dev.platform_data;
+        if (plat_dat) {
+                memcpy(&t->cam_info, plat_dat, sizeof(aml_cam_info_t));
+                if(plat_dat->front_back>=0)  
+                        video_nr=plat_dat->front_back;
+        }else {
+                printk("camera ov5647: have no platform data\n");
+                ret = -EINVAL;
+                goto unreg_dev;
+        }	
+        ret = video_register_device(vfd, VFL_TYPE_GRABBER, video_nr);
+        if (ret < 0) {
+                goto unreg_dev;
+                return ret;
+        }
+
+        wake_lock_init(&(t->wake_lock),WAKE_LOCK_SUSPEND, "ov5647");
+        device_create_file( &t->vdev.dev, &dev_attr_cam_info);
+        return 0;
+
+unreg_dev:
+        v4l2_device_unregister(&t->v4l2_dev);
+free_dev:
+        kfree(t);
+        return ret;
 }
 
 static int ov5647_remove(struct i2c_client *client)
 {
 	struct v4l2_subdev *sd = i2c_get_clientdata(client);
 	struct ov5647_device *t = to_dev(sd);
-        device_remove_file( &t->vdev->dev, &dev_attr_cam_info);
-	video_unregister_device(t->vdev);
+        device_remove_file( &t->vdev.dev, &dev_attr_cam_info);
+	video_unregister_device(&t->vdev);
 	v4l2_device_unregister_subdev(sd);
+	v4l2_device_unregister(&t->v4l2_dev);
 	wake_lock_destroy(&(t->wake_lock));
 	kfree(t);
 	return 0;

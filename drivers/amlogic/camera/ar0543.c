@@ -107,29 +107,11 @@ static struct class *cam_class;
 static unsigned int g_ae_manual_exp;
 static unsigned int g_ae_manual_ag;
 static unsigned int g_ae_manual_vts;
-static unsigned int exp_mode;
-static unsigned int change_cnt;
 static unsigned int current_fmt;
 static unsigned int current_fr = 0;//50 hz
 static unsigned int aet_index;
 static unsigned int last_af_step = 0;
 
-#define HI2056_CAMERA_MODULE_NAME "mipi-hi2056"
-
-static struct am_csi2_camera_para ar0543_para = {
-    .name = HI2056_CAMERA_MODULE_NAME,
-    .output_pixel = 0,
-    .output_line = 0,
-    .active_pixel = 0,
-    .active_line = 0,
-    .frame_rate = 0,
-    .ui_val = 0,
-    .hs_freq = 0,
-    .clock_lane_mode = 0,
-    .mirror = 0,
-    .in_fmt = NULL,
-    .out_fmt = NULL,
-};
 static int i_index = -1;
 static int t_index = -1;
 static int dest_hactive = 640;
@@ -681,9 +663,9 @@ static cam_i2c_msg_t AR0543_init_script[] = {
 	{END_OF_SCRIPT, 0, 0},
 };
 #ifdef MIPI_INTERFACE
-static cam_i2c_msg_t AR0543_mipi_script[] = {
+/*static cam_i2c_msg_t AR0543_mipi_script[] = {
 	{END_OF_SCRIPT, 0, 0},
-};
+};*/
 #endif
 static cam_i2c_msg_t AR0543_preview_VGA_script[] = {
 	{END_OF_SCRIPT, 0, 0},
@@ -1510,7 +1492,7 @@ extern int aml_i2c_put_word(struct i2c_adapter *adapter,
 		unsigned short dev_addr, unsigned short addr, unsigned short data);
 
 void AR0543_manual_set_aet(unsigned int exp,unsigned int ag,unsigned int vts){
-	unsigned char exp_h = 0, exp_m = 0, exp_l = 0, ag_h = 0, ag_l = 0, vts_h = 0, vts_l = 0;
+	//unsigned char exp_h = 0, exp_m = 0, exp_l = 0, ag_h = 0, ag_l = 0, vts_h = 0, vts_l = 0;
 	struct i2c_adapter *adapter;
 	adapter = i2c_get_adapter(4);
 	
@@ -1572,19 +1554,19 @@ static bool AR0543_set_aet_new_step(void *priv,unsigned int new_step, bool exp_m
 }
 
 
-static bool AR0543_check_mains_freq(void){// when the fr change,we need to change the aet table
-    int detection; 
-    struct i2c_adapter *adapter;
+static bool AR0543_check_mains_freq(void *priv){// when the fr change,we need to change the aet table
+    //int detection; 
+    //struct i2c_adapter *adapter;
     return true;
 }
 
 bool AR0543_set_af_new_step(void *priv,unsigned int af_step){
     struct i2c_adapter *adapter;
     char buf[3];
+    unsigned int diff,vcm_data = 0,codes;
     if(af_step == last_af_step)
         return true;
     if(vcm_mod == 0){
-	unsigned int diff,vcm_data,codes;
 	diff = (af_step > last_af_step) ? af_step - last_af_step : last_af_step - af_step;
 	last_af_step = af_step;
 	if(diff < 256){
@@ -1613,9 +1595,14 @@ bool AR0543_set_af_new_step(void *priv,unsigned int af_step){
 
 void AR0543_set_new_format(void *priv,int width,int height,int fr){
     int index = 0;
+    camera_priv_data_t *camera_priv_data;
+    configure_t *configure;
+    
     current_fr = fr;
-    camera_priv_data_t *camera_priv_data = (camera_priv_data_t *)priv;
-    configure_t *configure = camera_priv_data->configure;
+    
+    camera_priv_data = (camera_priv_data_t *)priv;
+    configure = camera_priv_data->configure;
+    
     if(camera_priv_data == NULL)
     	return;
     printk("sum:%d,mode:%d,fr:%d\n",configure->aet.sum,ar0543_work_mode,fr);
@@ -1723,7 +1710,7 @@ static CLASS_ATTR(camera_debug, 0664, i2c_debug_show, i2c_debug_store);
 
 static void power_down_ar0543(struct ar0543_device *dev)
 {
-	struct i2c_client *client = v4l2_get_subdevdata(&dev->sd);
+	//struct i2c_client *client = v4l2_get_subdevdata(&dev->sd);
 	//i2c_put_byte(client,0x0104, 0x00);
 	//i2c_put_byte(client,0x0100, 0x00);
 }
@@ -1734,7 +1721,7 @@ static ssize_t vcm_manual_store(struct class *cls,struct class_attribute *attr, 
 	char buff[3];
 	unsigned int af_step = 0;
 	unsigned int diff = 0;
-	int codes,vcm_data;
+	int codes,vcm_data = 0;
 	unsigned char byte_h, byte_l;
 	sscanf(buf,"%d",&af_step);
     if(af_step == last_af_step)
@@ -1954,7 +1941,7 @@ void AR0543_set_param_wb(struct ar0543_device *dev,enum  camera_wb_flip_e para)/
  *************************************************************************/
 void AR0543_set_param_exposure(struct ar0543_device *dev,enum camera_exposure_e para)
 {
-    struct i2c_client *client = v4l2_get_subdevdata(&dev->sd);
+    //struct i2c_client *client = v4l2_get_subdevdata(&dev->sd);
     int value;
     if(para == EXPOSURE_0_STEP){
         dev->cam_para->cam_command = CAM_COMMAND_AE_ON;
@@ -2007,7 +1994,7 @@ static effect_pair_t effect_pair[] = {
     {SPECIAL_EFFECT_NEGATIVE,"CAM_EFFECT_ENC_COLORINV"}
 };
 
-void AR0543_set_param_effect(struct ar0543_device *dev,enum camera_effect_flip_e para)
+void AR0543_set_param_effect(struct ar0543_device *dev,enum camera_special_effect_e para)
 {
     int index = 0;
     int i = 0;
@@ -2062,9 +2049,9 @@ void AR0543_set_param_effect(struct ar0543_device *dev,enum camera_effect_flip_e
  *************************************************************************/
 void AR0543_set_night_mode(struct ar0543_device *dev,enum  camera_night_mode_flip_e enable)
 {
-    struct i2c_client *client = v4l2_get_subdevdata(&dev->sd);
+    //struct i2c_client *client = v4l2_get_subdevdata(&dev->sd);
 
-    if (50) {
+    if (enable) {
         
     }
     else{
@@ -2073,9 +2060,9 @@ void AR0543_set_night_mode(struct ar0543_device *dev,enum  camera_night_mode_fli
 
 }   /* AR0543_NightMode */
 
-static void AR0543_set_param_banding(struct ar0543_device *dev,enum  camera_night_mode_flip_e banding)
+static void AR0543_set_param_banding(struct ar0543_device *dev, enum  camera_banding_flip_e banding)
 {
-    struct i2c_client *client = v4l2_get_subdevdata(&dev->sd);
+    //struct i2c_client *client = v4l2_get_subdevdata(&dev->sd);
     switch(banding){
         case CAM_BANDING_60HZ:
             printk("set banding 60Hz\n");
@@ -2093,7 +2080,7 @@ static void AR0543_set_param_banding(struct ar0543_device *dev,enum  camera_nigh
 
 static int AR0543_AutoFocus(struct ar0543_device *dev, int focus_mode)
 {
-    struct i2c_client *client = v4l2_get_subdevdata(&dev->sd);
+    //struct i2c_client *client = v4l2_get_subdevdata(&dev->sd);
     int ret = 0;
 
     switch (focus_mode) {
@@ -2155,6 +2142,7 @@ static int set_flip(struct ar0543_device *dev)
         printk("fail in setting sensor orientation \n");
         return -1;
     }
+    return 0;
 }
 
 
@@ -2231,6 +2219,9 @@ static resolution_param_t* get_resolution_param(struct ar0543_device *dev, int a
 }
 
 static char *res_size[]={
+	"144p",
+	"240p",
+	"288p",
 	"480p",
 	"720p",
 	"960p",
@@ -2241,7 +2232,7 @@ static char *res_size[]={
 static void set_resolution_param(struct ar0543_device *dev, resolution_param_t* res_param)
 {
 	struct i2c_client *client = v4l2_get_subdevdata(&dev->sd);
-	int rc = -1;
+	//int rc = -1;
 	int i=0;
 	unsigned char t = 1;//dev->cam_info.interface;
 	printk("%s, %d, interface =%d\n" , __func__, __LINE__, t);
@@ -2294,9 +2285,9 @@ static void set_resolution_param(struct ar0543_device *dev, resolution_param_t* 
 static int set_focus_zone(struct ar0543_device *dev, int value)
 {
 	int xc, yc, tx, ty;
-	struct i2c_client *client = v4l2_get_subdevdata(&dev->sd);
-	int retry_count = 10;
-	int ret = -1;
+	//struct i2c_client *client = v4l2_get_subdevdata(&dev->sd);
+	//int retry_count = 10;
+	//int ret = -1;
 	
 	xc = (value >> 16) & 0xffff;
 	yc = (value & 0xffff);
@@ -2361,7 +2352,7 @@ static int convert_canvas_index(unsigned int v4l2_format, unsigned int start_can
 static int ar0543_setting(struct ar0543_device *dev,int PROP_ID,int value )
 {
 	int ret=0;
-	struct i2c_client *client = v4l2_get_subdevdata(&dev->sd);
+	//struct i2c_client *client = v4l2_get_subdevdata(&dev->sd);
 	struct ar0543_fh *fh = to_fh(dev);
 	switch(PROP_ID)  {
 	case V4L2_CID_BRIGHTNESS:
@@ -2868,6 +2859,7 @@ static int vidioc_s_fmt_vid_cap(struct file *file, void *priv,
 	struct ar0543_fh *fh = priv;
 	struct videobuf_queue *q = &fh->vb_vidq;
 	struct ar0543_device *dev = fh->dev;
+	int ret;
 	resolution_param_t* res_param = NULL;
 
     f->fmt.pix.width = (f->fmt.pix.width + (CANVAS_WIDTH_ALIGN-1) ) & (~(CANVAS_WIDTH_ALIGN-1));
@@ -2875,7 +2867,7 @@ static int vidioc_s_fmt_vid_cap(struct file *file, void *priv,
             (f->fmt.pix.pixelformat==V4L2_PIX_FMT_YUV420)){
     	f->fmt.pix.width = (f->fmt.pix.width + (CANVAS_WIDTH_ALIGN*2-1) ) & (~(CANVAS_WIDTH_ALIGN*2-1));
     }
-	int ret = vidioc_try_fmt_vid_cap(file, fh, f);
+	ret = vidioc_try_fmt_vid_cap(file, fh, f);
 	if (ret < 0)
 		return ret;
 	
@@ -2994,7 +2986,7 @@ static int vidiocgmbuf(struct file *file, void *priv, struct video_mbuf *mbuf)
 }
 #endif
 #ifdef MIPI_INTERFACE
-static struct ar0543_fmt input_formats_vdin[] = 
+/*static struct ar0543_fmt input_formats_vdin[] = 
 {
     // vdin path format
     {
@@ -3012,7 +3004,7 @@ static struct ar0543_fmt input_formats_vdin[] =
         .fourcc   = V4L2_PIX_FMT_NV12,
         .depth    = 12,
     }
-};
+};*/
 #endif
 
 static int vidioc_streamon(struct file *file, void *priv, enum v4l2_buf_type i)
@@ -3218,7 +3210,7 @@ static int vidioc_enum_framesizes(struct file *file, void *fh,struct v4l2_frmsiz
       return ret;
 }
 
-static int vidioc_s_std(struct file *file, void *priv, v4l2_std_id *i)
+static int vidioc_s_std(struct file *file, void *fh, v4l2_std_id norm)
 {
 	return 0;
 }
@@ -3277,7 +3269,7 @@ static int vidioc_g_ctrl(struct file *file, void *priv,
 {
 	struct ar0543_fh *fh = priv;
 	struct ar0543_device *dev = fh->dev;
-	int i, status;
+	int i; //status;
 	int ret = 0;
 
 	for (i = 0; i < ARRAY_SIZE(ar0543_qctrl); i++)
@@ -3372,7 +3364,13 @@ static int ar0543_open(struct file *file)
     resource_size_t mem_start = 0;
     unsigned int mem_size = 0;
     int retval = 0;
-
+#if CONFIG_CMA
+    retval = vm_init_buf(24*SZ_1M);
+    if(retval <0) {
+    	printk("error: no cma memory\n");
+        return -1;
+    }
+#endif
 #if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6
     switch_mod_gate_by_name("ge2d", 1);
 #endif		
@@ -3591,6 +3589,9 @@ static int ar0543_close(struct file *file)
     class_remove_file(cam_class,&class_attr_version_debug);
     class_destroy(cam_class);
     printk("close success\n");
+#ifdef CONFIG_CMA
+    vm_deinit_buf();
+#endif
     return 0;
 }
 
@@ -3702,7 +3703,7 @@ static ssize_t cam_info_store(struct device *dev,struct device_attribute *attr,c
 
 	struct ar0543_device *t;
 	unsigned char n=0;
-	unsigned char ret=0;
+	//unsigned char ret=0;
 	char *buf_orig, *ps, *token;
 	char *parm[3] = {NULL};
 	

@@ -12,6 +12,7 @@
 #include <linux/kthread.h>
 #include <linux/io-mapping.h>
 
+#include <linux/amlogic/camera/aml_cam_info.h>
 
 /**************************************************************
 **																	 **
@@ -82,5 +83,10 @@ static DEFINE_MUTEX(vm_mutex);
 #else
 #define CANVAS_WIDTH_ALIGN 8
 #endif
+
+#define MAGIC_SG_MEM    0x17890714
+#define MAGIC_DC_MEM    0x0733ac61
+#define MAGIC_VMAL_MEM  0x18221223
+#define MAGIC_RE_MEM    0x123039dc
 
 #endif /* _VM_INCLUDE__ */

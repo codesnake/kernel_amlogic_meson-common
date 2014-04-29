@@ -361,12 +361,12 @@ typedef struct xml_algorithm_ae_s {
         unsigned int           fast_lpfcoef_enh;     // 0 ~ 255
         unsigned int           flash_thr_enh;	     // 0 ~ 255
     /***********************AE_ADD********************************/
-        unsigned int ae_ratio_low;				//0 ~ 1024			0x00000005
+        unsigned int ae_ratio_low;			//0 ~ 1024			0x00000005
         unsigned int ae_ratio_low2mid;			//0 ~ 1024			0x0000000f
         unsigned int ae_ratio_mid2high; 		//0 ~ 1024			0x0000001e
         unsigned int ae_ratio_high; 			//0 ~ 1024			0x00000028
-        unsigned int ae_min_diff;				//0 ~ 255			0x00000032
-        unsigned int ae_max_diff;				//0 ~ 255			0x0000000f
+        unsigned int ae_min_diff;			//0 ~ 255			0x00000032
+        unsigned int ae_max_diff;			//0 ~ 255			0x0000000f
 
         unsigned int reserve[16];
         unsigned int 	       aet_fmt_gain;         //0db for each fmt
@@ -687,6 +687,7 @@ typedef enum vdin_format_convert_e {
 	VDIN_FORMAT_CONVERT_YUV_NV21,
 	VDIN_FORMAT_CONVERT_RGB_NV12,
 	VDIN_FORMAT_CONVERT_RGB_NV21,
+	VDIN_FORMAT_CONVERT_MAX,
 } vdin_format_convert_t;
 
 typedef enum vdin_cmd_e {
@@ -745,6 +746,8 @@ typedef struct csi_parm_s {
 	unsigned ui_val; //ns
 	unsigned hs_freq; //hz
 	unsigned urgent;
+
+        unsigned int lane_mask;
 
 	clk_channel_t clk_channel;
 	unsigned int skip_frames;

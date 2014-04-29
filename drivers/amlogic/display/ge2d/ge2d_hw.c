@@ -605,6 +605,31 @@ void ge2d_set_cmd (ge2d_cmd_t *cfg)
     x_yc_ratio = READ_MPEG_REG_BITS(GE2D_GEN_CTRL0, 11, 1);
     y_yc_ratio = READ_MPEG_REG_BITS(GE2D_GEN_CTRL0, 10, 1);
 
+#if MESON_CPU_TYPE == MESON_CPU_TYPE_MESON6	
+    if (x_yc_ratio) {
+        if (cfg->src1_x_rev) {
+            x_extra_bit_start = 0;
+            x_extra_bit_end   = 3;
+            x_chr_phase = 0x80;
+        } else {
+            x_extra_bit_start = 3;
+            x_extra_bit_end   = 0;
+            x_chr_phase = 0x08;
+        }
+    }
+    
+    if (y_yc_ratio) {
+        if (cfg->src1_y_rev) {
+            y_extra_bit_start = 2;
+            y_extra_bit_end   = 3;
+            y_chr_phase = 0xc4;
+        } else {
+            y_extra_bit_start = 3;
+            y_extra_bit_end   = 2;
+            y_chr_phase = 0x4c;
+        }
+    }
+#else
     if (x_yc_ratio) {
         if( (cfg->src1_x_rev+cfg->dst_x_rev) == 1) {
             x_extra_bit_start = 3;
@@ -628,6 +653,8 @@ void ge2d_set_cmd (ge2d_cmd_t *cfg)
             y_chr_phase = 0x4c;
         }
     }
+
+#endif
 
     WRITE_MPEG_REG(GE2D_SRC1_X_START_END, 
                          (x_extra_bit_start << 30) |  //x start extra

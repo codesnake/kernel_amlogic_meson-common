@@ -167,6 +167,16 @@ static s32 video_layer_global_offset_x, video_layer_global_offset_y;
 static s32 osd_layer_top,osd_layer_left,osd_layer_width,osd_layer_height;
 static u32 video_speed_check_width=1800, video_speed_check_height=1400;
 
+
+#ifdef TV_3D_FUNCTION_OPEN
+static bool vpp_3d_scale=0;
+static int force_filter_mode=1;
+
+MODULE_PARM_DESC(force_filter_mode, "\n force_filter_mode  \n");
+module_param(force_filter_mode, int, 0664);
+
+#endif
+
 #define ZOOM_BITS       18
 #define PHASE_BITS      8
 
@@ -534,8 +544,12 @@ RESTART:
     tmp_ratio_y = ratio_y;
     ratio_y <<= height_shift;
     ratio_y = ratio_y / (next_frame_par->vscale_skip_count + 1);
-
-    if (vpp_flags & VPP_FLAG_INTERLACE_OUT) {
+#ifdef 	TV_3D_FUNCTION_OPEN
+    if (((vpp_flags & VPP_FLAG_INTERLACE_OUT)||next_frame_par->vpp_3d_scale) && force_filter_mode)
+#else
+    if (vpp_flags & VPP_FLAG_INTERLACE_OUT)
+#endif
+    {
         filter->vpp_vert_coeff = filter_table[COEF_BILINEAR];
     } else {
         filter->vpp_vert_coeff = filter_table[COEF_BICUBIC];
@@ -650,6 +664,11 @@ RESTART:
             if (vpp_flags & VPP_FLAG_INTERLACE_IN) {
                 next_frame_par->vscale_skip_count += 2;
             } else {
+#ifdef TV_3D_FUNCTION_OPEN
+            if(next_frame_par->vpp_3d_mode == VPP_3D_MODE_LA)
+		next_frame_par->vscale_skip_count += 2;
+	    else
+#endif
                 next_frame_par->vscale_skip_count++;
             }
             goto RESTART;
@@ -706,8 +725,136 @@ RESTART:
 #endif
 }
 
+#ifdef TV_3D_FUNCTION_OPEN
+
+static void
+vpp_get_video_source_size(u32 *src_width,u32 *src_height,u32 process_3d_type,
+					vframe_t *vf, vpp_frame_par_t *next_frame_par)
+{
+
+   if (process_3d_type&MODE_3D_AUTO) {
+
+        if(vf->trans_fmt) {
+	    if(process_3d_type & MODE_3D_TO_2D_MASK) {
+	        *src_height = vf->left_eye.height;
+            } else {
+	        *src_height = vf->left_eye.height<<1;
+	        next_frame_par->vpp_2pic_mode = 1;
+            }
+	    *src_width  = vf->left_eye.width;
+   	}
+
+        switch(vf->trans_fmt){
+            case TVIN_TFMT_3D_LRH_OLOR:
+	    case TVIN_TFMT_3D_LRH_OLER:
+	    case TVIN_TFMT_3D_LRH_ELOR:
+	    case TVIN_TFMT_3D_LRH_ELER:
+	    case TVIN_TFMT_3D_DET_LR:
+	        next_frame_par->vpp_3d_mode = VPP_3D_MODE_LR;
+	        break;
+            case TVIN_TFMT_3D_FP:
+            case TVIN_TFMT_3D_TB:
+	    case TVIN_TFMT_3D_DET_TB:
+	    case TVIN_TFMT_3D_FA:
+	        next_frame_par->vpp_3d_mode = VPP_3D_MODE_TB;
+		/*just for mvc 3d file*/
+		if (process_3d_type&MODE_3D_MVC) {
+		    next_frame_par->vpp_2pic_mode = 2;
+		    next_frame_par->vpp_3d_mode = VPP_3D_MODE_FA;
+		}
+                break;
+	    case TVIN_TFMT_3D_LA:
+            case TVIN_TFMT_3D_DET_INTERLACE:
+		next_frame_par->vpp_3d_mode = VPP_3D_MODE_LA;
+		next_frame_par->vpp_2pic_mode = 0;
+		break;
+            case TVIN_TFMT_3D_DET_CHESSBOARD:
+	    default:
+	        *src_width  = vf->width;
+                *src_height = vf->height;
+		next_frame_par->vpp_3d_mode = VPP_3D_MODE_NULL;
+		next_frame_par->vpp_3d_scale = 1;
+		next_frame_par->vpp_2pic_mode = 0;
+                break;
+        }
+
+    } else if (process_3d_type&MODE_3D_LR) {
+        next_frame_par->vpp_3d_mode = VPP_3D_MODE_LR;
+	if(process_3d_type & MODE_3D_TO_2D_MASK) {
+	    *src_width  = vf->width>>1;
+            *src_height = vf->height;
+	} else {
+	    *src_width  = vf->width>>1;
+	    *src_height = vf->height<<1;
+	    next_frame_par->vpp_2pic_mode = 1;
+	}
+
+    } else if (process_3d_type & MODE_3D_TB) {
+        next_frame_par->vpp_3d_mode = VPP_3D_MODE_TB;
+	if(process_3d_type & MODE_3D_TO_2D_MASK){
+	    *src_width  = vf->width;
+	    *src_height = vf->height>>1;
+	} else {
+	    *src_width  = vf->width;
+            *src_height = vf->height;
+	    next_frame_par->vpp_2pic_mode = 1;
+	}
+    } else if(process_3d_type & MODE_3D_LA) {
+    	next_frame_par->vpp_3d_mode = VPP_3D_MODE_LA;
+	if((process_3d_type & MODE_3D_LR_SWITCH)||(process_3d_type & MODE_3D_TO_2D_L))
+	     *src_height = vf->height+1;
+	else
+	    *src_height = vf->height-1 ;
+	*src_width  = vf->width;
+	next_frame_par->vpp_2pic_mode = 0;
+        next_frame_par->vpp_3d_scale = 1;
+	if(process_3d_type & MODE_3D_TO_2D_MASK) {
+	    next_frame_par->vscale_skip_count = 1;
+	    next_frame_par->vpp_3d_scale = 0;
+	}
+    } else if(process_3d_type & MODE_3D_FA) {
+        next_frame_par->vpp_3d_mode = VPP_3D_MODE_FA;
+	if(process_3d_type & MODE_3D_TO_2D_MASK) {
+	    *src_width  = vf->width;
+	    *src_height = vf->height;
+        } else {
+    	    *src_width  = vf->width;
+	    *src_height = vf->height<<1;
+	    next_frame_par->vpp_2pic_mode = 2;
+	}
+    } else {
+	*src_width  = vf->width;
+        *src_height = vf->height;
+	next_frame_par->vpp_3d_mode = VPP_3D_MODE_NULL;
+	next_frame_par->vpp_2pic_mode = 0;
+	next_frame_par->vpp_3d_scale = 0;
+    }
+	/*process 3d->2d or l/r switch case*/
+    if((VPP_3D_MODE_NULL != next_frame_par->vpp_3d_mode) &&
+       (VPP_3D_MODE_LA != next_frame_par->vpp_3d_mode)     )
+    {
+	if(process_3d_type & MODE_3D_TO_2D_R)
+       	    next_frame_par->vpp_2pic_mode = VPP_SELECT_PIC1;
+	else if(process_3d_type & MODE_3D_TO_2D_L)
+	    next_frame_par->vpp_2pic_mode = VPP_SELECT_PIC0;
+	else if(process_3d_type & MODE_3D_LR_SWITCH)
+	    next_frame_par->vpp_2pic_mode |= VPP_PIC1_FIRST;
+
+	/*only display one pic*/
+	if((next_frame_par->vpp_2pic_mode & 0x3) == 0)
+	    next_frame_par->vpp_3d_scale = 0;
+	else
+	    next_frame_par->vpp_3d_scale = 1;
+    }
+    /*avoid dividing 0 error*/
+    if(*src_width==0 || *src_height==0){
+	*src_width  = vf->width;
+       	*src_height = vf->height;
+    }
+}
+#endif
 void
-vpp_set_filters(u32 wide_mode,
+vpp_set_filters(u32 process_3d_type,u32 wide_mode,
                 vframe_t *vf,
                 vpp_frame_par_t *next_frame_par,
                 const vinfo_t *vinfo)
@@ -723,7 +870,27 @@ vpp_set_filters(u32 wide_mode,
     next_frame_par->VPP_post_blend_vd_h_start_ = 0;
 
     next_frame_par->VPP_postproc_misc_ = 0x200;
+#ifdef TV_3D_FUNCTION_OPEN
+    next_frame_par->vscale_skip_count = 0;
+    /*
+    *check 3d mode change in display buffer or 3d type
+    *get the source size according to 3d mode
+    */
+    if(process_3d_type & MODE_3D_ENABLE) {
+        vpp_get_video_source_size(&src_width,&src_height,process_3d_type,vf,next_frame_par);
+    } else {
+        src_width = vf->width;
+        src_height = vf->height;
+        next_frame_par->vpp_3d_mode = VPP_3D_MODE_NULL;
+        next_frame_par->vpp_2pic_mode = 0;
+	next_frame_par->vpp_3d_scale = 0;
+    }
 
+    if(vpp_3d_scale){
+	next_frame_par->vpp_3d_scale = 1;
+    }
+	amlog_mask(LOG_MASK_VPP,"%s: src_width %u,src_height %u.\n",__func__,src_width,src_height);
+#endif
     /* check force ratio change flag in display buffer also
      * if it exist then it will override the settings in display side
      */
@@ -948,4 +1115,10 @@ void vpp_get_video_speed_check(u32 *h, u32 *w)
     *h = video_speed_check_height;
     *w = video_speed_check_width;
 }
+#ifdef TV_3D_FUNCTION_OPEN
+void vpp_set_3d_scale(bool enable)
+{
+	vpp_3d_scale = enable;
+}
+#endif
 

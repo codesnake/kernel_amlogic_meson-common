@@ -8,7 +8,7 @@
 #include <linux/earlysuspend.h>
 #include <mach/pinmux.h>
 #include <linux/pinctrl/consumer.h>
-
+#define MX_REVD
 #ifdef CONFIG_CLK81_DFS
 #include <linux/semaphore.h>
 #define init_MUTEX(sem)             sema_init(sem, 1)
@@ -18,6 +18,33 @@
 #define	NAND_PAGELIST_MAGIC 	0x4c50414e
 #endif
 /** Register defination **/
+#define IO_CBUS_BASE2  0xc1100000
+
+#define NAND_CMD  ((0xc1108600-IO_CBUS_BASE2)>>2)
+#define NAND_CFG  ((0xc1108604-IO_CBUS_BASE2)>>2)
+#define NAND_DADR ((0xc1108608-IO_CBUS_BASE2)>>2)
+#define NAND_IADR ((0xc110860c-IO_CBUS_BASE2)>>2)
+#define NAND_BUF  ((0xc1108610-IO_CBUS_BASE2)>>2)
+#define NAND_INFO ((0xc1108614-IO_CBUS_BASE2)>>2)
+#define NAND_DC   ((0xc1108618-IO_CBUS_BASE2)>>2)
+#define NAND_ADR  ((0xc110861c-IO_CBUS_BASE2)>>2)
+#define NAND_DL   ((0xc1108620-IO_CBUS_BASE2)>>2)
+#define NAND_DH   ((0xc1108624-IO_CBUS_BASE2)>>2)
+#define NAND_CADR ((0xc1108628-IO_CBUS_BASE2)>>2)
+#define NAND_SADR ((0xc110862c-IO_CBUS_BASE2)>>2)
+
+#define P_NAND_CMD                                CBUS_REG_ADDR(NAND_CMD)
+#define P_NAND_CFG                                CBUS_REG_ADDR(NAND_CFG)
+#define P_NAND_DADR                               CBUS_REG_ADDR(NAND_DADR)
+#define P_NAND_IADR                               CBUS_REG_ADDR(NAND_IADR)
+#define P_NAND_BUF                                CBUS_REG_ADDR(NAND_BUF)
+#define P_NAND_INFO                               CBUS_REG_ADDR(NAND_INFO)
+#define P_NAND_DC                                 CBUS_REG_ADDR(NAND_DC)
+#define P_NAND_ADR                                CBUS_REG_ADDR(NAND_ADR)
+#define P_NAND_DL                                 CBUS_REG_ADDR(NAND_DL)
+#define P_NAND_DH                                 CBUS_REG_ADDR(NAND_DH)
+#define P_NAND_CADR                               CBUS_REG_ADDR(NAND_CADR)
+#define P_NAND_SADR                               CBUS_REG_ADDR(NAND_SADR)
 
 #define NAND_SYS_CLK_NAME	  "clk81"
 #define NAND_CYCLE_DELAY	  90
@@ -295,8 +322,8 @@
 #define NAND_CMD_DUMMY_PROGRAM			0x11
 #define NAND_CMD_ERASE1_END				0xd1
 #define NAND_CMD_MULTI_CHIP_STATUS		0x78
-//#define NAND_CMD_SET_FEATURES			0xEF
-//#define NAND_CMD_GET_FEATURES			0xEE
+#define NAND_CMD_SET_FEATURES			0xEF
+#define NAND_CMD_GET_FEATURES			0xEE
 #define ONFI_TIMING_ADDR				0x01
 
 #define MAX_CHIP_NUM		4
@@ -454,8 +481,8 @@ struct aml_nand_bch_desc{
 #define RETRY_NAND_COPY_NUM	4
 
 #define	READ_RETRY_REG_NUM   	8
-#define	READ_RETRY_CNT   		20
-
+#define	READ_RETRY_CNT   		30
+#define	HYNIX_RETRY_CNT		20
 
 #define	ENHANCE_SLC_REG_NUM   	5
 
@@ -478,8 +505,10 @@ struct aml_nand_bch_desc{
 #define	HYNIX_20NM_8GB 		3		//
 #define	HYNIX_20NM_4GB 		4		//
 #define	HYNIX_20NM_LGA_8GB 		5		//
+#define	HYNIX_1YNM_8GB 		6
 //for Toshiba
 #define	TOSHIBA_24NM 			20		//TC58NVG5D2HTA00
+#define	TOSHIBA_A19NM 			21	
 										//TC58NVG6D2GTA00
 //for SAMSUNG
 #define	SUMSUNG_2XNM 			30	
@@ -489,6 +518,7 @@ struct aml_nand_bch_desc{
 //for SANDISK
 #define    SANDISK_19NM			50
 #define     SANDISK_24NM			51
+#define     SANDISK_A19NM		52
 
 #define      DYNAMIC_REG_NUM        3
 #define      DYNAMIC_REG_INIT_NUM        9
@@ -504,6 +534,8 @@ struct aml_nand_bch_desc{
 #define	NAND_CMD_SANDISK_INIT_ONE				0x3B
 #define	NAND_CMD_SANDISK_INIT_TWO				0xB9
 
+#define	NAND_CMD_SANDISK_DSP_ON					0x26
+#define	NAND_CMD_SANDISK_RETRY_STA					 0x5D
 #define	NAND_CMD_SANDISK_LOAD_VALUE_ONE			0x53
 #define	NAND_CMD_SANDISK_LOAD_VALUE_TWO			0x54
 

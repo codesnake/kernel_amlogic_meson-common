@@ -320,10 +320,10 @@ static int
 	}
 
 #if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8
-   	WRITE_VCBUS_REG_BITS(VPP2_OFIFO_SIZE, 0x800,
+    aml_set_reg32_bits(P_VPP2_OFIFO_SIZE, 0x800,
                         VPP_OFIFO_SIZE_BIT, VPP_OFIFO_SIZE_WID);
 #else
-   	WRITE_VCBUS_REG_BITS(VPP2_OFIFO_SIZE, 0x780,
+    aml_set_reg32_bits(P_VPP2_OFIFO_SIZE, 0x780,
                         VPP_OFIFO_SIZE_BIT, VPP_OFIFO_SIZE_WID);
 #endif                        
 

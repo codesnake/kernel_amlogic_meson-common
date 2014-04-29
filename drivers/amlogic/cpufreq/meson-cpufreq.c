@@ -219,7 +219,7 @@ static int meson_cpufreq_target(struct cpufreq_policy *policy,
     return ret;
 }
 
-unsigned int meson_cpufreq_get(unsigned int cpu)
+static unsigned int meson_cpufreq_get(unsigned int cpu)
 {
     unsigned long rate;
     if(cpu > (NR_CPUS-1))
@@ -234,7 +234,7 @@ unsigned int meson_cpufreq_get(unsigned int cpu)
 static int meson_cpufreq_init(struct cpufreq_policy *policy)
 {
     struct cpufreq_frequency_table *freq_table = NULL;
-    int result = 0, index = 0;
+    int index = 0;
 
     if (policy->cpu != 0)
         return -EINVAL;
@@ -324,6 +324,7 @@ static int meson_cpufreq_suspend(struct cpufreq_policy *policy)
 static int meson_cpufreq_resume(struct cpufreq_policy *policy)
 {
     unsigned cur;
+	int ret;
 
     printk("cpufreq resume sleep_freq=%dMhz\n", sleep_freq/1000);
 
@@ -333,7 +334,7 @@ static int meson_cpufreq_resume(struct cpufreq_policy *policy)
     cur = clk_get_rate(cpufreq.armclk) / 1000;
     if (policy->max > cur) {
         adjust_jiffies(policy->max, cur);
-        int ret = aml_dvfs_freq_change(AML_DVFS_ID_VCCK,
+		ret = aml_dvfs_freq_change(AML_DVFS_ID_VCCK,
                                        sleep_freq,
                                        policy->max,
                                        AML_DVFS_FREQ_POSTCHANGE);
@@ -364,8 +365,6 @@ static int __init meson_cpufreq_probe(struct platform_device *pdev)
 		int voltage_control = 0;
 
 #ifdef CONFIG_USE_OF
-		struct meson_cpufreq_config *cpufreq_info;
-		int ret,val=0;
 		const void *prop;
 
 		if (pdev->dev.of_node) {
@@ -388,9 +387,6 @@ static int __init meson_cpufreq_probe(struct platform_device *pdev)
     }
 
    return cpufreq_register_driver(&meson_cpufreq_driver);
-   err:
-		//kfree(vcck_opp_table);
-		return -1;
 }
 
 
@@ -464,27 +460,5 @@ static void adjust_jiffies(unsigned int freqOld, unsigned int freqNew)
         per_cpu(cpu_data, i).loops_per_jiffy = loops_per_jiffy;
     }
 #endif
-}
-
-int meson_cpufreq_boost(unsigned int freq)
-{
-    int ret = 0;
-    if (!early_suspend_flag) {
-        // only allow freq boost when not in early suspend
-        //check last_cpu_rate. inaccurate but no lock
-        //printk("%u %u\n", last_cpu_rate, freq);
-        //if (last_cpu_rate < freq) {
-            if ((clk_get_rate(cpufreq.armclk) / 1000) < freq) {
-                mutex_lock(&meson_cpufreq_mutex);
-                if ((clk_get_rate(cpufreq.armclk) / 1000) < freq) {
-                    ret = meson_cpufreq_target_locked(NULL,
-                                                      freq,
-                                                      CPUFREQ_RELATION_H);
-                }
-                mutex_unlock(&meson_cpufreq_mutex);
-            }
-        //}
-    }
-    return ret;
 }
 

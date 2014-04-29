@@ -32,7 +32,7 @@
 #define ALSA_PRINT(fmt,args...)	printk(KERN_INFO "[aml-pcm-dai]" fmt,##args)
 #ifdef DEBUG_ALSA_SOC_DAI_SPDIF
 #define ALSA_DEBUG(fmt,args...) 	printk(KERN_INFO "[aml-pcm-dai]" fmt,##args)
-#define ALSA_TRACE()     			printk("[aml-pcm-dai] enter func %s,line %d\n",__FUNCTION__,__LINE__);
+#define ALSA_TRACE()     			printk("[aml-pcm-dai] enter func %s,line %d\n",__FUNCTION__,__LINE__)
 #else
 #define ALSA_DEBUG(fmt,args...) 
 #define ALSA_TRACE()   
@@ -59,12 +59,13 @@ static void aml_dai_pcm_shutdown(struct snd_pcm_substream *substream,
 static int aml_dai_pcm_prepare(struct snd_pcm_substream *substream,
 					struct snd_soc_dai *dai)
 {
-#ifdef AML_DAI_DEBUG
-	printk("***Entered %s:%s\n", __FILE__,__func__);
-#endif
 //#if 1
     struct snd_pcm_runtime *runtime = substream->runtime;
 	struct aml_pcm_runtime_data *prtd = runtime->private_data;
+
+#ifdef AML_DAI_DEBUG
+        printk("***Entered %s:%s\n", __FILE__,__func__);
+#endif
 
 	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
         printk(KERN_DEBUG "%s playback stream buffer start: 0x%08x size: 0x%x\n", __FUNCTION__, prtd->buffer_start, prtd->buffer_size);
@@ -86,7 +87,7 @@ static int aml_dai_pcm_trigger(struct snd_pcm_substream *substream, int cmd,
 				struct snd_soc_dai *dai)
 {
 	ALSA_DEBUG();
-	struct snd_pcm_runtime *rtd = substream->runtime;
+	//struct snd_pcm_runtime *rtd = substream->runtime;
 	switch (cmd) {
 		case SNDRV_PCM_TRIGGER_START:
 		case SNDRV_PCM_TRIGGER_RESUME:

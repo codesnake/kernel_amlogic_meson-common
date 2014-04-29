@@ -337,13 +337,14 @@ struct ov7675_fh {
 	return container_of(dev, struct ov7675_fh, dev);
 }*/
 
-static struct v4l2_frmsize_discrete ov7675_prev_resolution[2]=
+static struct v4l2_frmsize_discrete ov7675_prev_resolution[]=
 {
 	{320,240},
+	{352,288},
 	{640,480},
 };
 
-static struct v4l2_frmsize_discrete ov7675_pic_resolution[1]=
+static struct v4l2_frmsize_discrete ov7675_pic_resolution[]=
 {
 	{640,480},
 };
@@ -1712,7 +1713,7 @@ static int vidioc_enum_framesizes(struct file *file, void *fh,struct v4l2_frmsiz
 	return ret;
 }
 
-static int vidioc_s_std(struct file *file, void *priv, v4l2_std_id *i)
+static int vidioc_s_std(struct file *file, void *priv, v4l2_std_id i)
 {
 	return 0;
 }
@@ -1817,6 +1818,11 @@ static int ov7675_open(struct file *file)
 	struct ov7675_fh *fh = NULL;
 	int retval = 0;
 
+#if CONFIG_CMA
+    retval = vm_init_buf(16*SZ_1M);
+    if(retval <0)
+        return -1;
+#endif
 	ov7675_have_opened=1;
 #if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6
 	switch_mod_gate_by_name("ge2d", 1);
@@ -1947,6 +1953,9 @@ static int ov7675_close(struct file *file)
 	switch_mod_gate_by_name("ge2d", 0);
 #endif	
 	wake_unlock(&(dev->wake_lock));
+#ifdef CONFIG_CMA
+    vm_deinit_buf();
+#endif
 	return 0;
 }
 

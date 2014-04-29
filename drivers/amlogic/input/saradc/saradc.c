@@ -10,14 +10,17 @@
 #include <mach/cpu.h>
 #endif
 #include <linux/amlogic/efuse.h>
-//#define ENABLE_CALIBRATION
+#define ENABLE_CALIBRATION
 #ifndef CONFIG_OF
 #define CONFIG_OF
 #endif
 struct saradc {
 	spinlock_t lock;
-	struct calibration *cal;
-	int cal_num;
+#ifdef ENABLE_CALIBRATION
+	int ref_val;
+	int ref_nominal;
+	int coef;
+#endif
 #ifdef CONFIG_ARCH_MESON8
 	int flag;
 	int trimming;
@@ -47,7 +50,7 @@ static void saradc_reset(void)
 	enable_adc();
 #ifdef CONFIG_ARCH_MESON8
 	enable_bandgap();
-#endif	
+#endif
 	set_sample_mode(DIFF_MODE);
 	set_tempsen(0);
 	disable_fifo_irq();
@@ -90,56 +93,53 @@ static void saradc_reset(void)
 }
 
 #ifdef ENABLE_CALIBRATION
-static int  saradc_internal_cal(struct calibration *cal)
+static int  saradc_internal_cal(struct saradc *saradc)
 {
 	int i;
 	int voltage[] = {CAL_VOLTAGE_1, CAL_VOLTAGE_2, CAL_VOLTAGE_3, CAL_VOLTAGE_4, CAL_VOLTAGE_5};
-	int ref[] = {0, 256, 512, 768, 1023};
+	int nominal[INTERNAL_CAL_NUM] = {0, 256, 512, 768, 1023};
+	int val[INTERNAL_CAL_NUM];
 	
 //	set_cal_mux(MUX_CAL);
 //	enable_cal_res_array();	
 	for (i=0; i<INTERNAL_CAL_NUM; i++) {
 		set_cal_voltage(voltage[i]);
-		msleep(100);
-		cal[i].ref = ref[i];
-		cal[i].val = get_adc_sample(CHAN_7);
-		printk(KERN_INFO "cal[%d]=%d\n", i, cal[i].val);
-		if (cal[i].val < 0) {
+		msleep(20);
+		val[i] = get_adc_sample(CHAN_7);
+		if (val[i] < 0) {
 			return -1;
 		}
 	}
-	
+	saradc->ref_val = val[2];	
+	saradc->ref_nominal = nominal[2];
+	saradc->coef = (nominal[3] - nominal[1]) << 12;
+	saradc->coef /= val[3] - val[1];
+	printk("saradc calibration: ref_val = %d\n", saradc->ref_val);
+	printk("saradc calibration: ref_nominal = %d\n", saradc->ref_nominal);
+	printk("saradc calibration: coef = %d\n", saradc->coef);
+
 	return 0;
 }
 
-static int saradc_get_cal_value(struct calibration *cal, int num, int val)
+static int saradc_get_cal_value(struct saradc *saradc, int val)
 {
-	int ret = -1;
-	int i;
-	
-	if (num < 2)
-		return val;
-		
-	if (val <= cal[0].val)
-		return cal[0].ref;
-
-	if (val >= cal[num-1].val)
-		return cal[num-1].ref;
-	
-	for (i=0; i<num-1; i++) {
-		if (val < cal[i+1].val) {
-			ret = val - cal[i].val;
-			ret *= cal[i+1].ref - cal[i].ref;
-			ret /= cal[i+1].val - cal[i].val;
-			ret += cal[i].ref;
-			break;
-		}
-	}
-	return ret;
+  int nominal;
+/*  
+  ((nominal - ref_nominal) << 10) / (val - ref_val) = coef
+  ==> nominal = ((val - ref_val) * coef >> 10) + ref_nominal
+*/
+  nominal = val;
+  if ((saradc->coef > 0) && ( val > 0)) {
+    nominal = (val - saradc->ref_val) * saradc->coef;
+    nominal >>= 12;
+    nominal += saradc->ref_nominal;
+  }
+  if (nominal < 0) nominal = 0;
+  if (nominal > 1023) nominal = 1023;
+ 	return nominal;
 }
 #endif
 
-static int last_value[] = {-1,-1,-1,-1,-1 ,-1,-1 ,-1};
 static u8 print_flag = 0; //(1<<CHAN_4)
 
 int get_adc_sample(int chan)
@@ -147,8 +147,7 @@ int get_adc_sample(int chan)
 	int count;
 	int value=-1;
 	int sum;
-	int changed;
-	unsigned long flags;
+	unsigned int flags;
 	if (!gp_saradc)
 		return -1;
 	
@@ -188,15 +187,12 @@ int get_adc_sample(int chan)
 	value = (count) ? (sum / count) : (-1);
 
 end:
-	changed = (abs(value-last_value[chan])<3) ? 0 : 1;
-	if (changed && ((print_flag>>chan)&1)) {
+	if ((print_flag>>chan)&1) {
 		printk("before cal: ch%d = %d\n", chan, value);
-		last_value[chan] = value;
 	}
 #ifdef ENABLE_CALIBRATION
-	if (gp_saradc->cal_num) {
-		value = saradc_get_cal_value(gp_saradc->cal, gp_saradc->cal_num, value);
-		if (changed && ((print_flag>>chan)&1))
+  value = saradc_get_cal_value(gp_saradc, value);
+  if ((print_flag>>chan)&1) {
 			printk("after cal: ch%d = %d\n\n", chan, value);
 	}
 #endif
@@ -304,7 +300,7 @@ static ssize_t saradc_print_flag_store(struct class *cla, struct class_attribute
 #ifndef CONFIG_MESON_CPU_TEMP_SENSOR
 static ssize_t saradc_temperature_store(struct class *cla, struct class_attribute *attr, const char *buf, size_t count)
 {
-//    int ret;
+    int ret;
 		u8 tempsen;
 		sscanf(buf, "%d", (int*)&tempsen);
 		if (tempsen) {
@@ -420,9 +416,10 @@ static struct class saradc_class = {
     .name = "saradc",
     .class_attrs = saradc_class_attrs,
 };
-#ifdef CONFIG_ARCH_MESON8
-int get_cpu_temp()
+
+int get_cpu_temp(void)
 {
+#ifdef CONFIG_ARCH_MESON8
 	int ret=-1,tempa;
 	if(gp_saradc->flag){
 		ret=get_adc_sample(6);
@@ -435,21 +432,15 @@ int get_cpu_temp()
 		ret=NOT_WRITE_EFUSE;
 	}
 	return ret;
-}
 #else
-int get_cpu_temp()
-{
-
 	return NOT_WRITE_EFUSE;
-}
 #endif
+}
 static int saradc_probe(struct platform_device *pdev)
 {
 	int err;
 	struct saradc *saradc;
-#ifdef ENABLE_CALIBRATION
-	struct saradc_platform_data *pdata = pdev->dev.platform_data;
-#endif
+
 	printk("__%s__\n",__func__);
 	saradc = kzalloc(sizeof(struct saradc), GFP_KERNEL);
 	if (!saradc) {
@@ -458,30 +449,9 @@ static int saradc_probe(struct platform_device *pdev)
 	}
 	saradc_reset();
 	gp_saradc = saradc;
-	saradc->cal = 0;
-	saradc->cal_num = 0;
 #ifdef ENABLE_CALIBRATION
-	if (pdata && pdata->cal) {
-		saradc->cal = pdata->cal;
-		saradc->cal_num = pdata->cal_num;
-		printk(KERN_INFO "saradc use signed calibration data\n");
-	}
-	else {
-		printk(KERN_INFO "saradc use internal calibration\n");
-		saradc->cal = kzalloc(sizeof(struct calibration) * 
-				INTERNAL_CAL_NUM, GFP_KERNEL);
-		if (saradc->cal) {
-			if (saradc_internal_cal(saradc->cal) < 0) {
-				kfree(saradc->cal);
-				saradc->cal = 0;
-				printk(KERN_INFO "saradc calibration fail\n");
-			}
-			else {
-				saradc->cal_num = INTERNAL_CAL_NUM;
-				printk(KERN_INFO "saradc calibration ok\n");
-			}
-		}
-	}
+	saradc->coef = 0;
+  saradc_internal_cal(saradc);
 #endif
 #ifdef CONFIG_ARCH_MESON8
 	char buf[2]={0};

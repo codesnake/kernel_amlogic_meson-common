@@ -43,7 +43,7 @@ typedef struct audio_tone_control {
     int tone_flag;
 }audio_tone_control_t;
 
-struct aml_pcm_dma_params{
+struct aml_i2s_dma_params{
 		char *name;			/* stream identifier */
 		struct snd_pcm_substream *substream;
 		void (*dma_intr_handler)(u32, struct snd_pcm_substream *);
@@ -60,7 +60,7 @@ enum {
  * Data types
 \*--------------------------------------------------------------------------*/
 struct aml_runtime_data {
-	struct aml_pcm_dma_params *params;
+	struct aml_i2s_dma_params *params;
 	dma_addr_t dma_buffer;		/* physical address of dma buffer */
 	dma_addr_t dma_buffer_end;	/* first address beyond DMA buffer */
 

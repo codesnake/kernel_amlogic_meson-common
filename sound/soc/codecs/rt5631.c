@@ -32,6 +32,7 @@
 
 #include "rt5631.h"
 
+#define EQ_FUNC 0
 struct rt5631_priv {
 	struct regmap *regmap;
 	int codec_version;

@@ -121,8 +121,9 @@ snd-soc-wm9713-objs := wm9713.o
 snd-soc-wm-hubs-objs := wm_hubs.o
 snd-soc-dummy_codec-objs := dummy_codec.o
 snd-soc-aml-m8-codec-objs := aml_m8_codec.o
-aml_audio_codec_probe-objs := common/aml_audio_codec_probe.o
 snd-soc-pcm2bt-objs  := pcm2bt.o
+snd-soc-tas5711-objs := tas5711.o
+snd-soc-tas5707-objs := tas5707.o
 
 # Amp
 snd-soc-max9877-objs := max9877.o
@@ -250,8 +251,9 @@ obj-$(CONFIG_SND_SOC_WM_ADSP)	+= snd-soc-wm-adsp.o
 obj-$(CONFIG_SND_SOC_WM_HUBS)	+= snd-soc-wm-hubs.o
 obj-$(CONFIG_SND_SOC_DUMMY_CODEC)   += snd-soc-dummy_codec.o
 obj-$(CONFIG_SND_SOC_AML_M8_CODEC)	+= snd-soc-aml-m8-codec.o
-#obj-y += aml_audio_codec_probe.o
 obj-$(CONFIG_SND_SOC_PCM2BT)    += snd-soc-pcm2bt.o
+obj-$(CONFIG_SND_SOC_TAS5711)   += snd-soc-tas5711.o
+obj-$(CONFIG_SND_SOC_TAS5707)   += snd-soc-tas5707.o
 
 # Amp
 obj-$(CONFIG_SND_SOC_MAX9877)	+= snd-soc-max9877.o

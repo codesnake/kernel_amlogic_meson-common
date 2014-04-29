@@ -344,16 +344,17 @@ static int usb_audio_source_info_Insert(u32 usbid, int num)
 {
     int i = 0, j=0;
     struct mutex usb_audio_mutex2;
-    struct usb_audio_source_config u1;
+    struct usb_audio_source_config *u1 = NULL;
+    
     mutex_init(&usb_audio_mutex2);
     mutex_lock(&usb_audio_mutex2);
     for(i = 1; i <= num; i++)
     {
         if(usbaudioinfo[i].usbid == usbid)
         {
-            u1.usbid = usbid;
-            u1.card = usbaudioinfo[i].card;
-            u1.device = usbaudioinfo[i].device;
+            u1->usbid = usbid;
+            u1->card = usbaudioinfo[i].card;
+            u1->device = usbaudioinfo[i].device;
             for(j = i; j < num; j++)
             {
                 usbaudioinfo[j].card = usbaudioinfo[j+1].card;
@@ -362,13 +363,13 @@ static int usb_audio_source_info_Insert(u32 usbid, int num)
             }
         }
     }
-    usbaudioinfo[num].usbid = u1.usbid;
-    usbaudioinfo[num].card = u1.card;
-    usbaudioinfo[num].device = u1.device;
+    usbaudioinfo[num].usbid = u1->usbid;
+    usbaudioinfo[num].card = u1->card;
+    usbaudioinfo[num].device = u1->device;
     
-    pstr->card = u1.card;
-    pstr->device = u1.device;
-    pstr->usbid = u1.usbid;
+    pstr->card = u1->card;
+    pstr->device = u1->device;
+    pstr->usbid = u1->usbid;
     mutex_unlock(&usb_audio_mutex2);
     return 0;
 }

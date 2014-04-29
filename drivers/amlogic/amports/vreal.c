@@ -396,7 +396,7 @@ static int  vreal_vf_states(vframe_states_t *states, void* op_arg)
 
     return 0;
 }
-
+#if 0
 #ifdef CONFIG_POST_PROCESS_MANAGER
 static void vreal_ppmgr_reset(void)
 {
@@ -407,7 +407,7 @@ static void vreal_ppmgr_reset(void)
     printk("vrealdec: vf_ppmgr_reset\n");
 }
 #endif
-
+#endif 
 static void vreal_put_timer_func(unsigned long arg)
 {
     struct timer_list *timer = (struct timer_list *)arg;
@@ -588,7 +588,7 @@ static void vreal_prot_init(void)
 #endif
 
     /* notify ucode the buffer offset */
-    WRITE_VREG(AV_SCRATCH_F, buf_offset >> 12);
+    WRITE_VREG(AV_SCRATCH_F, buf_offset);
 
 #if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6  
     WRITE_VREG(DOS_SW_RESET0, (1<<9) | (1<<8));
@@ -697,9 +697,7 @@ static void load_block_data(unsigned int dest, unsigned int count)
 
 s32 vreal_init(void)
 {
-    int trickmode_fffb = 0;
     int r;
-    dma_addr_t buf_start_map;
 
     printk("vreal_init\n");
 

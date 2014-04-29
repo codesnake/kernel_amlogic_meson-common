@@ -101,6 +101,7 @@ struct aml_i2c_platform{
 	pinmux_set_t  master_a_pinmux;
 	pinmux_set_t  master_b_pinmux;
 	const char *master_state_name;
+	struct list_head list;
 };
 
 /**************i2c software gpio***************/

@@ -523,4 +523,6 @@ extern int axp_clr_bits(struct device *dev, int reg, uint8_t bit_mask);
 extern int axp_charger_set_usbcur_limit_extern(int usbcur_limit);
 extern void axp_power_off(void);
 extern struct i2c_client *axp;
+extern int axp202_usb_charger(struct notifier_block *nb, unsigned long value, void *pdata);
+extern int axp202_otg_change(struct notifier_block *nb, unsigned long value, void *pdata);
 #endif /* __LINUX_PMIC_AXP_H */

@@ -95,6 +95,9 @@ enum {
 	 /* SP1628  */
      V4L2_IDENT_SP1628 = 43,
 
+     /* BF3720  */
+     V4L2_IDENT_BF3720 = 44,
+
 	/* module tvaudio: reserved range 50-99 */
 	V4L2_IDENT_TVAUDIO = 50,	/* A tvaudio chip, unknown which it is exactly */
 

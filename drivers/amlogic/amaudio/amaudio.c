@@ -1855,6 +1855,8 @@ static ssize_t show_resample_type(struct class* class, struct class_attribute* a
          return sprintf(buf, "DW\n");
      }else if(resample_type_flag==2){//2-->up resample processing
          return sprintf(buf, "UP\n");
+     }else{                          //other-->invalid resample type flag
+         return sprintf(buf, "IR\n");
      }
 }
 
@@ -1942,6 +1944,8 @@ static ssize_t record_type_show(struct class* class, struct class_attribute* att
          return sprintf(buf, "spdif in mode \n");
      }else if(audioin_mode&I2SIN_SLAVE_MODE){//i2s in slave
          return sprintf(buf, "i2s in slave mode \n");
+     }else{
+         return sprintf(buf, "audioin_mode can't match mode\n");
      }
 }
 static struct class_attribute amaudio_attrs[]={
@@ -1952,9 +1956,9 @@ static struct class_attribute amaudio_attrs[]={
   __ATTR(enable_debug_print, S_IRUGO | S_IWUSR, show_enable_debug, store_enable_debug),
   __ATTR(enable_debug_dump, S_IRUGO | S_IWUSR, show_enable_dump, store_enable_dump),
   __ATTR_RO(amaudio_runtime),
-  __ATTR(audio_channels_mask, S_IRUGO | S_IWUSR, show_audio_channels_mask, store_audio_channels_mask),
-  __ATTR(enable_resample, S_IRUGO | S_IWUSR, show_enable_resample, store_enable_resample),
-  __ATTR(resample_type, S_IRUGO | S_IWUSR, show_resample_type, store_resample_type),
+  __ATTR(audio_channels_mask, S_IRUGO | S_IWUSR | S_IWGRP, show_audio_channels_mask, store_audio_channels_mask),
+  __ATTR(enable_resample, S_IRUGO | S_IWUSR | S_IWGRP, show_enable_resample, store_enable_resample),
+  __ATTR(resample_type, S_IRUGO | S_IWUSR | S_IWGRP, show_resample_type, store_resample_type),
   __ATTR(resample_delta, S_IRUGO | S_IWUSR, show_resample_delta, store_resample_delta),
   __ATTR(dac_mute_const, S_IRUGO | S_IWUSR, dac_mute_const_show, dac_mute_const_store),
   __ATTR_RO(output_enable),
@@ -2052,6 +2056,36 @@ static void __exit amaudio_exit(void)
   class_destroy(amaudio_clsp);
   return;
 }
+void aml_device_destroy(struct class *pclass, dev_t devt)
+{
+	device_destroy(pclass,devt);
+}
+void aml_class_destroy(struct class *cls)
+{
+	class_destroy(cls);
+}
+struct device *aml_device_create(struct class *pclass, struct device *parent,
+			     dev_t devt, void *drvdata, const char *fmt, ...)
+{
+	struct device *dev;
+	va_list vargs;	
+	va_start(vargs, fmt);
+	dev=  device_create(pclass, parent,devt, drvdata, fmt, vargs);
+	va_end(vargs);
+	return dev;	
+}
+int aml_class_create_file(struct class *cls, const struct class_attribute *attr)
+{
+	return class_create_file(cls,attr);
 
+}
+struct class *aml_class_create(struct module *owner, const char *name){
+	return class_create(owner,name);
+}
+EXPORT_SYMBOL(aml_device_destroy);
+EXPORT_SYMBOL(aml_class_destroy);
+EXPORT_SYMBOL(aml_device_create);
+EXPORT_SYMBOL(aml_class_create_file);
+EXPORT_SYMBOL(aml_class_create);
 module_init(amaudio_init);
 module_exit(amaudio_exit);

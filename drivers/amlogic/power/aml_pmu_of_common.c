@@ -19,8 +19,8 @@
 #include <linux/pinctrl/consumer.h>
 #include <mach/am_regs.h>
 #include <linux/delay.h>
-//#include <mach/gpio_data.h>
 #include <linux/amlogic/battery_parameter.h>
+#include <linux/amlogic/aml_pmu_common.h>
 
 #define AML_I2C_BUS_AO     0
 #define AML_I2C_BUS_A       1
@@ -53,6 +53,177 @@
         DBG("get property:%25s, value:%s\n",                            \
             prop_name, value);                                          \
     }
+
+/*
+ * common API for callback and drivers
+ */
+static void    *pmu_callback_mutex     = NULL;
+static struct aml_pmu_driver *g_driver = NULL;
+static struct aml_pmu_api *g_aml_pmu_api = NULL;
+
+struct pmu_callback_group {
+    char                        name[20];
+    void                       *private;
+    pmu_callback                callback;
+    struct pmu_callback_group *next;
+};
+
+static struct pmu_callback_group *g_callbacks = NULL;
+
+int aml_pmu_register_callback(pmu_callback callback, void *pdata, char *name)
+{
+    struct pmu_callback_group *cg = NULL, *cn;
+
+    if (!pmu_callback_mutex) {
+        pmu_callback_mutex = pmu_alloc_mutex();
+        if (!pmu_callback_mutex) {
+            printk("%s, allocate mutex failed\n", __func__);
+            return -ENOMEM;
+        }
+    }
+    pmu_mutex_lock(pmu_callback_mutex);
+    cg = kzalloc(sizeof(*cg), GFP_KERNEL);
+    if (!cg) {
+        printk("%s, allocate callback failed\n", __func__);
+        pmu_mutex_unlock(pmu_callback_mutex);
+        return -ENOMEM; 
+    }
+    cg->callback = callback;
+    cg->private  = pdata;
+    strcpy(cg->name, name);
+    if (!g_callbacks) {                                                 // add first callback
+        g_callbacks = cg;
+        printk("callback %s registed, cg:%p\n", cg->name, cg);
+        pmu_mutex_unlock(pmu_callback_mutex);
+        return 0;
+    }
+    for (cn = g_callbacks; cn->next; cn = cn->next) {
+        if (name && !strcmp(cn->name, name)) {
+            printk("%s, callback %s is already exist\n", __func__, name);
+            pmu_mutex_unlock(pmu_callback_mutex);
+            return -EINVAL;
+        }
+    }
+    cn->next = cg;
+    printk("callback %s registed, cg:%p\n", cg->name, cg);
+    pmu_mutex_unlock(pmu_callback_mutex);
+    return 0;
+}
+EXPORT_SYMBOL(aml_pmu_register_callback);
+
+int aml_pmu_unregister_callback(char *name)
+{
+    struct pmu_callback_group *cn, *tmp = g_callbacks;
+    int find = 0;
+    pmu_mutex_lock(pmu_callback_mutex);
+    if (name && !strcmp(tmp->name, name)) {                             // first node is target
+        g_callbacks = g_callbacks->next;    
+        kfree(tmp);
+        printk("%s, callback %s unregisted\n", __func__, name);
+        find = 1;
+    }
+    if (g_callbacks) {
+        for (cn = g_callbacks->next; cn; cn = cn->next) {
+            if (name && !strcmp(cn->name, name)) {
+                tmp->next = cn->next;
+                kfree(cn);
+                printk("%s, callback %s unregisted\n", __func__, name);
+                find = 1;
+                break;
+            }
+            tmp = tmp->next;
+        }
+    }
+    pmu_mutex_unlock(pmu_callback_mutex);
+    if (!find) {
+        printk("%s, callback %s not find\n", __func__, name);
+        return -1;
+    }
+    return 0;
+}
+EXPORT_SYMBOL(aml_pmu_unregister_callback);
+
+void aml_pmu_do_callbacks(struct aml_charger *charger)
+{
+    struct pmu_callback_group *cn;
+
+    if (g_callbacks) {
+        pmu_mutex_lock(pmu_callback_mutex);
+        for (cn = g_callbacks; cn; cn = cn->next) {
+            if (cn->callback) {
+                cn->callback(charger, cn->private);    
+            }
+        }
+        pmu_mutex_unlock(pmu_callback_mutex);
+    }
+}
+EXPORT_SYMBOL(aml_pmu_do_callbacks);
+
+int aml_pmu_register_api(struct aml_pmu_api *api)
+{
+    if (!api || g_aml_pmu_api) {
+        printk("%s, invalid input, api:%p\n", __func__, g_aml_pmu_api);    
+        return -EINVAL;
+    }
+    g_aml_pmu_api = api;
+    return 0;
+}
+EXPORT_SYMBOL(aml_pmu_register_api);
+
+void aml_pmu_clear_api(void)
+{
+    g_aml_pmu_api = NULL;    
+}
+EXPORT_SYMBOL(aml_pmu_clear_api);
+
+struct aml_pmu_api *aml_pmu_get_api(void)
+{
+    return g_aml_pmu_api;    
+}
+EXPORT_SYMBOL(aml_pmu_get_api);
+
+/*
+ * register PMU operater for this lib
+ * @driver: amlogic PMU driver to be registed
+ */
+int aml_pmu_register_driver(struct aml_pmu_driver *driver)
+{
+    if (driver == NULL) {
+        printk("%s, ERROR:NULL driver\n", __func__);    
+        return -1;
+    }
+    if (g_driver != NULL) {
+        printk("%s, ERROR:driver %s has alread registed\n", __func__, driver->name);
+        return -1;
+    }
+    if (!driver->pmu_get_coulomb || !driver->pmu_update_status) {
+        printk("%s, lost important functions\n", __func__);
+        return -1;
+    }
+    g_driver = driver;
+
+    return 0;
+}
+EXPORT_SYMBOL(aml_pmu_register_driver);
+
+/*
+ * clear pmu drivers which already registered;
+ */
+void aml_pmu_clear_driver(void) 
+{
+    g_driver = NULL;
+}
+EXPORT_SYMBOL(aml_pmu_clear_driver);
+
+/*
+ * return registed pmu driver
+ */
+struct aml_pmu_driver* aml_pmu_get_driver(void)
+{
+    return g_driver;
+}
+EXPORT_SYMBOL(aml_pmu_get_driver);
+
 
 /*
  * common API of parse battery parameters for each PMU
@@ -125,7 +296,7 @@ parse_next4:
 parse_failed:
     return -EINVAL;
 }
-EXPORT_SYMBOL_GPL(parse_battery_parameters);
+EXPORT_SYMBOL(parse_battery_parameters);
 
 static int aml_pmus_probe(struct platform_device *pdev)
 {

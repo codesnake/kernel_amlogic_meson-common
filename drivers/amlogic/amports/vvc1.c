@@ -254,11 +254,11 @@ static irqreturn_t vvc1_isr(int irq, void *dev_id)
         v_width = READ_VREG(AV_SCRATCH_J);
         v_height = READ_VREG(AV_SCRATCH_K);
         
-        if (v_width != vvc1_amstream_dec_info.width) {
+        if (v_width && (v_width != vvc1_amstream_dec_info.width)) {
             printk("frame width changed %d to %d\n", vvc1_amstream_dec_info.width, v_width);
             vvc1_amstream_dec_info.width = v_width;
         }
-        if (v_height != vvc1_amstream_dec_info.height) {
+        if (v_height && (v_height != vvc1_amstream_dec_info.height)) {
             printk("frame height changed %d to %d\n", vvc1_amstream_dec_info.height, v_height);
             vvc1_amstream_dec_info.height = v_height;
         } 

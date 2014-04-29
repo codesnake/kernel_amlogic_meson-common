@@ -74,27 +74,28 @@ extern void pmu_mutex_unlock(void *mutex);
 extern int  pmu_rtc_device_init(void);
 extern int  pmu_rtc_set_alarm(unsigned long seconds);
    
+struct aml_pmu_api {
+    int     (*pmu_get_ocv_filter)(void);
+    int     (*pmu_get_report_delay)(void);
+    int     (*pmu_set_report_delay)(int);
+    void    (*pmu_update_battery_capacity)(struct aml_charger *, struct battery_parameter *);
+    void    (*pmu_probe_process)(struct aml_charger *, struct battery_parameter *);
+    void    (*pmu_suspend_process)(struct aml_charger *);
+    void    (*pmu_resume_process)(struct aml_charger *, struct battery_parameter *);
+    void    (*pmu_update_battery_by_ocv)(struct aml_charger *, struct battery_parameter *);
+    void    (*pmu_calibrate_probe_process)(struct aml_charger *);
+    ssize_t (*pmu_format_dbg_buffer)(struct aml_charger *, char *);
+};
+
 extern int    aml_pmu_register_callback(pmu_callback callback, void *pdata, char *name);
 extern int    aml_pmu_unregister_callback(char *name);
 extern int    aml_pmu_register_driver(struct aml_pmu_driver *driver);
+extern int    aml_pmu_register_api(struct aml_pmu_api *);
+extern void   aml_pmu_clear_api(void);
+extern struct aml_pmu_api *aml_pmu_get_api(void);
 extern void   aml_pmu_clear_driver(void);
+extern void   aml_pmu_do_callbacks(struct aml_charger *charger);
 extern struct aml_pmu_driver* aml_pmu_get_driver(void);
 
-extern void aml_pmu_update_coulomb(struct aml_charger *charger, 
-                                   struct battery_parameter *axp_pmu_battery);
-extern void aml_pmu_update_battery_capacity(struct aml_charger *charger, 
-                                            struct battery_parameter *axp_pmu_battery);
-extern void aml_pmu_probe_process(struct aml_charger *charger, 
-                                  struct battery_parameter *pmu_battery);
-extern void aml_pmu_suspend_process(struct aml_charger * charger);
-extern void aml_pmu_resume_process(struct aml_charger *charger, 
-                                   struct battery_parameter *pmu_battery);
-extern void aml_pmu_update_battery_by_ocv(struct aml_charger *charger, 
-                                          struct battery_parameter *pmu_battery);
-extern ssize_t aml_pmu_format_dbg_buffer(struct aml_charger *charger, char *buf);
-extern void aml_pmu_calibrate_probe_process(struct aml_charger *charger);
-extern int  aml_pmu_get_ocv_filter(void);
-
-extern int aml_pmu_get_report_delay(void);
-extern int aml_pmu_set_report_delay(int delay);
+extern struct aml_pmu_api *aml_pmu_get_api(void);
 #endif /* __AML_PMU_COMMON_H__ */

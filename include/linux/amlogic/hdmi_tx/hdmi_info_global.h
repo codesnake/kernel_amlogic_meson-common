@@ -200,18 +200,21 @@ typedef enum
 
 //Sampling Freq Fs:0 - Refer to Stream Header; 1 - 32KHz; 2 - 44.1KHz; 3 - 48KHz; 4 - 88.2KHz...
 typedef enum {
-	FS_REFER_TO_STREAM = 0,
-	FS_32K   = 1,
-	FS_44K1  = 2,
-	FS_48K   = 3,
-	FS_88K2  = 4,
-	FS_96K   = 5,
-	FS_176K4 = 6,
-	FS_192K  = 7,
-        FS_MAX,
+    FS_REFER_TO_STREAM = 0,
+    FS_32K   = 1,
+    FS_44K1  = 2,
+    FS_48K   = 3,
+    FS_88K2  = 4,
+    FS_96K   = 5,
+    FS_176K4 = 6,
+    FS_192K  = 7,
+    FS_MAX,
 }audio_fs_t;
 
-
+struct rate_map_fs {
+    unsigned int rate;
+    audio_fs_t fs;
+};
 
 typedef enum {
     SS_REFER_TO_STREAM = 0,
@@ -221,6 +224,10 @@ typedef enum {
     SS_MAX
 }audio_sample_size_t;
 
+struct size_map_ss {
+    unsigned int sample_bits;
+    audio_sample_size_t ss;
+};
 
 //FL-- Front Left
 //FC --Front Center

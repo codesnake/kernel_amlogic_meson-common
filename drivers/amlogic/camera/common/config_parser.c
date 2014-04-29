@@ -53,7 +53,7 @@ Input	:	*config_file
 Output	:	file size
 function	:	open the firware file, and return total size
  ***********************************************************************************************/
-int camera_open_config(char *config_file)
+int camera_open_config(const char *config_file)
 {
     loff_t file_size;
     struct inode *inode = NULL;
@@ -480,7 +480,7 @@ int parse_effect(configure_t *cf,buffer_para_t *buf_para,int *remained,int *offs
 
 int parse_aet(configure_t *cf,buffer_para_t *buf_para,int *remained,int *offset){
     int sum,ret,check,i;
-    char *iter,*eter;
+    char *iter;
 
     iter = search_string(buf_para,offset,remained,"aet_start]","[aet]");
     if(iter == NULL){
@@ -864,7 +864,7 @@ int parse_gamma(configure_t *cf,buffer_para_t *buf_para,int *remained,int *offse
     iter = strstr(iter,"export");
     iter += 7;
     for(i = 0; i < GAMMA_MAX && iter != NULL;){
-        sscanf(iter,"%x",&(cf->gamma.gamma_r[i]));
+        sscanf(iter,"%x",(unsigned int *)&(cf->gamma.gamma_r[i]));
         i++;
         iter = strstr(iter,",");
         if(iter == NULL)
@@ -874,7 +874,7 @@ int parse_gamma(configure_t *cf,buffer_para_t *buf_para,int *remained,int *offse
     if(i != GAMMA_MAX)
     	return -CHECK_LEN_FAILED;
     for(i = 0; i < GAMMA_MAX && iter != NULL;){
-        sscanf(iter,"%x",&(cf->gamma.gamma_g[i]));
+        sscanf(iter,"%x",(unsigned int *)&(cf->gamma.gamma_g[i]));
         i++;
         iter = strstr(iter,",");
         if(iter == NULL)
@@ -884,7 +884,7 @@ int parse_gamma(configure_t *cf,buffer_para_t *buf_para,int *remained,int *offse
     if(i != GAMMA_MAX)
     	return -CHECK_LEN_FAILED;
     for(i = 0; i < GAMMA_MAX && iter != NULL;){
-        sscanf(iter,"%x",&(cf->gamma.gamma_b[i]));
+        sscanf(iter,"%x",(unsigned int *)&(cf->gamma.gamma_b[i]));
         i++;
         iter = strstr(iter,",");
         if(iter == NULL)
@@ -925,7 +925,6 @@ int parse_wb_sensor(configure_t *cf,buffer_para_t *buf_para,int *remained,int *o
 
 
 int parse_version(configure_t *cf,buffer_para_t *buf_para,int *remained,int *offset){
-    int i;
     char *iter,*end;
     int len = 0;
 
@@ -1084,7 +1083,7 @@ int parse_peaking(configure_t *cf,buffer_para_t *buf_para,int *remained,int *off
      return 0;
 }
 
-int parse_config(char *path,configure_t *cf){
+int parse_config(const char *path,configure_t *cf){
     char *buffer,*iter;
     int file_size;
     int remained_size;
@@ -1598,7 +1597,7 @@ int update_fmt_para(int width,int height,cam_parameter_t *para,para_index_t *pin
 		if(i < cf->lens.sum)
 			pindex->lens_index = i;
 		else{
-			printk("width:%x,height:%x no match lens param\n");
+			printk("width:%x,height:%x no match lens param\n", width, height);
 			pindex->lens_index = 0;	
 		}
 		/** init lens **/
@@ -1622,7 +1621,7 @@ int update_fmt_para(int width,int height,cam_parameter_t *para,para_index_t *pin
 		if(i < cf->nr.sum)
 			pindex->nr_index = i;
 		else{
-			printk("width:%x,height:%x no match nr param\n");
+			printk("width:%x,height:%x no match nr param\n", width, height);
 			pindex->nr_index = 0;	
 		}
 			/** init nr **/
@@ -1646,7 +1645,7 @@ int update_fmt_para(int width,int height,cam_parameter_t *para,para_index_t *pin
 		if(i < cf->peaking.sum)
 			pindex->peaking_index = i;
 		else{
-			printk("width:%x,height:%x no match peaking param\n");
+			printk("width:%x,height:%x no match peaking param\n", width, height);
 			pindex->peaking_index = 0;	
 		}
 		    /** init sharp **/

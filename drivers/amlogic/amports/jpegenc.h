@@ -44,7 +44,7 @@
 #define JPEGENC_IOC_NEW_CMD						_IOW(JPEGENC_IOC_MAGIC, 0x03, unsigned int)
 #define JPEGENC_IOC_GET_STAGE					_IOW(JPEGENC_IOC_MAGIC, 0x04, unsigned int)
 #define JPEGENC_IOC_GET_OUTPUT_SIZE				_IOW(JPEGENC_IOC_MAGIC, 0x05, unsigned int)
-#define JPEGENC_IOC_SET_QUANT 					_IOW(JPEGENC_IOC_MAGIC, 0x06, unsigned int)
+#define JPEGENC_IOC_SET_QUALTIY 					_IOW(JPEGENC_IOC_MAGIC, 0x06, unsigned int)
 #define JPEGENC_IOC_SET_ENCODER_WIDTH 			_IOW(JPEGENC_IOC_MAGIC, 0x07, unsigned int)
 #define JPEGENC_IOC_SET_ENCODER_HEIGHT 			_IOW(JPEGENC_IOC_MAGIC, 0x08, unsigned int)
 #define JPEGENC_IOC_CONFIG_INIT 				_IOW(JPEGENC_IOC_MAGIC, 0x09, unsigned int)
@@ -52,6 +52,14 @@
 #define JPEGENC_IOC_FLUSH_DMA 					_IOW(JPEGENC_IOC_MAGIC, 0x0b, unsigned int)
 #define JPEGENC_IOC_GET_BUFFINFO 				_IOW(JPEGENC_IOC_MAGIC, 0x0c, unsigned int)
 #define JPEGENC_IOC_INPUT_FORMAT 				_IOW(JPEGENC_IOC_MAGIC, 0x0d, unsigned int)
+#define JPEGENC_IOC_SEL_QUANT_TABLE 				_IOW(JPEGENC_IOC_MAGIC, 0x0e, unsigned int)
+#define JPEGENC_IOC_SET_EXT_QUANT_TABLE 				_IOW(JPEGENC_IOC_MAGIC, 0x0f, unsigned int)
+
+
+#define JPEGENC_BUFFER_INPUT              0
+#define JPEGENC_BUFFER_OUTPUT           1
+
+#define DCTSIZE2	    64
 
 typedef enum{
     LOCAL_BUFF = 0,
@@ -68,6 +76,7 @@ typedef enum{
     FMT_YUV420,    
     FMT_YUV444_PLANE,
     FMT_RGB888,
+    FMT_RGB888_PLANE,
     FMT_RGB565,
     FMT_RGBA8888,
     MAX_FRAME_FMT 
@@ -477,7 +486,7 @@ unsigned long reciprocal (unsigned int q)
     return q_recip;
 }   /* reciprocal */
 
-static const unsigned short jpeg_quant[7][64]   = {
+static const unsigned short jpeg_quant[7][DCTSIZE2]   = {
     {       // jpeg_quant[0][] : Luma, Canon
     0x06, 0x06, 0x08, 0x0A, 0x0A, 0x10, 0x15, 0x19,
     0x06, 0x0A, 0x0A, 0x0E, 0x12, 0x1F, 0x29, 0x29,

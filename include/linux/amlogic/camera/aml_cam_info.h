@@ -61,7 +61,7 @@ typedef enum resolution_size {
 typedef int(*aml_cam_probe_fun_t)(struct i2c_adapter *);
 
 typedef struct {
-	char* name;
+	const char* name;
 	unsigned i2c_bus_num;
 	unsigned pwdn_act;
 	unsigned front_back; /* front is 0, back is 1 */
@@ -70,8 +70,8 @@ typedef struct {
 	unsigned flash;
 	unsigned auto_focus;
 	unsigned i2c_addr;
-	char* motor_driver;
-	char* resolution;
+	const char* motor_driver;
+	const char* resolution;
 	unsigned mclk;
 	unsigned flash_support;
 	unsigned flash_ctrl_level;
@@ -84,7 +84,7 @@ typedef struct {
 	gpio_t flash_ctrl_pin;
 	resolution_size_t max_cap_size;
 	tvin_color_fmt_t bayer_fmt;
-	char* config;
+	const char* config;
 }aml_cam_info_t;
 
 typedef struct aml_camera_i2c_fig_s{

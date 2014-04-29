@@ -144,6 +144,8 @@ typedef  struct {
 	pandata_t	rotation_pandata[HW_OSD_COUNT];
 	hw_list_t	 	reg[HW_OSD_COUNT][HW_REG_INDEX_MAX];
 	u32			field_out_en;
+	u32			scale_workaround;
+	u32			fb_for_4k2k;
 	u32         antiflicker_mode;
 }hw_para_t;
 

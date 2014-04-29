@@ -476,6 +476,7 @@ typedef enum {
     REPORT_PHYSICAL_ADDRESS,    //0x17
     SET_TEXT_VIEW_ON,
     POLLING_ONLINE_DEV, //0x19
+    PING_TV,
     USR_CMD_MAX,
 } usr_cmd_type_e;
 

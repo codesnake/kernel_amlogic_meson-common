@@ -60,6 +60,7 @@
 #include <linux/page-debug-flags.h>
 #include <linux/hugetlb.h>
 #include <linux/sched/rt.h>
+#include <linux/sysctl.h>
 
 #include <asm/tlbflush.h>
 #include <asm/div64.h>
@@ -235,7 +236,18 @@ void set_pageblock_migratetype(struct page *page, int migratetype)
 }
 
 bool oom_killer_disabled __read_mostly;
+int mem_management_thresh = START_KSWAPD_FREE_PAGE_THRESH;
+int proc_mem_management_thresh_handler(struct ctl_table *table, int write,
+		void __user *buffer, size_t *lenp,
+		loff_t *ppos)
+{
+	int ret;
 
+	ret = proc_dointvec_minmax(table, write, buffer, lenp, ppos);
+	if (ret && write)
+		mem_management_thresh = START_KSWAPD_FREE_PAGE_THRESH;
+	return ret;
+}
 #ifdef CONFIG_DEBUG_VM
 static int page_outside_zone_boundaries(struct zone *zone, struct page *page)
 {
@@ -1337,7 +1349,8 @@ void free_hot_cold_page(struct page *page, int cold)
 	 * excessively into the page allocator
 	 */
 	if (migratetype >= MIGRATE_PCPTYPES) {
-		if (unlikely(is_migrate_isolate(migratetype))) {
+		if (unlikely(is_migrate_isolate(migratetype))
+            || unlikely(is_migrate_cma(migratetype))) {
 			free_one_page(zone, page, 0, migratetype);
 			goto out;
 		}
@@ -1668,6 +1681,11 @@ bool zone_watermark_ok_safe(struct zone *z, int order, unsigned long mark,
 		      int classzone_idx, int alloc_flags)
 {
 	long free_pages = zone_page_state(z, NR_FREE_PAGES);
+
+	if(global_page_state(NR_FREE_PAGES)  - global_page_state(NR_FREE_CMA_PAGES)
+	   < mem_management_thresh){
+		return false;
+	}
 
 	if (z->percpu_drift_mark && free_pages < z->percpu_drift_mark)
 		free_pages = zone_page_state_snapshot(z, NR_FREE_PAGES);
@@ -2647,7 +2665,8 @@ retry_cpuset:
 	if (allocflags_to_migratetype(gfp_mask) == MIGRATE_MOVABLE)
 		alloc_flags |= ALLOC_CMA;
 #endif
-	if(global_page_state(NR_FREE_PAGES) < START_KSWAPD_FREE_PAGE_THRESH){
+	if(global_page_state(NR_FREE_PAGES)  - global_page_state(NR_FREE_CMA_PAGES)
+	   < mem_management_thresh){
 		if (!(gfp_mask & __GFP_NO_KSWAPD))
 			wake_all_kswapd(order, zonelist, high_zoneidx,
 							zone_idx(preferred_zone));

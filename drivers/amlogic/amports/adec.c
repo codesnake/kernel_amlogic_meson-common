@@ -151,6 +151,7 @@ static struct uio_info astream_uio_info = {
 
     .mem = {
         [0] = {
+            .name = "AIFIFO",			
             .memtype = UIO_MEM_PHYS,
             .addr = (IO_CBUS_PHY_BASE + CBUS_REG_OFFSET(AIU_AIFIFO_CTRL)),
             .size = (AIU_MEM_AIFIFO_LEVEL - AIU_AIFIFO_CTRL + 1) * 4,
@@ -160,6 +161,18 @@ static struct uio_info astream_uio_info = {
             .addr = (IO_CBUS_PHY_BASE + CBUS_REG_OFFSET(VCOP_CTRL_REG)),
             .size = (VC1_BITPLANE_CTL - VCOP_CTRL_REG + 1)*4,
         },
+        [2] = {
+            .name = "SECBUS",
+            .memtype = UIO_MEM_PHYS,
+            .addr = (IO_SECBUS_PHY_BASE ),
+            .size = (EFUSE_CNTL4 - EFUSE_CNTL0 + 1)*4,
+        },  
+        [3] = {
+            .name = "CBUS",
+            .memtype = UIO_MEM_PHYS,
+            .addr = (IO_CBUS_PHY_BASE+ CBUS_REG_OFFSET(ASSIST_HW_REV)),
+            .size = (4 - 0 + 1)*4,
+        },           
     },
 };
 #endif

@@ -338,11 +338,11 @@ static int aml_pcm2bt_prepare(struct snd_pcm_substream *substream)
 }
 
 static int aml_pcm2bt_trigger(struct snd_pcm_substream *substream, int cmd)
-{
-    pcm_debug(KERN_DEBUG "enter %s\n", __FUNCTION__);
+{  
 	struct snd_pcm_runtime *runtime = substream->runtime;
 	struct aml_pcm_runtime_data *prtd = runtime->private_data;
 	int ret = 0;
+    pcm_debug(KERN_DEBUG "enter %s\n", __FUNCTION__);
 
 	switch (cmd) {
     	case SNDRV_PCM_TRIGGER_START:
@@ -385,11 +385,11 @@ static snd_pcm_uframes_t aml_pcm2bt_pointer(struct snd_pcm_substream *substream)
 }
 
 static int aml_pcm2bt_open(struct snd_pcm_substream *substream)
-{
-    pcm_debug(KERN_DEBUG "enter %s\n", __FUNCTION__);
+{ 
 	struct snd_pcm_runtime *runtime = substream->runtime;
 	struct aml_pcm_runtime_data *prtd;
 	int ret;
+    pcm_debug(KERN_DEBUG "enter %s\n", __FUNCTION__);
 
 	snd_soc_set_runtime_hwparams(substream, &aml_pcm2bt_hardware);
 
@@ -571,11 +571,12 @@ static int aml_pcm2bt_preallocate_dma_buffer(struct snd_pcm *pcm,
 
 static int aml_pcm2bt_new(struct snd_soc_pcm_runtime *rtd)
 {
-    pcm_debug(KERN_DEBUG "enter %s\n", __FUNCTION__);
+    //pcm_debug(KERN_DEBUG "enter %s\n", __FUNCTION__);
 	int ret = 0;
        struct snd_soc_card *card = rtd->card;
        struct snd_pcm *pcm =rtd->pcm ;  
-       struct snd_soc_dai *dai =rtd->cpu_dai ;  	   
+       struct snd_soc_dai *dai ;
+       dai = rtd->cpu_dai ;  	   
        pcm_debug("enter %s dai->name: %s dai->id: %d\n", __FUNCTION__, dai->name, dai->id);
     
 	if (!card->dev->dma_mask)

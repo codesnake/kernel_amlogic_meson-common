@@ -13,6 +13,9 @@
 #include <linux/amlogic/efuse.h>
 #include "efuse_regs.h"
 
+#ifdef CONFIG_MESON_TRUSTZONE
+#include <mach/meson-secure.h>
+#endif
 
 static void __efuse_write_byte( unsigned long addr, unsigned long data );
 static void __efuse_read_dword( unsigned long addr, unsigned long *data);
@@ -206,7 +209,12 @@ static ssize_t __efuse_read( char *buf, size_t count, loff_t *ppos )
 	unsigned pos = *ppos;
 	unsigned long *pdw;
 	char* tmp_p;
-		
+
+#ifdef CONFIG_MESON_TRUSTZONE
+	struct efuse_hal_api_arg arg;
+	unsigned int retcnt;
+	int ret;
+#endif				
 	/*pos may not align to 4*/
 	unsigned int dwsize = (count + 3 +  pos%4) >> 2;	
 	
@@ -220,7 +228,8 @@ static ssize_t __efuse_read( char *buf, size_t count, loff_t *ppos )
 		count = EFUSE_BYTES - pos;
 	if (count > EFUSE_BYTES)
 		return -EFAULT;
-	
+
+#ifndef CONFIG_MESON_TRUSTZONE
 	CLK_GATE_ON(EFUSE);
 	aml_set_reg32_bits( P_EFUSE_CNTL1, CNTL1_AUTO_RD_ENABLE_ON,
 		CNTL1_AUTO_RD_ENABLE_BIT, CNTL1_AUTO_RD_ENABLE_SIZE );
@@ -244,6 +253,21 @@ static ssize_t __efuse_read( char *buf, size_t count, loff_t *ppos )
 	memcpy(buf, tmp_p, count);
 
 	*ppos += count;
+#else
+	arg.cmd=EFUSE_HAL_API_READ;
+	arg.offset=pos;
+	arg.size=count;
+	arg.buffer_phy=virt_to_phys(contents);
+	arg.retcnt_phy=virt_to_phys(&retcnt);
+	ret = meson_trustzone_efuse(&arg);
+	if(ret == 0){
+		count=retcnt;
+		*ppos += retcnt;
+		memcpy(buf, contents, retcnt);
+	}
+	else
+		count=0;
+#endif
 	
 	if (contents)
 		kfree(contents);
@@ -256,13 +280,19 @@ static ssize_t __efuse_write(const char *buf, size_t count, loff_t *ppos )
 	//loff_t *readppos = ppos;
 	unsigned char *pc;	
 
+#ifdef CONFIG_MESON_TRUSTZONE
+	struct efuse_hal_api_arg arg;	
+	unsigned int retcnt;
+	int ret;
+#endif
+
 	if (pos >= EFUSE_BYTES)
 		return 0;       /* Past EOF */
 	if (count > EFUSE_BYTES - pos)
 		count = EFUSE_BYTES - pos;
 	if (count > EFUSE_BYTES)
 		return -EFAULT;
-	
+#ifndef CONFIG_MESON_TRUSTZONE		
 	for (pc = (char*)buf; count--; ++pos, ++pc){
 		#ifdef EFUSE_DEBUG    
          __efuse_write_byte_debug(pos, *pc);  
@@ -270,10 +300,22 @@ static ssize_t __efuse_write(const char *buf, size_t count, loff_t *ppos )
           __efuse_write_byte(pos, *pc);   
          #endif
     }
-
 	*ppos = pos;
-
 	return (const char *)pc - buf;
+#else
+	arg.cmd = EFUSE_HAL_API_WRITE;
+	arg.offset = pos;
+	arg.size=count; 
+	arg.buffer_phy=virt_to_phys(buf);
+	arg.retcnt_phy=virt_to_phys(&retcnt);
+	ret = meson_trustzone_efuse(&arg);
+	if(ret == 0){
+		*ppos = pos+retcnt;
+		return retcnt;
+	}
+	else
+		return 0;		
+#endif	
 }
 
 //=================================================================================================
@@ -339,10 +381,6 @@ static efuse_socchip_type_e efuse_get_socchip_type(void)
 	//unsigned int __iomem *bootrom_base;
 	//unsigned int *pID1 =(unsigned int *)0xd9040004;//phy address
 	//unsigned int *pID2 =(unsigned int *)0xd904002c;
-	//unsigned int __iomem *pID1,*pID2;
-	//bootrom_base = (void __iomem *)IO_BOOTROM_BASE;
-	//pID1 = (unsigned int __iomem *)(IO_BOOTROM_BASE + 0x4);
-	//pID2 = (unsigned int __iomem *)(IO_BOOTROM_BASE + 0x2c);
 	type = EFUSE_SOC_CHIP_UNKNOW;
 	if(cpu_is_before_m6()){
 		type = EFUSE_SOC_CHIP_M3;

@@ -6,6 +6,7 @@
 //$$ L2 PROP_U32 2= "bl_level_default_uboot_kernel"
 //$$ L2 PROP_U32 2= "bl_level_middle_mapping"
 //$$ L2 PROP_U32 2= "bl_level_max_min"
+//$$ L2 PROP_U32 = "bl_power_on_delay"
 //$$ L2 PROP_U32 = "bl_ctrl_method"
 //$$ L2 PROP_STR = "bl_gpio_port"
 //$$ L2 PROP_U32 2 = "bl_gpio_dim_max_min"
@@ -30,6 +31,7 @@
 		bl_level_max_min=<255 10>;	/** brightness level max & min, must match the rootfs setting*/
 		
 		/* backlight power ctrl */
+		bl_power_on_delay=<200>; /** delay time before backlight power on(unit: ms) */
 		bl_ctrl_method=<1>;	/** backlight control method(0=gpio, 1=pwm_negative, 2=pwm_positive. 3=pwm_combo. decided by hardware design) */
 		
 		bl_gpio_port="GPIODV_28";	/** backlight control gpio port */

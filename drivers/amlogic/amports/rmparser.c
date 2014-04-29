@@ -176,6 +176,7 @@ static ssize_t _rmparser_write(const char __user *buf, size_t count)
     const char __user *p = buf;
     u32 len;
     int ret;
+    static int halt_droped_len=0;
     u32 vwp,awp;
     if (r > 0) {
         len = min(r, (size_t)FETCHBUF_SIZE);
@@ -223,14 +224,16 @@ static ssize_t _rmparser_write(const char __user *buf, size_t count)
                 WRITE_MPEG_REG(PARSER_CONTROL, (ES_SEARCH | ES_PARSER_START));
                 printk("reset parse_control=%x\n",READ_MPEG_REG(PARSER_CONTROL));
             }
-            if(parse_halt <= 10){/*drops first 10 pkt ,some times maybe no av data*/
+            if(parse_halt <= 10 || halt_droped_len <100*1024){/*drops first 10 pkt ,some times maybe no av data*/
 				 printk("drop this pkt=%d,len=%d\n",parse_halt,len);
                 p += len;
                 r -= len;
+                halt_droped_len+=len;
             }else{
                 return -EAGAIN;
             }
         }else{
+            halt_droped_len=0;	
             parse_halt = 0;
             p += len;
             r -= len;

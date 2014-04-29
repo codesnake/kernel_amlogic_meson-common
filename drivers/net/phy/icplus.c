@@ -166,9 +166,9 @@ static int ip101gr_reset(struct phy_device *phydev)
 
 	phy_write(phydev, IP101G_MMD_CTRL, 0x4007);
 
-	phy_write(phydev, IP101G_MMD_CTRL, 0x0);
+	phy_write(phydev, IP101G_MMD_DATA, 0x0);
 
-	phy_write(phydev, IP101G_DIO_PIN_DCR, 0x1252);
+	phy_write(phydev, IP101G_DIO_PIN_DCR, 0x2252);
 	return 0;
 }
 
@@ -269,6 +269,7 @@ static int ip101a_g_genphy_suspend(struct phy_device *phydev)
 	off_analog(phydev, OFF);
 	value = phy_read(phydev, MII_BMCR);
 	phy_write(phydev, MII_BMCR, (value | BMCR_PDOWN));
+	return 0;
 }
 static int ip101a_g_genphy_resume(struct phy_device *phydev)
 {
@@ -277,6 +278,7 @@ static int ip101a_g_genphy_resume(struct phy_device *phydev)
 	off_analog(phydev, ON);
 	value = phy_read(phydev, MII_BMCR);
 	phy_write(phydev, MII_BMCR, (value & ~BMCR_PDOWN));
+	return 0;
 
 }
 static struct phy_driver icplus_driver[] = {

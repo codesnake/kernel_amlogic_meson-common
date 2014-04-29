@@ -64,7 +64,7 @@ static    unsigned char    gbl_msg[MAX_MSG];
 cec_global_info_t cec_global_info;
 unsigned char rc_long_press_pwr_key = 0;
 EXPORT_SYMBOL(rc_long_press_pwr_key);
-int cec_msg_dbg_en = 0;
+bool cec_msg_dbg_en = 0;
 
 ssize_t    cec_lang_config_state(struct switch_dev *sdev, char *buf){
     int pos=0;
@@ -104,6 +104,11 @@ static irqreturn_t cec_isr_handler(int irq, void *dev_instance);
 static struct early_suspend hdmitx_cec_early_suspend_handler;
 static void hdmitx_cec_early_suspend(struct early_suspend *h)
 {
+    if(!hdmitx_device->hpd_state) { //if none HDMI out,no CEC features.
+        hdmi_print(INF, CEC "HPD low!\n");
+        return;
+    }
+    
     if(hdmitx_device->cec_func_config & (1 << CEC_FUNC_MSAK)) {
         cec_menu_status_smp(DEVICE_MENU_INACTIVE);
         cec_inactive_source();
@@ -119,6 +124,10 @@ static void hdmitx_cec_early_suspend(struct early_suspend *h)
 
 static void hdmitx_cec_late_resume(struct early_suspend *h)
 {
+    if(!hdmitx_device->hpd_state) { //if none HDMI out,no CEC features.
+        hdmi_print(INF, CEC "HPD low!\n");
+        return;
+    }
     cec_hw_reset();//for M8 CEC standby.
     if(hdmitx_device->cec_func_config & (1 << CEC_FUNC_MSAK)) {
         cec_imageview_on_smp();
@@ -134,6 +143,9 @@ static void hdmitx_cec_late_resume(struct early_suspend *h)
 
 void cec_isr_post_process(void)
 {
+    if(!hdmitx_device->hpd_state) { //if none HDMI out,no CEC features.
+        return;
+    }
     /* isr post process */
     while(cec_global_info.cec_rx_msg_buf.rx_read_pos != cec_global_info.cec_rx_msg_buf.rx_write_pos) {
         cec_handle_message(&(cec_global_info.cec_rx_msg_buf.cec_rx_message[cec_global_info.cec_rx_msg_buf.rx_read_pos]));
@@ -151,7 +163,6 @@ void cec_usr_cmd_post_process(void)
     }
 }
 
-#if 0
 static int detect_tv_support_cec(unsigned addr)
 {
     unsigned int ret = 0;
@@ -159,10 +170,9 @@ static int detect_tv_support_cec(unsigned addr)
     msg[0] = (addr<<4) | 0x0;       // 0x0, TV's root address
     ret = cec_ll_tx_polling(msg, 1);
     cec_hw_reset();
-    hdmi_print(INF, CEC "tv%shave CEC feature\n", ret ? " " : " don\'t ");
+    hdmi_print(INF, CEC "tv%s have CEC feature\n", ret ? " " : " don\'t ");
     return (hdmitx_device->tv_cec_support = ret);
 }
-#endif
 
 void cec_node_init(hdmitx_dev_t* hdmitx_device)
 {
@@ -286,7 +296,6 @@ void cec_node_init(hdmitx_dev_t* hdmitx_device)
             // here, we need to detect whether TV is supporting the CEC function
             // if not, jump out to save system time
             //if(!detect_tv_support_cec(player_dev[i])) {
-            //    hdmi_print(INF, CEC "HDMI CEC: No TV detected.\n");
             //    break;
             //}
             cec_get_menu_language_smp();
@@ -305,6 +314,8 @@ void cec_node_init(hdmitx_dev_t* hdmitx_device)
     }
     if(bool == 1)
         hdmi_print(INF, CEC "Can't get a valid logical address\n");
+    else
+        hdmi_print(INF, CEC "cec node init: cec features ok !\n");
 }
 
 void cec_node_uninit(hdmitx_dev_t* hdmitx_device)
@@ -1719,40 +1730,40 @@ void cec_usrcmd_set_dispatch(const char * buf, size_t count)
 {
     int i = 0;
     int j = 0;
-    int n = 0;
-    int m = 0;
     int bool = 0;
-    char param[16] = {0};
-    char tmpbuf[32] = {0};
+    char param[32] = {0};
     unsigned bit_set;
     unsigned time_set;
     unsigned char msg[4] = {0};
-
+    
+    hdmi_print(INF, CEC "cec usrcmd set dispatch start:\n");
+    if(!hdmitx_device->hpd_state) { //if none HDMI out,no CEC features.
+        hdmi_print(INF, CEC "HPD low!\n");
+        return;
+    }
+    
+    if(!(hdmitx_device->cec_func_config & (1 << CEC_FUNC_MSAK))){
+        hdmi_print(INF, CEC "cec function masked!\n");
+        return;
+    }
+        
     if(count > 32){
         hdmi_print(INF, CEC "too many args\n");
     }
     for(i = 0; i < count; i++){
-        if ( (buf[i] >= '0') && (buf[i] <= 'f') ){
-            param[j] = simple_strtoul(&buf[i], NULL, 16);
-            j ++;
-        }
+        param[j] = simple_strtoul(&buf[i], NULL, 16);
+        j ++;
         while ( buf[i] != ' ' )
             i ++;
     }
-
-    while((buf[n]!=',')&&(buf[i]!=' ')){
-        tmpbuf[n]=buf[n];
-        n++;
-    }
-    tmpbuf[n]=0;
-    hdmirx_cec_dbg_print("cec_usrcmd_set_dispatch: \n");
+    param[j]=0;
 #ifdef CONFIG_ARCH_MESON8
-    if(strncmp(tmpbuf, "waocec", 6)==0){
-        bit_set = simple_strtoul(tmpbuf+6, NULL, 16);
-        time_set = simple_strtoul(buf+n+1, NULL, 16);
+    if(strncmp(buf, "waocec", 6)==0){
+        bit_set = simple_strtoul(buf+6, NULL, 16);
+        time_set = simple_strtoul(buf+8, NULL, 16);
         cec_arbit_bit_time_set(bit_set, time_set, 1);
         return;
-    }else if(strncmp(tmpbuf, "raocec", 6)==0){
+    }else if(strncmp(buf, "raocec", 6)==0){
         cec_arbit_bit_time_read();
         return;
     }
@@ -1841,9 +1852,13 @@ void cec_usrcmd_set_dispatch(const char * buf, size_t count)
 
         cec_ll_tx(msg, 4);
         break;
+    case PING_TV:    //0x1a LA : For TV CEC detected.
+        detect_tv_support_cec(param[1]);
+        break;
     default:
         break;
     }
+    hdmi_print(INF, CEC "cec usrcmd set dispatch end!\n\n");
 }
 
 /***************************** cec high level code end *****************************/

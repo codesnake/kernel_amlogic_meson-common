@@ -1391,26 +1391,26 @@ static ssize_t show_last_checkin_apts(struct class *class,
                            struct class_attribute *attr,
                            char *buf)
 {
-  unsigned long last_apts;
+  unsigned int last_apts;
   last_apts = get_last_checkin_pts(PTS_TYPE_AUDIO);
   return sprintf(buf, "0x%x\n",last_apts);
 }
 
 static struct class_attribute tsync_class_attrs[] = {
-    __ATTR(pts_video,  S_IRUGO | S_IWUSR, show_vpts,    store_vpts),
-    __ATTR(pts_audio,  S_IRUGO | S_IWUSR, show_apts,    store_apts),
-    __ATTR(pts_pcrscr, S_IRUGO | S_IWUSR, show_pcrscr,  store_pcrscr),
-    __ATTR(event,      S_IRUGO | S_IWUSR, NULL,         store_event),
-    __ATTR(mode,       S_IRUGO | S_IWUSR, show_mode,    NULL),
-    __ATTR(enable,     S_IRUGO | S_IWUSR, show_enable,  store_enable),
-    __ATTR(pcr_recover, S_IRUGO | S_IWUSR, show_pcr_recover,  store_pcr_recover),
+    __ATTR(pts_video,  S_IRUGO | S_IWUSR | S_IWGRP, show_vpts,    store_vpts),
+    __ATTR(pts_audio,  S_IRUGO | S_IWUSR | S_IWGRP, show_apts,    store_apts),
+    __ATTR(pts_pcrscr, S_IRUGO | S_IWUSR | S_IWGRP, show_pcrscr,  store_pcrscr),
+    __ATTR(event,      S_IRUGO | S_IWUSR | S_IWGRP, NULL,         store_event),
+    __ATTR(mode,       S_IRUGO | S_IWUSR | S_IWGRP, show_mode,    NULL),
+    __ATTR(enable,     S_IRUGO | S_IWUSR | S_IWGRP, show_enable,  store_enable),
+    __ATTR(pcr_recover, S_IRUGO | S_IWUSR | S_IWGRP, show_pcr_recover,  store_pcr_recover),
     __ATTR(discontinue, S_IRUGO | S_IWUSR, show_discontinue,  store_discontinue),
     __ATTR(debug_pts_checkin, S_IRUGO | S_IWUSR, show_debug_pts_checkin,  store_debug_pts_checkin),
     __ATTR(debug_pts_checkout, S_IRUGO | S_IWUSR, show_debug_pts_checkout,  store_debug_pts_checkout),
     __ATTR(debug_video_pts, S_IRUGO | S_IWUSR, show_debug_vpts,  store_debug_vpts),
     __ATTR(debug_audio_pts, S_IRUGO | S_IWUSR, show_debug_apts,  store_debug_apts),
-    __ATTR(av_threshold_min, S_IRUGO | S_IWUSR, show_av_threshold_min,  store_av_threshold_min),
-    __ATTR(av_threshold_max, S_IRUGO | S_IWUSR, show_av_threshold_max,  store_av_threshold_max),
+    __ATTR(av_threshold_min, S_IRUGO | S_IWUSR | S_IWGRP, show_av_threshold_min,  store_av_threshold_min),
+    __ATTR(av_threshold_max, S_IRUGO | S_IWUSR | S_IWGRP, show_av_threshold_max,  store_av_threshold_max),
     __ATTR(last_checkin_apts, S_IRUGO | S_IWUSR, show_last_checkin_apts, NULL),
     __ATTR_NULL
 };

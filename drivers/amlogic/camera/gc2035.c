@@ -411,6 +411,7 @@ struct gc2035_fh {
 
 static struct v4l2_frmsize_discrete gc2035_prev_resolution[]= //should include 352x288 and 640x480, those two size are used for recording
 {
+	{320,240},
 	{352,288},
 	{640,480},
 };
@@ -3388,6 +3389,15 @@ static int gc2035_open(struct file *file)
         resource_size_t mem_start = 0;
         unsigned int mem_size = 0;
 
+#if CONFIG_CMA
+    retval = vm_init_buf(16*SZ_1M);
+    if(retval <0)
+    {
+        pr_err("%s : Allocation from CMA failed\n", __func__);
+        return -1;
+    }
+#endif
+
 #ifdef MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6
 	switch_mod_gate_by_name("ge2d", 1);
 #endif	
@@ -3523,6 +3533,9 @@ static int gc2035_close(struct file *file)
 #endif	
 	wake_unlock(&(dev->wake_lock));
 
+#ifdef CONFIG_CMA
+    vm_deinit_buf();
+#endif
 	return 0;
 }
 
