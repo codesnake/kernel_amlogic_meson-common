@@ -12,7 +12,7 @@ config DEFCONFIG_LIST
 	option defconfig_list
 	default "/lib/modules/$UNAME_RELEASE/.config"
 	default "/etc/kernel-config"
-	default "/boot/config-$UNAME_RELEASE"
+	default "arch/arm/configs/matricom_g18_defconfig"
 	default "$ARCH_DEFCONFIG"
 	default "arch/$ARCH/defconfig"
 
