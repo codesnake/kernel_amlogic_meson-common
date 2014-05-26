@@ -78,3 +78,6 @@ GTAGS
 *.orig
 *~
 \#*#
+
+# menuconfig backup file
+arch/arm/configs/matricom_g18_defconfig.old
