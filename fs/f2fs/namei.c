@@ -22,12 +22,18 @@
 
 static struct inode *f2fs_new_inode(struct inode *dir, umode_t mode)
 {
-	struct super_block *sb = dir->i_sb;
-	struct f2fs_sb_info *sbi = F2FS_SB(sb);
+	struct super_block *sb;
+	struct f2fs_sb_info *sbi;
 	nid_t ino;
 	struct inode *inode;
 	bool nid_free = false;
 	int err, ilock;
+
+	if (inode->i_nlink >= F2FS_LINK_MAX)
+		return -EMLINK;
+
+	sb = dir->i_sb;
+	sbi = F2FS_SB(sb);
 
 	inode = new_inode(sb);
 	if (!inode)
@@ -298,10 +304,14 @@ out:
 
 static int f2fs_mkdir(struct inode *dir, struct dentry *dentry, umode_t mode)
 {
-	struct f2fs_sb_info *sbi = F2FS_SB(dir->i_sb);
+	struct f2fs_sb_info *sbi;
 	struct inode *inode;
 	int err, ilock;
 
+	if (dir->i_nlink >= F2FS_LINK_MAX)
+		return -EMLINK;
+
+	sbi = F2FS_SB(dir->i_sb);
 	f2fs_balance_fs(sbi);
 
 	inode = f2fs_new_inode(dir, S_IFDIR | mode);
@@ -437,6 +447,13 @@ static int f2fs_rename(struct inode *old_dir, struct dentry *old_dentry,
 			add_orphan_inode(sbi, new_inode->i_ino);
 		update_inode_page(new_inode);
 	} else {
+		if (old_dir_entry) {
+			err = -EMLINK;
+			if (new_dir->i_nlink >= F2FS_LINK_MAX) {
+				goto out_dir;
+                        }
+		}
+
 		err = f2fs_add_link(new_dentry, old_inode);
 		if (err)
 			goto out_dir;
