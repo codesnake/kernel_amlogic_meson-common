@@ -22,10 +22,17 @@
 #ifndef PTSSERV_H
 #define PTSSERV_H
 
+#include <mach/cpu.h>
+
 enum {
     PTS_TYPE_VIDEO = 0,
     PTS_TYPE_AUDIO = 1,
+#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8B
+    PTS_TYPE_HEVC  = 2,
+    PTS_TYPE_MAX   = 3
+#else
     PTS_TYPE_MAX   = 2
+#endif
 };
 
 #define apts_checkin(x) pts_checkin(PTS_TYPE_AUDIO, (x))

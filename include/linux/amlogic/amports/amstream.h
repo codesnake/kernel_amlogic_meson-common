@@ -46,6 +46,7 @@
 #define PORT_TYPE_RM        0x20
 #define PORT_TYPE_SUB       0x40
 #define PORT_TYPE_SUB_RD    0x80
+#define PORT_TYPE_HEVC      0x100
 #define PORT_TYPE_USERDATA	0x200
 #endif
 

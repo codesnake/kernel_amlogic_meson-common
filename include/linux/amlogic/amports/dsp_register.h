@@ -4,6 +4,7 @@ dsp_register.h
 #ifndef DSP_REGISTER_H
 #define DSP_REGISTER_H
 #include <linux/dma-mapping.h>
+#include <mach/cpu.h>
 
 #ifdef CONFIG_ARCH_MESON8
 #define SYS_MEM_START	0x00000000
@@ -16,7 +17,7 @@ dsp_register.h
 #define S_1M					(S_1K*S_1K)
 
 #define AUDIO_DSP_MEM_SIZE		 S_1M
-#ifdef CONFIG_ARCH_MESON8
+#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8
 #define AUDIO_DSP_START_PHY_ADDR 0x06000000
 #else
 #define AUDIO_DSP_START_PHY_ADDR 0x85000000

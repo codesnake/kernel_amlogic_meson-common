@@ -70,6 +70,9 @@ extern vmode_t validate_vmode(char *);
 extern int vout_suspend(void); 
 extern int vout_resume(void);
 
+int get_power_level();
+
+
 #define VOUT_EVENT_MODE_CHANGE		0x00010000	
 #define VOUT_EVENT_OSD_BLANK			0x00020000
 #define VOUT_EVENT_OSD_DISP_AXIS			0x00030000

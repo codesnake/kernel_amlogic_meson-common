@@ -26,6 +26,7 @@
 
 #include <linux/types.h>
 #include <linux/amlogic/tvin/tvin.h>
+#include <linux/atomic.h>
 
 #define VIDTYPE_PROGRESSIVE             0x0
 #define VIDTYPE_INTERLACE_TOP           0x1
@@ -190,6 +191,7 @@ typedef struct vframe_s {
         /* pixel aspect ratio */
         enum pixel_aspect_ratio_e pixel_ratio;
         u64 ready_jiffies64;//ready from decode on  jiffies_64
+        atomic_t use_cnt;
 } vframe_t;
 
 #if 0

@@ -37,8 +37,8 @@ typedef struct {
 } canvas_t;
 
 #define AMVDEC_ALL_CANVAS_INDEX 0x0
-#define AMVDEC_ALL_CANVAS_RANGE_0 0xb  // vc1/real/mpeg12/mpeg4/ jpeg logo / h264 
-#define AMVDEC_ALL_CANVAS_RANGE_1 0x17 //mjpeg
+#define AMVDEC_ALL_CANVAS_RANGE_0 0xb  // vc1/real/mpeg12/mpeg4/ jpeg logo / h264
+#define AMVDEC_ALL_CANVAS_RANGE_1 0x25 //mjpeg
 
 #define AMVDEC_H264MVC_CANVAS_INDEX 0x78
 #define AMVDEC_H264MVC_CANVAS_MAX 0xbf
@@ -48,9 +48,6 @@ typedef struct {
 
 #define AMVDEC_H264_CANVAS_INDEX 0x80
 #define AMVDEC_H264_CANVAS_MAX 0xbf
-
-
-//0x18-0x23  empty
 
 //jpeg dec
 #define JPEGDEC_CANVAS_INDEX   0//0x18//0x3a
@@ -117,20 +114,19 @@ typedef struct {
 #define DEINTERLACE_CANVAS_MAX_INDEX	0x7f
 #endif
 
+#define AMVIDEOCAP_CANVAS_INDEX 0x50
+
 #define MIPI_CANVAS_INDEX 0x70
 #define MIPI_CANVAS_MAX_INDEX 0x7f
 
-//tvin vdin0: 0x80-0x97 share with h264 decoder only for tvin&camera
-#define VDIN0_CANVAS_INDEX              0x80
-#define VDIN0_CANVAS_MAX_INDEX          0x97
-//tvin vdin1: 0x24-0x3b
-#define VDIN1_CANVAS_INDEX              0x24
-#define VDIN1_CANVAS_MAX_INDEX          0x3B
+//tvin vdin: 0x18-0x3B
+#define VDIN_CANVAS_INDEX              0x26
+#define VDIN_CANVAS_MAX_INDEX          0x3B
 
 #define CAMERA_USER_CANVAS_INDEX             0x98
 #define CAMERA_USER_CANVAS_MAX_INDEX     0xaf
 
-#if MESON_CPU_TYPE == MESON_CPU_TYPE_MESON8
+#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8
 #define AMLVIDEO2_RES_CANVAS 0xD8
 #define AMLVIDEO2_MAX_RES_CANVAS 0xE3
 #elif MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6TV
@@ -141,7 +137,7 @@ typedef struct {
 #define AMLVIDEO2_MAX_RES_CANVAS 0x3E
 #endif
 
-#if MESON_CPU_TYPE == MESON_CPU_TYPE_MESON8
+#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8
 #define AMVENC_CANVAS_INDEX 0xE4
 #define AMVENC_CANVAS_MAX_INDEX 0xEC
 
@@ -149,10 +145,10 @@ typedef struct {
 #define D2D3_CANVAS_DBR_INDEX      0xEE
 #elif MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6TV
 #define AMVENC_CANVAS_INDEX 0xDB
-#define AMVENC_CANVAS_MAX_INDEX 0xE0
+#define AMVENC_CANVAS_MAX_INDEX 0xE3
 
-#define D2D3_CANVAS_DPG_INDEX      0xE1
-#define D2D3_CANVAS_DBR_INDEX      0xE2
+#define D2D3_CANVAS_DPG_INDEX      0xE4
+#define D2D3_CANVAS_DBR_INDEX      0xE5
 #endif
 
 extern void canvas_config(u32 index, ulong addr, u32 width,

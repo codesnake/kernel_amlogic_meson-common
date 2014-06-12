@@ -143,6 +143,10 @@
 	#define PLL_CTRL_EN				30
 	#define PLL_CTRL_OD				9	//[10:9]
 	#define PLL_CTRL_N				24	//[28:24]
+#elif (MESON_CPU_TYPE == MESON_CPU_TYPE_MESON8B)
+	#define PLL_CTRL_EN				30
+	#define PLL_CTRL_OD				16	//[17:16]
+	#define PLL_CTRL_N				10	//[14:10]
 #endif
 	#define PLL_CTRL_M				0	//[8:0]
 
@@ -154,17 +158,17 @@
 	#define DIV_CTRL_POST_SEL		8	//[9:8]
 	#define DIV_CTRL_DIV_PRE		4	//[6:4]
 
-	#define CLK_TEST_FLAG			31
-	#define CLK_CTRL_AUTO			30
+	#define CLK_CTRL_AUTO			31
+	#define CLK_TEST_FLAG			30
 	#define CLK_CTRL_FRAC			16	//[27:16]
-	#define CLK_CTRL_LEVEL			12	//[13:12]
+	#define CLK_CTRL_LEVEL			12	//[14:12]
 	//#define CLK_CTRL_PLL_SEL		10
 	//#define CLK_CTRL_DIV_SEL		9
 	#define CLK_CTRL_VCLK_SEL		8
 	#define CLK_CTRL_SS				4	//[7:4]
 	#define CLK_CTRL_XD				0	//[3:0]
 	
-	#define PLL_WAIT_LOCK_CNT		100
+	#define PLL_WAIT_LOCK_CNT		200
 
 /**** clk frequency limit ***/
 	#define FIN_FREQ				(24 * 1000)
@@ -178,11 +182,11 @@
 	#define PLL_FREF_MAX			(30 * 1000)
 	#define PLL_VCO_MIN				(750 * 1000)
 	#define PLL_VCO_MAX				(1500 * 1000)
-#elif (MESON_CPU_TYPE == MESON_CPU_TYPE_MESON8)
+#elif ((MESON_CPU_TYPE == MESON_CPU_TYPE_MESON8) || (MESON_CPU_TYPE == MESON_CPU_TYPE_MESON8B))
 	#define PLL_M_MIN				2
 	#define PLL_M_MAX				511
 	#define PLL_N_MIN				1
-	#define PLL_N_MAX				2
+	#define PLL_N_MAX				1
 	#define PLL_FREF_MIN			(5 * 1000)
 	#define PLL_FREF_MAX			(25 * 1000)
 	#define PLL_VCO_MIN				(1200 * 1000)
@@ -194,11 +198,11 @@
 	#define DIV_POST_MAX_CLK_IN		(800 * 1000)
 	#define CRT_VID_MAX_CLK_IN		(600 * 1000)
 	#define LCD_VENC_MAX_CLK_IN		(208 * 1000)
-#elif (MESON_CPU_TYPE == MESON_CPU_TYPE_MESON8)
+#elif ((MESON_CPU_TYPE == MESON_CPU_TYPE_MESON8) || (MESON_CPU_TYPE == MESON_CPU_TYPE_MESON8B))
 	#define MIPI_PHY_MAX_CLK_IN		(1000 * 1000)
 	#define DIV_PRE_MAX_CLK_IN		(1500 * 1000)
 	#define DIV_POST_MAX_CLK_IN		(1000 * 1000)
-	#define CRT_VID_MAX_CLK_IN		(600 * 1000)
+	#define CRT_VID_MAX_CLK_IN		(1300 * 1000)
 	#define LCD_VENC_MAX_CLK_IN		(333 * 1000)
 #endif
 	/* lcd interface video clk */
@@ -214,8 +218,8 @@
 #define CRT_VID_DIV_MAX				15
 #if (MESON_CPU_TYPE == MESON_CPU_TYPE_MESON6)
 #define OD_SEL_MAX					2
-#elif (MESON_CPU_TYPE == MESON_CPU_TYPE_MESON8)
-#define OD_SEL_MAX					4
+#elif ((MESON_CPU_TYPE == MESON_CPU_TYPE_MESON8) || (MESON_CPU_TYPE == MESON_CPU_TYPE_MESON8B))
+#define OD_SEL_MAX					3
 #endif
 #define DIV_PRE_SEL_MAX				6
 #define EDP_DIV0_SEL_MAX			15
@@ -256,7 +260,7 @@ static const char* lcd_power_type_table[]={
 	"pmu",
 	"signal",
 	"init",
-	"null"
+	"null",
 };
 
 static const char* lcd_power_pmu_gpio_table[]={
@@ -265,7 +269,7 @@ static const char* lcd_power_pmu_gpio_table[]={
 	"GPIO2",
 	"GPIO3",
 	"GPIO4",
-	"null"
+	"null",
 }; 
 
 typedef enum
@@ -298,7 +302,7 @@ static const char *lcd_ss_level_table[]={
 	"4%",
 	"5%",
 };
-#elif (MESON_CPU_TYPE == MESON_CPU_TYPE_MESON8)
+#elif (MESON_CPU_TYPE == MESON_CPU_TYPE_MESON8) || (MESON_CPU_TYPE == MESON_CPU_TYPE_MESON8B)
 #define SS_LEVEL_MAX	5
 static const char *lcd_ss_level_table[]={
 	"0",
@@ -344,9 +348,10 @@ typedef struct {
 	u16 de_hstart;
 	u16 de_vstart;
 	u16 de_valid;
+	u32 vsync_h_phase; //[31]sign [15:0]value
 	u32 h_offset;
 	u32 v_offset;
-	u32 vsync_h_phase;
+
 	u16 sth1_hs_addr;
 	u16 sth1_he_addr;
 	u16 sth1_vs_addr;
@@ -429,39 +434,42 @@ typedef struct {
 } MLVDS_Config_t;
 #endif
 
-#if (MESON_CPU_TYPE == MESON_CPU_TYPE_MESON8)
+#if ((MESON_CPU_TYPE == MESON_CPU_TYPE_MESON8) || (MESON_CPU_TYPE == MESON_CPU_TYPE_MESON8B))
+#define DSI_INIT_ON_MAX              100
+#define DSI_INIT_OFF_MAX             30
+
+#define BIT_OPERATION_MODE_INIT      0
+#define BIT_OPERATION_MODE_DISP      4
+#define BIT_TRANS_CTRL_CLK           0
+#define BIT_TRANS_CTRL_SWITCH        4 //[5:4]
 typedef struct DSI_Config_s{
-        unsigned int    dsi_clk_div;
-        unsigned int    dsi_clk_max;
-        unsigned int    dsi_clk_min; //2^32 = 4294967296 = 4.2G
-        unsigned int    denominator; //
-        unsigned int    numerator;//default 10000
-				unsigned int    mipi_init_flag;
-        unsigned int    hline;
-        unsigned int    hsa;
-        unsigned int    hbp;
-        unsigned int    vsa;
-        unsigned int    vbp;
-        unsigned int    vfp;
-        unsigned int    vact;
+    unsigned char lane_num;
+    unsigned int bit_rate_max;
+    unsigned int bit_rate_min;
+    unsigned int bit_rate;
+    unsigned int factor_denominator;
+    unsigned int factor_numerator;
+    unsigned int hline;
+    unsigned int hsa;
+    unsigned int hbp;
+    unsigned int vsa;
+    unsigned int vbp;
+    unsigned int vfp;
+    unsigned int vact;
 
-        unsigned int    venc_color_type;
-        unsigned int    dpi_color_type;
-        unsigned char   dpi_chroma_subsamp;
-        unsigned int    venc_fmt;
-        unsigned char   lane_num;
-        unsigned char   trans_mode;
+    unsigned int venc_data_width;
+    unsigned int dpi_data_format;
+    unsigned int venc_fmt;
+    unsigned int operation_mode;  //mipi-dsi operation mode: video, command. [4]display , [0]init
+    unsigned int transfer_ctrl;  //[0]LP mode auto stop clk lane, [5:4]phy switch between LP and HS
+    unsigned char video_mode_type;  //burst, non-burst(sync pulse, sync event)
 
-        unsigned char   trans_type;    //such ad hs or lp
-        unsigned char   ack_type;      //if need bta ack check
-        unsigned char   tear_switch;
-
-        unsigned char   is_rgb;        //whether dpi color type is rgb
-        unsigned char   mipi_init[20];
-        unsigned int 		sleep_out_delay;
-        unsigned int 		display_on_delay;
+    unsigned char *dsi_init_on;
+    unsigned char *dsi_init_off;
+    unsigned char lcd_extern_init;
 }DSI_Config_t;
-
+#endif
+#if (MESON_CPU_TYPE == MESON_CPU_TYPE_MESON8)
 typedef struct {
 	unsigned char link_user;
 	unsigned char lane_count;
@@ -486,8 +494,10 @@ typedef struct {
 } TTL_Config_t;
 
 typedef struct {
-#if (MESON_CPU_TYPE == MESON_CPU_TYPE_MESON8)
+#if ((MESON_CPU_TYPE == MESON_CPU_TYPE_MESON8) || (MESON_CPU_TYPE == MESON_CPU_TYPE_MESON8B))
 	DSI_Config_t *mipi_config;
+#endif
+#if (MESON_CPU_TYPE == MESON_CPU_TYPE_MESON8)
 	EDP_Config_t *edp_config;
 #endif
 	LVDS_Config_t *lvds_config;

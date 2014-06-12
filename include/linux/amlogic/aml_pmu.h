@@ -219,7 +219,7 @@ extern int aml1212_otg_change(struct notifier_block *nb, unsigned long value, vo
 #define AML1216_CHARGER_DISCHARGING         2
 #define AML1216_CHARGER_NONE                3 
 
-#define AML_DBG(format,args...)                 \
+#define AML1216_DBG(format,args...)                 \
     if (1) printk(KERN_ERR "[AML1216]"format,##args)  
 #define ABS(x)                  ((x) >0 ? (x) : -(x))
 
@@ -351,7 +351,7 @@ extern int aml1216_usb_charger(struct notifier_block *nb, unsigned long value, v
 #define AML1218_CHARGER_DISCHARGING         2
 #define AML1218_CHARGER_NONE                3 
 
-#define AML_DBG(format,args...)                 \
+#define AML1218_DBG(format,args...)                 \
     if (1) printk(KERN_ERR "[AML1218]"format,##args)  
 #define ABS(x)                  ((x) >0 ? (x) : -(x))
 
