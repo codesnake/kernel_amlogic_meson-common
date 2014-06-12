@@ -9,7 +9,8 @@ config SND_AML_M8
 	select SND_SOC_RT5616 if SND_AML_M8
 	select SND_SOC_WM8960
 	select SND_SOC_RT5631
-	
+	select SND_SOC_AMLPMU3 if AML1218
+
 config SND_AML_M8_PCM
 	tristate "M8 evaluation board with PCM2BT"
 	depends on SND_AML_M8_SOC
@@ -18,3 +19,7 @@ config SND_AML_M8_PCM
 config SND_AML_M8_FAULTY_GPIOZ
 	bool "If board has a faulty GPIOZ port which causes no HDMI audio"
 	default n
+	
+config SND_AML_M_DUMMY_CODEC
+    tristate "AML M series board with DUMMY_CODEC"
+    select SND_SOC_DUMMY_CODEC

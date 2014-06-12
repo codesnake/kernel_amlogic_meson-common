@@ -1017,7 +1017,10 @@ int if_audio_out_enable()
 {
 	return READ_MPEG_REG_BITS(AIU_MEM_I2S_CONTROL, 1, 2);
 }
-
+int if_958_audio_out_enable()
+{
+	return READ_MPEG_REG_BITS(AIU_MEM_IEC958_CONTROL,1,2);
+}
 unsigned int read_i2s_rd_ptr(void)
 {
     unsigned int val;

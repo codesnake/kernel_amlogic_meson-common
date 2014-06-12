@@ -188,9 +188,12 @@ unsigned int audio_hdmi_init_ready(void);
 /*OVERCLOCK == 1,our SOC privide 512fs mclk,OVERCLOCK == 0 ,256fs*/
 #if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6TV
 #define OVERCLOCK 0
-#define IEC958_OVERCLOCK 1
 #else
 #define OVERCLOCK 1
+#endif
+/*IEC958 overclock is used after M8*/
+#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8
+#define IEC958_OVERCLOCK 1
 #endif
 
 #if (OVERCLOCK == 1)

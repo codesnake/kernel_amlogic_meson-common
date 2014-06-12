@@ -30,6 +30,7 @@
 #include "aml_pcm.h"
 #include "aml_audio_hw.h"
 #include <sound/aml_m6tv_audio.h>
+#include "aml_audio_codec_probe.h"
 
 #ifdef CONFIG_USE_OF
 #include <linux/of.h>
@@ -159,25 +160,8 @@ static int m6tv_audio_codec_init(struct snd_soc_pcm_runtime *rtd)
 {
     return 0;
 }
-#ifdef CONFIG_SND_AML_M6TV_STA380
-static int m6tv_sta381xx_init(struct snd_soc_dapm_context *dapm)
-{
-	CODEC_DEBUG("~~~~%s\n", __func__);
 
-	snd_soc_codec_set_sysclk(dapm->codec, 1, 48000 * 512, 0);
-	return 0;
-}
-#endif
-#ifdef CONFIG_SND_AML_M6TV_TAS5711
-static int m6tv_tas5711_init(struct snd_soc_dapm_context *dapm)
-{
-	CODEC_DEBUG("~~~~%s\n", __func__);
-
-	return 0;
-}
-#endif
 static struct snd_soc_dai_link m6tv_audio_dai_link[] = {
-#ifdef CONFIG_SND_AML_M6TV_SYNOPSYS9629_CODEC
     {
         .name = "syno9629",
         .stream_name = "SYNO9629 PCM",
@@ -188,38 +172,13 @@ static struct snd_soc_dai_link m6tv_audio_dai_link[] = {
         .codec_name = "syno9629.0",
         .ops = &m6tv_audio_soc_ops,
     },
-#endif
 };
-struct snd_soc_aux_dev m6tv_audio_aux_dev[] = {
-#ifdef CONFIG_SND_AML_M6TV_STA380
-	{
-		.name = "sta381xx",
-		.codec_name = "sta381xx.0-001c",
-		.init = m6tv_sta381xx_init,
-	},
-#endif
-#ifdef CONFIG_SND_AML_M6TV_TAS5711
-	{
-		.name = "tas5711",
-		.codec_name = "tas5711.1-001b",
-		.init = m6tv_tas5711_init,
-	},
-#endif
-};
+struct snd_soc_aux_dev m6tv_audio_aux_dev;
 
 static struct snd_soc_codec_conf m6tv_audio_codec_conf[] = {
-#ifdef CONFIG_SND_AML_M6TV_STA380
 	{
-		.dev_name = "sta381xx.0-001c",
 		.name_prefix = "AMP",
 	},
-#endif
-#ifdef CONFIG_SND_AML_M6TV_TAS5711
-	{
-		.dev_name = "tas5711.1-001b",
-		.name_prefix = "AMP",
-	},
-#endif
 };
 static struct snd_soc_card snd_soc_m6tv_audio = {
     .name = "AML-M6TV",
@@ -227,8 +186,8 @@ static struct snd_soc_card snd_soc_m6tv_audio = {
     .dai_link = m6tv_audio_dai_link,
     .num_links = ARRAY_SIZE(m6tv_audio_dai_link),
     .set_bias_level = m6tv_audio_set_bias_level,
-    .aux_dev = m6tv_audio_aux_dev,
-    .num_aux_devs = ARRAY_SIZE(m6tv_audio_aux_dev),
+    .aux_dev = &m6tv_audio_aux_dev,
+    .num_aux_devs = 1,
     .codec_conf = m6tv_audio_codec_conf,
     .num_configs = ARRAY_SIZE(m6tv_audio_codec_conf),
 
@@ -297,6 +256,11 @@ static int m6tv_audio_audio_probe(struct platform_device *pdev)
 		ret = -EINVAL;
 		goto err;
 	}
+
+	m6tv_audio_aux_dev.name = codec_info.name;
+	m6tv_audio_aux_dev.codec_name = codec_info.name_bus;
+	m6tv_audio_codec_conf[0].dev_name = codec_info.name_bus;
+
 	ret = snd_soc_register_card(card);
 	if (ret) {
 		dev_err(&pdev->dev, "snd_soc_register_card failed (%d)\n",
@@ -314,6 +278,9 @@ err:
 static int m6tv_audio_audio_remove(struct platform_device *pdev)
 {
     int ret = 0;
+	struct snd_soc_card *card = platform_get_drvdata(pdev);
+
+	aml_m6_pinmux_deinit(card);
     m6tv_audio_dev_uninit();
     platform_device_put(m6tv_audio_snd_device);
 //    kfree(m6tv_audio_snd_priv);

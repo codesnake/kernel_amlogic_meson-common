@@ -103,7 +103,7 @@ static int hp_det_adc_value(struct aml_audio_private_data *p_aml_audio)
         }
         hp_val_sum += hp_value;
         loop_num ++;
-        msleep(15);
+        msleep_interruptible(15);
     }
     hp_val_sum = hp_val_sum >> 3;
 	//printk("00000000000hp_val_sum = %hx\n",hp_val_sum);
@@ -142,14 +142,14 @@ static int aml_audio_hp_detect(struct aml_audio_private_data *p_aml_audio)
         ret = hp_det_adc_value(p_aml_audio);
         if(p_aml_audio->hp_last_state != ret){
             loop_num = 0;
-            msleep(50);
+            msleep_interruptible(50);
             if(ret < 0){
                 ret = p_aml_audio->hp_last_state;
             }else {
                 p_aml_audio->hp_last_state = ret;
             }
         }else{
-            msleep(50);
+            msleep_interruptible(50);
             loop_num = loop_num + 1;
         }
     }
@@ -300,11 +300,11 @@ static int aml_m8_set_spk(struct snd_kcontrol *kcontrol,
     aml_m8_spk_enabled = ucontrol->value.integer.value[0];
     printk(KERN_INFO "aml_m8_set_spk: aml_m8_spk_enabled=%d\n",aml_m8_spk_enabled);
 
-    msleep(10);
+    msleep_interruptible(10);
     amlogic_set_value(p_audio->gpio_mute, aml_m8_spk_enabled, "mute_spk");
 
     if(aml_m8_spk_enabled ==1)
-        msleep(100);
+        msleep_interruptible(100);
 
     return 0;
 }
@@ -464,7 +464,7 @@ static int speaker_events(struct snd_soc_dapm_widget *w,
 	switch (event) {
 	case SND_SOC_DAPM_POST_PMU:
 		amlogic_set_value(p_audio->gpio_mute, 1, "mute_spk");
-        msleep(50);
+        msleep(p_audio->sleep_time);
 		break;
 	case SND_SOC_DAPM_PRE_PMD:
 		amlogic_set_value(p_audio->gpio_mute, 0, "mute_spk");
@@ -495,11 +495,11 @@ static struct snd_soc_jack_pin jack_pins[] = {
 static const struct snd_kcontrol_new aml_m8_controls[] = {
 	SOC_DAPM_PIN_SWITCH("Ext Spk"),
 
-/*
+
 	SOC_SINGLE_BOOL_EXT("Amp Spk enable", 0,
 		aml_m8_get_spk,
 		aml_m8_set_spk),
-
+   /*
     SOC_SINGLE_BOOL_EXT("Audio MPLL9 Switch", 0,
     aml_m8_get_MPLL9,
     aml_m8_set_MPLL9),
@@ -569,6 +569,11 @@ static int aml_asoc_init(struct snd_soc_pcm_runtime *rtd)
         printk("hp detect paraments: h=%d,l=%d,mic=%d,det=%d,ch=%d \n",p_aml_audio->hp_val_h,p_aml_audio->hp_val_l,
             p_aml_audio->mic_val,p_aml_audio->hp_detal,p_aml_audio->hp_adc_ch);
     }
+    ret = of_property_read_u32(card->dev->of_node, "sleep_time", &p_aml_audio->sleep_time);
+    if(ret)
+        printk("falied to get spk event delay time paraments from dts file\n");
+    printk("***delay_time = %d****\n",p_aml_audio->sleep_time);
+    
     init_timer(&p_aml_audio->timer);
     p_aml_audio->timer.function = aml_asoc_timer_func;
     p_aml_audio->timer.data = (unsigned long)p_aml_audio;

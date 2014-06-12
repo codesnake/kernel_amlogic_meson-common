@@ -6,6 +6,7 @@ struct aml_audio_private_data {
     int clock_en;
 	int gpio_hp_det;
 	bool det_pol_inv;
+    int sleep_time;
 	int gpio_mute;
     int gpio_i2s_m;
     int gpio_i2s_s;

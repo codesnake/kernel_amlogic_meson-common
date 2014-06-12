@@ -29,41 +29,9 @@ config SND_AML_M_DUMMY_CODEC
 config SND_AML_M6TV_AUDIO_CODEC
 	tristate "AML M6TV evaluation board,this must be selected for all m6tv board"
 	depends on SND_AML_M6_SOC
+	select SND_AML_M6TV_SYNOPSYS9629_CODEC
+	select SND_SOC_TAS5711
+	select SND_SOC_TAS5707
 config SND_AML_M6TV_SYNOPSYS9629_CODEC
 	tristate "AML M6TV  board with internal syno9629 codec"
 	depends on SND_AML_M6TV_AUDIO_CODEC
-config SND_AML_M6TV_STA380
-	tristate "AML M6TV board with STA380 codec"
-	depends on SND_AML_M6TV_AUDIO_CODEC
-	select SND_SOC_STA380 if SND_AML_M6TV_STA380
-config SND_AML_M6TV_TAS5711
-	tristate "AML M6TV board with TAS5711 codec"
-	depends on SND_AML_M6TV_AUDIO_CODEC
-	select SND_SOC_TAS5711 if SND_AML_M6TV_TAS5711
-if SND_AML_M6TV_TAS5711
-choice
-	prompt "TAS5711 work mode"
-	default TAS5711_2_CHANNEL
-config TAS5711_2_CHANNEL
-	bool "2 BTL channel mode"
-config TAS5711_2_PLUS_1_CHANNEL
-	bool "2.1 channel mode"
-config TAS5711_2_SUBWOOFER_CHANNEL
-	bool "2 BTL subwoofer channel"
-endchoice
-endif
-config SND_AML_M6TV_TAS5707
-	tristate "AML M6TV board with TAS5707 codec"
-	depends on SND_AML_M6TV_AUDIO_CODEC
-	select SND_SOC_TAS5707 if SND_AML_M6TV_TAS5707
-if SND_AML_M6TV_TAS5707
-choice
-	prompt "TAS5707 work mode"
-	default TAS5707_2_CHANNEL
-config TAS5707_2_CHANNEL
-	bool "2 BTL channel mode"
-config TAS5707_2_SUBWOOFER_CHANNEL
-	bool "2 BTL subwoofer channel"
-endchoice
-endif
-
