@@ -1,4 +1,5 @@
-scripts/*
+scripts/basic/*
+scripts/kconfig/*
 arch/arm/configs/*.old
 .config*
 
