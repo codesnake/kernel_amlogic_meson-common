@@ -211,7 +211,6 @@
 
     meson_vcck_dvfs_driver{
         compatible = "amlogic, meson_vcck_dvfs";
-        default_uV = <1110000>;
         pinctrl-names = "default";
         pinctrl-0 = <&aml_pwm_pins>;
         use_pwm = <1>; 

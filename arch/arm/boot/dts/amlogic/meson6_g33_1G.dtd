@@ -507,23 +507,22 @@ void root_func(){
             dvfs_table  = <
                 /* NOTE: frequent in this table must be ascending order */
                 /* frequent(Khz)    min_uV      max_uV                  */
-                 200000             1080000     1080000
-                 600000             1080000     1080000
-                 792000             1080000     1080000
-                 816000             1150000     1150000
-                 840000             1150000     1150000
-                 984000             1150000     1150000
-                1000000             1150000     1150000
-                1080000             1250000     1250000
-                1200000             1270000     1270000
-                1320000             1340000     1340000
-                1500000             1340000     1340000
+                 200000             1010000     1010000
+                 600000             1010000     1010000
+                 792000             1010000     1010000
+                 816000             1110000     1110000
+                 840000             1110000     1110000
+                 984000             1110000     1110000
+                1000000             1110000     1110000
+                1080000             1220000     1220000
+                1200000             1240000     1240000
+                1320000             1320000     1320000
+                1500000             1320000     1320000
             >;
         };
     };
 //$$ DEVICE="meson_vcck_dvfs_driver"
 //$$ L2 PROP_STR = "status"
-//$$ L2 PROP_U32 = "default_uV"
 //$$ L2 PROP_STR = "pinctrl-names"
 //$$ L2 PROP_CHOICE "meson_vcck_dvfs_pin_0_match" = "pinctrl-0"
 //$$ L2 PROP_U32 = "use_pwm"
@@ -533,7 +532,6 @@ void root_func(){
         compatible = "amlogic, meson_vcck_dvfs";
         dev_name = "meson_vcck_dvfs_driver";
         status = "ok";
-        default_uV = <1280000>;
         pinctrl-names = "default";
         pinctrl-0 = <&aml_pwm_pins>;
         use_pwm = <1>; 

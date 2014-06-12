@@ -57,7 +57,7 @@
 		aml_reserved_start = <0x85000000>;
 		aml_reserved_end = <0x84000000>;
 		phys_offset = <0x80000000>;
-		linux,total-memory = <0x40000000>;
+		linux,total-memory = <0x20000000>;
 	};
 
 	gic:interrupt-controller {
@@ -172,22 +172,11 @@
 		compatible = "amlogic,ppmgr";
 		dev_name = "ppmgr";
 		status = "okay";
-		reserve-memory = <0x02c00000>;
+		reserve-memory = <0>;
 		reserve-iomap = "true";
 	};
-/// ***************************************************************************************
-///	-	DISP&MM-AMLVIDEO2
-//$$ MODULE = "DISP&MM-AMLVIDEO2"
-//$$ DEVICE="amlvideo2"
-//$$ L2 PROP_STR = "status"
-//$$ L3 PROP_U32 2 ="reg"
-	amlvideo2 {
-		compatible = "amlogic,amlvideo2";
-		dev_name = "amlvideo2.0";
-		status = "okay";
-		reserve-memory = <0x01000000>;
-		reserve-iomap = "true";
-	};
+
+
 /// ***************************************************************************************
 ///	-	DISP&MM-Vout
 //$$ MODULE = "DISP&MM-Vout"
@@ -239,21 +228,22 @@
 			/* NOTE: frequent in this table must be ascending order */
 			/* frequent(Khz)    min_uV      max_uV                  */
 			200000		1080000		1080000
-			600000		1140000		1140000
-			792000		1200000		1200000
-			816000		1278000		1278000
-			840000		1278000		1278000
-			984000		1278000		1278000
-			1000000		1278000		1278000
-			1080000		1278000		1278000
-			1200000		1278000		1278000
-			1320000		1320000		1320000
-			1500000		1320000		1320000
+			600000		1132000		1132000
+			792000		1218000		1218000
+			816000		1300000		1300000
+			840000		1301000		1301000
+			984000		1301000		1301000
+			1000000		1301000		1301000
+			1080000		1327000		1327000
+			1200000		1327000		1327000
+			1320000		1370000		1370000
+			1512000		1370000		1370000
 			>;
 		};
 	};
 //$$ DEVICE = "meson_vcck_dvfs_driver"
 //$$ L2 PROP_STR = "status"
+//$$ L2 PROP_U32 = "default_uV"
 //$$ L2 PROP_STR = "pinctrl-names"
 //$$ L2 PROP_CHOICE "meson_vcck_dvfs_pin_0_match" = "pinctrl-0"
 //$$ L2 PROP_U32 = "use_pwm"
@@ -263,6 +253,7 @@
 		compatible = "amlogic, meson_vcck_dvfs";
 		dev_name = "meson_vcck_dvfs_driver";
 		status = "ok";
+		default_uV = <1280000>;
 		pinctrl-names = "default";
 		pinctrl-0 = <&aml_pwm_pins>;
 		use_pwm = <1>;
@@ -280,22 +271,22 @@
 			*
 			*  PWM value       VCCK voltage
 			*/
-			0x130009	1010000
-			0x12000a	1050000
-			0x11000b	1070000
-			0x10000c	1090000
-			0x0f000d	1110000
-			0x0e000e	1130000
-			0x0d000f	1150000
-			0x0c0010	1170000
-			0x0b0011	1190000
-			0x0a0012	1210000
-			0x090013	1220000
-			0x080014	1240000
-			0x070015	1270000
-			0x060016	1280000
-			0x050017	1300000
-			0x040018	1320000
+			0x0016000a	1045000
+			0x0016000a	1067000
+			0x0016000a	1088000
+			0x0016000a	1110000
+			0x0016000a	1132000
+			0x0016000a	1153000
+			0x0016000a	1175000
+			0x0016000a	1193000
+			0x00100010	1218000
+			0x00100010	1240000
+			0x00100010	1261000
+			0x00100010	1283000
+			0x00080018	1301000
+			0x00080018	1327000
+			0x00080018	1348000
+			0x00080018	1370000
 		>;
 	};
 /// ***************************************************************************************
@@ -795,28 +786,25 @@
 		compatible = "amlogic,vdin";
 		dev_name = "vdin0";
 		status = "ok";
-		reserve-memory = <0x2400000>;
-		camera_size = <2592 1944>;//camera is 5647,the picture resolution is 2592x1944;so 2592x1944x2x4=41M
-		reserve-iomap = "true";
+		share-memory-name = "vdec0";
+		share-memory-offset = <0>;
+		share-memory-size = <0x1000000>;
+		//reserve-memory = <0x1000000>;
+		camera_size = <1920 1080>;
+		//reserve-iomap = "true";
 		irq = <115>;
 		vdin_id = <0>;
 	};
-	vdin1 {
-		compatible = "amlogic,vdin";
-		dev_name = "vdin1";
-		status = "ok";
-		reserve-memory = <0x1000000>;
-		miracast_size = <1920 1080>;//miracast resolution is 1024x768,1024x768x2x4=6M
-		reserve-iomap = "true";
-		irq = <117>;
-		vdin_id = <1>;
-	};
+
 	tvafe {
 		compatible = "amlogic,tvafe";
 		dev_name = "tvafe";
 		status = "ok";
-		reserve-memory = <0x500000>;
-		reserve-iomap = "true";
+		share-memory-name = "vdec0";
+		share-memory-offset = <0x1000000>;
+		share-memory-size = <0x500000>;
+		//reserve-memory = <0x500000>;
+		//reserve-iomap = "true";
 		tvafe_id = <0>;
 		pinctrl-names = "default";
 		pinctrl-0 = <&vga_pins>;
@@ -1019,7 +1007,7 @@
 		dtv_demod0_reset_value = <0>;
 		dtv_demod0_reset_gpio = "GPIOX_8" ;
 		dtv_demod0_mem = <1>;
-		reserve-memory = <0x06400000>;
+		reserve-memory = <0x400000>;
 		reserve-iomap = "true";
 		fe0_dtv_demod = <0>;
 		fe0_ts = <0>;

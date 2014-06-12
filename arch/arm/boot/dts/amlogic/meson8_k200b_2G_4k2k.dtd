@@ -80,6 +80,15 @@ void root_func(){
 		aml_reserved_end = <0x05000000>;/**reserved memory end */
 		phys_offset = <0x00000000>;
 		linux,total-memory = <0x80000000>;
+
+        #address-cells = <1>;
+        #size-cells = <1>;
+
+        cma_0:region@0 {
+           region_name = "cma_0";
+           reg = <0 0x00f00000>;
+           linux,contiguous-region;
+        };
 	};
 /// ***************************************************************************************
 ///	-	GIC
@@ -137,7 +146,7 @@ void root_func(){
 		compatible = "amlogic,deinterlace";
 		dev_name = "deinterlace";
 		status = "ok";
-		reserve-memory = <0x02300000>; 	 
+		reserve-memory = <0x01800000>; //8x1920x1088x3/2=24M
 	};
 
 /// ***************************************************************************************
@@ -150,7 +159,7 @@ void root_func(){
 		compatible = "amlogic,mesonstream";
 		dev_name = "mesonstream.0";
 		status = "okay";
-		reserve-memory = <0x02000000>;
+		reserve-memory = <0x02000000>; // 32M
 		reserve-iomap = "true";
 	};
 
@@ -178,7 +187,7 @@ void root_func(){
 		compatible = "amlogic,ppmgr";
 		dev_name = "ppmgr";
 		status = "okay";
-		reserve-memory = <0x03000000>;
+		reserve-memory = <0x01000000>; // 16M
 	};
 
 /// ***************************************************************************************
@@ -191,8 +200,7 @@ void root_func(){
 		compatible = "amlogic,amvenc_avc";
 		dev_name = "amvenc_avc.0";
 		status = "okay";
-		reserve-memory = <0x00f00000>;
-		reserve-iomap = "true";
+        linux,contiguous-region = <&cma_0>;
 	};
 	
 /// ***************************************************************************************
@@ -221,11 +229,11 @@ void root_func(){
         dev_name = "vdin1";
         status = "ok";
         reserve-memory = <0x01000000>;
-	miracast_size = <1920 1080>;//1920x1080x2x4=17M
-	reserve-iomap = "true";
+        miracast_size = <1920 1080>;//1920x1080x2x4=17M
+        reserve-iomap = "true";
         irq = <117>;
         vdin_id = <1>;
-	};
+    };
 
 /// ***************************************************************************************
 ///	-	DISP&MM-AMLVIDEO2
@@ -234,12 +242,12 @@ void root_func(){
 //$$ L2 PROP_STR = "status"
 //$$ L3 PROP_U32 2 ="reg"
     amlvideo2{
-		compatible = "amlogic,amlvideo2";
-		dev_name = "amlvideo2.0";
-		status = "okay";
-		reserve-memory = <0x01000000>;
-		reserve-iomap = "true";
-	};
+        compatible = "amlogic,amlvideo2";
+        dev_name = "amlvideo2.0";
+        status = "okay";
+        reserve-memory = <0x01800000>;
+        reserve-iomap = "true";
+    };
 
 /// ***************************************************************************************
 ///	-	ION
@@ -252,7 +260,7 @@ void root_func(){
         status = "ok";
         share-memory-name = "ppmgr0";
         share-memory-offset = <0>;
-        share-memory-size = <0x03000000>;
+        share-memory-size = <0x01000000>; //16M
     };
 /// ***************************************************************************************
 ///	-	DISP&MM-Vout
@@ -264,7 +272,21 @@ void root_func(){
 		dev_name = "mesonvout";
 		status = "okay";
 	};
-
+/*
+/// ***************************************************************************************
+///	-	DISP&MM-A/V Amvideocap
+//$$ MODULE = "DISP&MM-Amvideocap"
+//$$ DEVICE="amvideocap"
+//$$ L2 PROP_STR = "status"
+//$$ L3 PROP_U32 4 ="reg"
+	amvideocap{
+		compatible = "amlogic,amvideocap";
+		dev_name = "amvideocap.0";
+		status = "okay";
+		reserve-memory = <0x00600000>;//1920*1088*3
+		reserve-iomap = "true";
+	};
+*/
 /// ***************************************************************************************
 ///	-	RTC
 //$$ MODULE="RTC"
@@ -362,6 +384,7 @@ void root_func(){
 		irq_num = <4>;
 		irq_trigger_type = "GPIO_IRQ_HIGH";
 		power_on_pin = "GPIOAO_6";
+		power_on_pin2 = "GPIOX_11";
 		clock_32k_pin = "GPIOX_10";
 	};
 	
@@ -373,6 +396,7 @@ void root_func(){
             dev_name = "wifi_power";
             status = "okay";
             power_gpio = "GPIOAO_6";
+            power_gpio2 = "GPIOX_11";
 	}; 
 
 /// ***************************************************************************************
@@ -486,6 +510,103 @@ sdio{
         };
     };
 
+//    sdhc{
+//        compatible = "amlogic,aml_sdhc";
+//        dev_name = "aml_sdhc.0";
+//        reg = <0xc1108e00 0x3c>;
+//        pinctrl-names = "sdhc_sd_clk_cmd_pins", "sdhc_sd_all_pins", "sdhc_emmc_clk_cmd_pins", "sdhc_emmc_all_pins", "sdhc_sdio_clk_cmd_pins", "sdhc_sdio_all_pins";
+//        pinctrl-0 = <&sdhc_sd_clk_cmd_pins>;
+//        pinctrl-1 = <&sdhc_sd_all_pins>;
+//        pinctrl-2 = <&sdhc_emmc_clk_cmd_pins>;
+//        pinctrl-3 = <&sdhc_emmc_all_pins>;
+//        pinctrl-4 = <&sdhc_sdio_clk_cmd_pins>;
+//        pinctrl-5 = <&sdhc_sdio_all_pins>;
+//        //pinctrl-6 = <&sd_1bit_pins>;
+
+//$$ DEVICE="sd"
+//$$ L2 PROP_STR = "status"
+//$$ L3 PROP_U32 = "port"
+//$$ L2 PROP_STR = "pinname"
+//$$ L3 PROP_U32 = "ocr_avail"
+//$$ L2 PROP_STR 3 = "caps"
+//$$ L3 PROP_U32 = "f_min"
+//$$ L3 PROP_U32 = "f_max"
+//$$ L3 PROP_U32 = "f_max_w"
+//$$ L3 PROP_U32 = "max_req_size"
+//$$ L2 PROP_STR = "gpio_dat3"
+//$$ L2 PROP_STR = "jtag_pin"
+//$$ L2 PROP_STR = "gpio_cd"
+//$$ L2 PROP_STR = "gpio_ro"
+//$$ L2 PROP_U32 = "irq_in"
+//$$ L2 PROP_U32 = "irq_out"
+//$$ L2 PROP_U32 = "card_type"
+        // sd{
+        //     status = "okay";
+        //     port = <4>;          /**0:sdhc_a, 1:sdio_b, 2:sdio_c, 3:sdhc_a, 4:sdhc_b, 5:sdhc_c */
+        //     pinname = "sd";
+        //     ocr_avail = <0x00200080>; // 3.3:0x200000, 1.8+3.3:0x00200080
+        //     caps = "MMC_CAP_4_BIT_DATA","MMC_CAP_MMC_HIGHSPEED","MMC_CAP_SD_HIGHSPEED","MMC_CAP_UHS_SDR12","MMC_CAP_UHS_SDR25","MMC_CAP_UHS_SDR50","MMC_CAP_UHS_SDR104";
+        //     f_min = <300000>;
+        //     f_max = <100000000>;
+        //     max_req_size = <0x20000>;          /**128KB*/
+        //     gpio_dat3 = "CARD_4";
+        //     //jtag_pin = "CARD_0";
+        //     gpio_cd = "CARD_6";
+        //     //gpio_ro = "GPIOZ_0";
+        //     irq_in = <3>;
+        //     irq_out = <5>;
+        //     card_type = <5>; /* 0:unknown, 1:mmc card(include eMMC), 2:sd card(include tSD), 3:sdio device(ie:sdio-wifi), 4:SD combo (IO+mem) card, 5:NON sdio device(means sd/mmc card), other:reserved */
+        // };
+
+//$$ DEVICE="emmc"
+//$$ L2 PROP_STR = "status"
+//$$ L3 PROP_U32 = "port"
+//$$ L2 PROP_STR = "pinname"
+//$$ L3 PROP_U32 = "ocr_avail"
+//$$ L2 PROP_STR 4 = "caps"
+//$$ L3 PROP_U32 = "f_min"
+//$$ L3 PROP_U32 = "f_max"
+//$$ L3 PROP_U32 = "f_max_w"
+//$$ L3 PROP_U32 = "max_req_size"
+//$$ L2 PROP_STR = "gpio_dat3"
+//$$ L2 PROP_U32 = "card_type"
+//        emmc{
+//            status = "okay";
+//            port = <5>;          /**0:sdio_a, 1:sdio_b, 2:sdio_c, 3:sdhc_a, 4:sdhc_b, 5:sdhc_c */
+//            pinname = "emmc";
+//            ocr_avail = <0x200000>;          /**VDD voltage 3.3 ~ 3.4 */
+//            caps = "MMC_CAP_8_BIT_DATA","MMC_CAP_MMC_HIGHSPEED","MMC_CAP_SD_HIGHSPEED", "MMC_CAP_NONREMOVABLE"; // MMC_CAP_NEEDS_POLL -- for detect, MMC_CAP_NONREMOVABLE -- for eMMC/TSD
+//            f_min = <300000>;
+//            f_max = <50000000>;
+//            max_req_size = <0x20000>;          /**128KB*/
+//            gpio_dat3 = "BOOT_3";
+//            card_type = <1>; /* 0:unknown, 1:mmc card(include eMMC), 2:sd card(include tSD), 3:sdio device(ie:sdio-wifi), 4:SD combo (IO+mem) card, 5:NON sdio device(means sd/mmc card), other:reserved */
+//        };   
+
+//$$ DEVICE="sdio"
+//$$ L2 PROP_STR = "status"
+//$$ L3 PROP_U32 = "port"
+//$$ L2 PROP_STR = "pinname"
+//$$ L3 PROP_U32 = "ocr_avail"
+//$$ L2 PROP_STR 4 = "caps"
+//$$ L3 PROP_U32 = "f_min"
+//$$ L3 PROP_U32 = "f_max"
+//$$ L3 PROP_U32 = "max_req_size"    
+//$$ L2 PROP_U32 = "card_type"    
+        // sdio{
+        //     status = "okay";
+        //     port = <3>;          /**0:sdio_a, 1:sdio_b, 2:sdio_c, 3:sdhc_a, 4:sdhc_b, 5:sdhc_c */
+        //     pinname = "sdio";
+        //     ocr_avail = <0x00200080>; // 3.3:0x200000, 1.8+3.3:0x00200080
+        //     caps = "MMC_CAP_4_BIT_DATA","MMC_CAP_MMC_HIGHSPEED","MMC_CAP_SD_HIGHSPEED", "MMC_CAP_NONREMOVABLE", "MMC_CAP_UHS_SDR12","MMC_CAP_UHS_SDR25","MMC_CAP_UHS_SDR50","MMC_CAP_UHS_SDR104";
+        //     f_min = <300000>;
+        //     f_max = <100000000>;
+        //     max_req_size = <0x20000>;          /**128KB*/
+        //     card_type = <3>; /* 0:unknown, 1:mmc card(include eMMC), 2:sd card(include tSD), 3:sdio device(ie:sdio-wifi), 4:SD combo (IO+mem) card, 5:NON sdio device(means sd/mmc card), other:reserved */
+        // };
+//    };
+    
+
 /// ***************************************************************************************
 ///	-	I2C
 //$$ MODULE="I2C"
@@ -568,19 +689,17 @@ sdio{
 //$$ L3 PROP_U32 2="reg"
 //$$ L3 PROP_STR = "pinctrl-names"
 //$$ L2 PROP_CHOICE "I2C_D_pin_match" = "pinctrl-0"	
-	i2c@c1108d20{ /*I2C-D*/
-		compatible = "amlogic,aml_i2c";
-		dev_name = "i2c-D";
-		status = "ok";
-		reg = <0xc1108d20 0x20>;
-		device_id = <4>;
-		pinctrl-names="default";
-		pinctrl-0=<&d_i2c_master>;
-		#address-cells = <1>;
-		#size-cells = <0>;
-		use_pio = <0>;
-		master_i2c_speed = <300000>;
-	};
+//	i2c@c1108d20{ /*I2C-D*/
+//		compatible = "amlogic,aml_i2c";
+//		dev_name = "i2c-D";
+//		status = "ok";
+//		reg = <0xc1108d20 0x20>;
+//		device_id = <4>;
+//		pinctrl-names="default";
+//		pinctrl-0=<&d_i2c_master>;
+//		#address-cells = <1>;
+//		#size-cells = <0>;
+//	};
 
 /// ***************************************************************************************
 ///	-	Power
@@ -644,16 +763,16 @@ sdio{
 //$$ L2 PROP_U32 = "ddr_voltage"
 //$$ L2 PROP_U32 = "vddao_voltage"
 //$$ L2 PROP_STR = "status"
-        axp202 { /* PMU for AXP */
-            compatible = "axp_mfd";                             /* for driver probe, must have          */
-            sub_type = "axp20_mfd";                             /** sub type of pmu family, must have    */
-            i2c_bus = "i2c_bus_ao";                             /** attached i2c bus, must have          */
-            reg = <0x34>;                                       /** device i2c address, must have        */
-            soft_limit_to99 = <0>;                              /** optional                             */
-            ddr_voltage   = <1500000>;                          /** default voltage for DDR, optional    */
-            vddao_voltage = <1200000>;                          /** default voltage for AO, optional     */
-            status = "disable";                                 /** status of pmu, only one should be OK */
-        };
+//        axp202 { /* PMU for AXP */
+//            compatible = "axp_mfd";                             /* for driver probe, must have          */
+//            sub_type = "axp20_mfd";                             /** sub type of pmu family, must have    */
+//            i2c_bus = "i2c_bus_ao";                             /** attached i2c bus, must have          */
+//            reg = <0x34>;                                       /** device i2c address, must have        */
+//            soft_limit_to99 = <0>;                              /** optional                             */
+//            ddr_voltage   = <1500000>;                          /** default voltage for DDR, optional    */
+//            vddao_voltage = <1200000>;                          /** default voltage for AO, optional     */
+//            status = "disable";                                 /** status of pmu, only one should be OK */
+//        };
 //$$ DEVICE = "Pmu_aml1212"
 //$$ L2 PROP_STR = "sub_type"
 //$$ L2 PROP_STR = "i2c_bus"
@@ -662,16 +781,16 @@ sdio{
 //$$ L2 PROP_U32 = "ddr_voltage"
 //$$ L2 PROP_U32 = "vddao_voltage"
 //$$ L2 PROP_STR = "status"
-        aml1212{                                                /* PMU for AML1212, see comment above   */
-            compatible = "aml_pmu";                             /* for driver probe, must have          */
-            sub_type = "aml1212";                               /** sub type of pmu family, must have    */
-            i2c_bus = "i2c_bus_ao";                             /** attached i2c bus, must have          */
-            reg = <0x35>;                                       /** device i2c address, must have        */
-            soft_limit_to99 = <0>;                              /** optional                             */
-            ddr_voltage   = <1500000>;                          /** default voltage for DDR, optional    */
-            vddao_voltage = <1200000>;                          /** default voltage for AO, optional     */
-            status = "disable";                                 /** status of pmu, only one should be OK */
-        };
+//        aml1212{                                                /* PMU for AML1212, see comment above   */
+//            compatible = "aml_pmu";                             /* for driver probe, must have          */
+//            sub_type = "aml1212";                               /** sub type of pmu family, must have    */
+//            i2c_bus = "i2c_bus_ao";                             /** attached i2c bus, must have          */
+//            reg = <0x35>;                                       /** device i2c address, must have        */
+//            soft_limit_to99 = <0>;                              /** optional                             */
+//            ddr_voltage   = <1500000>;                          /** default voltage for DDR, optional    */
+//            vddao_voltage = <1200000>;                          /** default voltage for AO, optional     */
+//            status = "disable";                                 /** status of pmu, only one should be OK */
+//        };
 //$$ DEVICE = "Pmu_rn5t618"
 //$$ L2 PROP_STR = "sub_type"
 //$$ L2 PROP_STR = "i2c_bus"
@@ -781,7 +900,7 @@ sdio{
 		bootloader:bootloader{
 			name = "bootloader";
 			offset = <0>;
-			size = <0x60000>;
+			size = <0x100000>;
 		};
 
 //$$ MATCH "Spi_nr-part-1_match" = <&ubootenv>
@@ -933,31 +1052,31 @@ sdio{
 
     aml_audio_codec{
         compatible = "amlogic,audio_codec";
-        rt5616:rt5616{
-            codec_name = "rt5616";
-            i2c_addr = <0x1B>;
-            i2c_bus = "i2c_bus_d";
-            id_reg = <0x00>;
-            id_val = <0x21>;
-            capless = <0>;
-            status = "okay";
-        };
-        rt5631:rt5631{
-            codec_name = "rt5631";
-            i2c_addr = <0x1A>;
-            i2c_bus = "i2c_bus_b";
-            id_reg = <0x00>;
-            id_val = <0x01>;
-            capless = <0>;
-            status = "disable";      
-        };  
-        wm8960:wm8960{
-            codec_name = "wm8960";
-            i2c_addr = <0x1A>;
-            i2c_bus = "i2c_bus_b";
-            capless = <1>;
-	    status = "disable";
-        };
+//        rt5616:rt5616{
+//            codec_name = "rt5616";
+//            i2c_addr = <0x1B>;
+//            i2c_bus = "i2c_bus_d";
+//            id_reg = <0x00>;
+//            id_val = <0x21>;
+//            capless = <0>;
+//            status = "okay";
+//        };
+//        rt5631:rt5631{
+//            codec_name = "rt5631";
+//            i2c_addr = <0x1A>;
+//            i2c_bus = "i2c_bus_b";
+//            id_reg = <0x00>;
+//            id_val = <0x01>;
+//            capless = <0>;
+//            status = "disable";      
+//        };  
+//        wm8960:wm8960{
+//            codec_name = "wm8960";
+//            i2c_addr = <0x1A>;
+//            i2c_bus = "i2c_bus_b";
+//            capless = <1>;
+//	    status = "disable";
+//        };
     };
 
 //$$ DEVICE="aml_m8_sound_card"
@@ -1066,10 +1185,11 @@ sdio{
 		status = "ok";
 
 		/*efuse-version = <0>;*/ /*m6 efuse version 2,m3 efuse version 1, not config efuse version in default*/
-		unifykey-num = <3>;
+		unifykey-num = <4>;
 		unifykey-index-0 = <&keysn_0>;
 		unifykey-index-1 = <&keysn_1>;
 		unifykey-index-2 = <&keysn_2>;
+		unifykey-index-3 = <&keysn_3>;
 
 
 //$$ MATCH "Unifykey_0_match" = <&keysn_0>
@@ -1078,9 +1198,9 @@ sdio{
 //$$ L2 PROP_STR = "key-dataformat"
 //$$ L2 PROP_STR 3 = "key-permit"
 		keysn_0: key_0{
-			key-name = "key0";
+			key-name = "usid";
 			key-device = "nandkey";
-			key-dataformat = "hexdata";
+			key-dataformat = "allascii";
 			key-permit = "read","write","del";
 		};
 		
@@ -1090,9 +1210,9 @@ sdio{
 //$$ L2 PROP_STR = "key-dataformat"
 //$$ L2 PROP_STR 3 = "key-permit"
 		keysn_1:key_1{
-			key-name = "key1";
+			key-name = "mac";
 			key-device = "nandkey";
-			key-dataformat = "hexdata";
+			key-dataformat = "hexascii";
 			key-permit = "read","write","del";
 		};
 		
@@ -1102,10 +1222,22 @@ sdio{
 //$$ L2 PROP_STR = "key-dataformat"
 //$$ L2 PROP_STR 3 = "key-permit"
 		keysn_2:key_2{
-			key-name = "key2";
+			key-name = "hdcp";
 			key-device = "nandkey";
 			key-dataformat = "hexdata";
 			key-permit = "read","write","del";
+		};
+
+//$$ MATCH "Unifykey_3_match" = <&keysn_3>
+//$$ L2 PROP_STR = "key-name"
+//$$ L2 PROP_STR = "key-device"
+//$$ L2 PROP_STR = "key-dataformat"
+//$$ L2 PROP_STR 3 = "key-permit"
+		keysn_3:key_3{
+			key-name = "secure_boot_set";
+			key-device = "efusekey";
+			key-dataformat = "hexdata";
+			key-permit = "read","write";
 		};
 	};
 	
@@ -1407,6 +1539,69 @@ sdio{
             amlogic,pullupen=<1>;
         };
 
+//        sdhc_sd_clk_cmd_pins:sdhc_sd_clk_cmd_pins{
+//            amlogic,setmask=<2 0x00000030>;         /*sdhc b*/
+//            amlogic,clrmask=<5 0x00007c00           /*sdhc a*/
+//                                4 0x7c000000        /*sdhc c*/
+//                                2 0x0000fc00        /*sdio b*/
+//                                8 0x00000600>;      /*UART*/
+//            amlogic,pins = "CARD_2","CARD_3"; /* CARD_2:CLK, CARD_3:CMD */
+//            amlogic,enable-output=<1>; /* 0:output, 1:input */
+//            amlogic,pullup=<1>;
+//            amlogic,pullupen=<1>;
+//        };
+//        sdhc_sd_all_pins:sdhc_sd_all_pins{
+//            amlogic,setmask=<2 0x000000f0>;         /*sdhc b*/
+//            amlogic,clrmask=<5 0x00007c00           /*sdhc a*/
+//                                4 0x7c000000        /*sdhc c*/
+//                                2 0x0000fc00        /*sdio b*/
+//                                8 0x00000600>;      /*UART*/
+//            amlogic,pins="CARD_0","CARD_1","CARD_2","CARD_3","CARD_4","CARD_5";
+//            amlogic,enable-output=<1>; /* 0:output, 1:input */
+//            amlogic,pullup=<1>;
+//            amlogic,pullupen=<1>;
+//        };
+//        sdhc_emmc_clk_cmd_pins:sdhc_emmc_clk_cmd_pins{
+//            amlogic,setmask=<4 0x0c000000>;         /*bit[26-27] */
+//            amlogic,clrmask=<2 0x04c000f0           /*sdhc b & nand*/
+//                                5 0x00007c00        /*sdhc a*/
+//                                6 0x3f000000>;        /*sdio c*/
+//            amlogic,pins = "BOOT_16","BOOT_17"; /** BOOT_16:CMD, BOOT_17:CLK */
+//            amlogic,enable-output=<1>; /** 0:output, 1:input */
+//            amlogic,pullup=<1>;
+//            amlogic,pullupen=<1>;
+//        };
+//        sdhc_emmc_all_pins:sdhc_emmc_all_pins{
+//            amlogic,setmask=<4 0x7c000000>;         /*sdhc c*/
+//            amlogic,clrmask=<2 0x04c000f0           /*sdhc b & nand*/
+//                                5 0x00007c00        /*sdhc a*/
+//                                6 0x3f000000>;        /*sdio c*/
+//            amlogic,pins = "BOOT_0","BOOT_1","BOOT_2","BOOT_3","BOOT_4","BOOT_5","BOOT_6","BOOT_7","BOOT_16","BOOT_17";
+//            amlogic,enable-output=<1>; /** 0:output, 1:input */
+//            amlogic,pullup=<1>;
+//            amlogic,pullupen=<1>;
+//        };
+//        sdhc_sdio_clk_cmd_pins:sdhc_sdio_clk_cmd_pins{
+//            amlogic,setmask=<5 0x00000c00>;         /*sdhc a bit[10-11] */
+//            amlogic,clrmask=<2 0x058000f0           /*sdhc b*/
+//                                4 0x7c000000        /*sdhc c */
+//                                8 0x0000003f>;        /*sdio a*/
+//            amlogic,pins = "GPIOX_8","GPIOX_9"; /** BOOT_16:CMD, BOOT_17:CLK */
+//            amlogic,enable-output=<1>; /** 0:output, 1:input */
+//            amlogic,pullup=<1>;
+//            amlogic,pullupen=<1>;
+//        };
+//        sdhc_sdio_all_pins:sdhc_sdio_all_pins{
+//            amlogic,setmask=<5 0x00006c00>;         /*sdhc a*/
+//            amlogic,clrmask=<2 0x058000f0           /*sdhc b*/
+//                                4 0x7c000000        /*sdhc c */
+//                                8 0x0000003f>;        /*sdio a*/
+//            amlogic,pins = "GPIOX_0","GPIOX_1","GPIOX_2","GPIOX_3","GPIOX_8","GPIOX_9";
+//            amlogic,enable-output=<1>; /** 0:output, 1:input */
+//            amlogic,pullup=<1>;
+//            amlogic,pullupen=<1>;
+//        };
+
 //$$ MATCH "I2C_AO_pin_match" = "&ao_i2c_master"
 //$$ L2 PROP_U32 2 = "amlogic,setmask"
 //$$ L2 PROP_U32 2 = "amlogic,clrmask"
@@ -1460,10 +1655,10 @@ sdio{
 //$$ MATCH "I2C_D_pin_match" = "&d_i2c_master"
 //$$ L2 PROP_U32 2 = "amlogic,setmask"
 //$$ L2 PROP_STR 2 = "amlogic,pins"
-		d_i2c_master:d_i2c{
-			amlogic,setmask=<4 0xc>;
-			amlogic,pins="GPIOH_7","GPIOH_8";
-		};
+//		d_i2c_master:d_i2c{
+//			amlogic,setmask=<4 0xc>;
+//			amlogic,pins="GPIOH_7","GPIOH_8";
+//		};
 
 //$$ MATCH "remote_pin_0_match" = "&remote_pins"
 //$$ L2 PROP_U32 2 = "amlogic,setmask"
@@ -1499,6 +1694,42 @@ sdio{
 			amlogic,pins = "BOOT_11","BOOT_12","BOOT_13","BOOT_18";
 		};
 
+//$$ MATCH "dvb_p_ts0_pins_match" = "&dvb_p_ts0_pins"
+//$$ L2 PROP_U32 2 = "amlogic,setmask"
+//$$ L2 PROP_U32 8 = "amlogic,clrmask"
+//$$ L2 PROP_STR 12 = "amlogic,pins"
+		dvb_p_ts0_pins: dvb_p_ts0_pins {
+			amlogic,setmask = <3 0x3F>;
+			amlogic,clrmask = <1 0xCCE41
+								4 0x2000000
+								7 0x20000000
+								9 0x431F>;
+			amlogic,pins = "GPIOY_9","GPIOY_10","GPIOY_11","GPIOY_12","GPIOY_13","GPIOY_14","GPIOY_15","GPIOY_16","GPIOY_0","GPIOY_1","GPIOY_4","GPIOY_8";
+		};
+
+//$$ MATCH "dvb_s_ts0_pins_match" = "&dvb_s_ts0_pins"
+//$$ L2 PROP_U32 2 = "amlogic,setmask"
+//$$ L2 PROP_U32 6 = "amlogic,clrmask"
+//$$ L2 PROP_STR 5 = "amlogic,pins"
+		dvb_s_ts0_pins: dvb_s_ts0_pins {
+			amlogic,setmask = <3 0x1F>;
+			amlogic,clrmask = <1 0xCCE41
+								4 0x2000000
+								9 0x310>;
+			amlogic,pins = "GPIOY_9","GPIOY_0","GPIOY_1","GPIOY_4","GPIOY_8";
+		};
+
+//$$ MATCH "dvb_fe_pins_match" = "&dvb_fe_pins"
+//$$ L2 PROP_U32 8 = "amlogic,clrmask"
+//$$ L2 PROP_STR 1 = "amlogic,pins"
+		dvb_fe_pins: dvb_fe_pins {
+			amlogic,clrmask = <1 0x38
+								3 0x18000
+								4 0x1800000
+								9 0xC0>;
+			amlogic,pins = "GPIOY_5","GPIOY_6";
+		};
+
 	};
 /// ***************************************************************************************
 ///	-	Ethernet
@@ -1511,6 +1742,54 @@ sdio{
 		status = "okay";
 		ethbaseaddr = <0xfe0c0000>;
 		interruptnum = <40>;
+	};
+
+/// ***************************************************************************************
+///	-	DVB
+//$$ MODULE="DVB"
+
+//$$ DEVICE="dvb"
+//$$ L2 PROP_STR = "ts0"
+//$$ L2 PROP_U32 = "ts0_invert"
+//$$ L2 PROP_U32 = "ts0_control"
+//$$ L2 PROP_STR 6 = "pinctrl-names"
+//$$ L2 PROP_CHOICE "dvb_p_ts0_pins_match" = "pinctrl-0"
+//$$ L2 PROP_CHOICE "dvb_s_ts0_pins_match" = "pinctrl-1"
+	dvb{
+		compatible = "amlogic,dvb";
+		/*"parallel","serial","disable"*/
+		ts0 = "parallel";
+		ts0_control = <0>;
+		ts0_invert = <0>;
+		pinctrl-names = "p_ts0", "s_ts0";
+		pinctrl-0 = <&dvb_p_ts0_pins>;
+		pinctrl-1 = <&dvb_s_ts0_pins>;
+	};
+
+//$$ DEVICE="dvbfe"
+//$$ L2 PROP_STR = "dtv_demod0"
+//$$ L2 PROP_U32 = "dtv_demod0_i2c_adap_id"
+//$$ L2 PROP_U32 = "dtv_demod0_i2c_addr"
+//$$ L2 PROP_U32 = "dtv_demod0_reset_value"
+//$$ L2 PROP_STR = "dtv_demod0_reset_gpio"
+//$$ L2 PROP_U32 = "fe0_dtv_demod"
+//$$ L2 PROP_U32 = "fe0_ts"
+//$$ L2 PROP_U32 = "fe0_dev"
+//$$ L2 PROP_STR 6 = "pinctrl-names"
+//$$ L2 PROP_CHOICE "dvb_fe_pins_match" = "pinctrl-0"
+
+	dvbfe{
+		compatible = "amlogic,dvbfe";
+		dtv_demod0 = "Avl6211";
+		dtv_demod0_i2c_adap_id = <2>;
+		dtv_demod0_i2c_addr = <0xC0>;
+		dtv_demod0_reset_value = <0>;
+		dtv_demod0_reset_gpio = "GPIOY_5";
+		fe0_dtv_demod = <0>;
+		fe0_ts = <0>;
+		fe0_dev = <0>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&dvb_fe_pins>;
 	};
 
 }; /* end of / */

@@ -115,7 +115,7 @@ void root_func(){
 		reserve-iomap = "true";
 	  vmode = <0>; /*0:VMODE_720P 1:VMODE_LCD  2:VMODE_LVDS_1080P 3:VMODE_1080P*/
 	  scale_mode = <0>; /*0:default 1:new*/
-	  display_size_default = <1280 720 1280 1440 32>;  // osd0:8M, osd1:1m  1280*720*4*3 = 11,059,200
+	  display_size_default = <1280 720 1280 2160 32>;  // osd0:8M, osd1:1m  1280*720*4*3 = 11,059,200
 	};
 //$$ DEVICE="deinterlace"
 //$$ L2 PROP_STR = "status"
@@ -487,23 +487,22 @@ void root_func(){
             dvfs_table  = <
                 /* NOTE: frequent in this table must be ascending order */
                 /* frequent(Khz)    min_uV      max_uV                  */
-                 200000             1080000     1080000
-                 600000             1080000     1080000
-                 792000             1080000     1080000
-                 816000             1150000     1150000
-                 840000             1150000     1150000
-                 984000             1150000     1150000
-                1000000             1150000     1150000
-                1080000             1250000     1250000
-                1200000             1270000     1270000
-                1320000             1340000     1340000
-                1500000             1340000     1340000
+                 200000             1010000     1010000
+                 600000             1010000     1010000
+                 792000             1010000     1010000
+                 816000             1110000     1110000
+                 840000             1110000     1110000
+                 984000             1110000     1110000
+                1000000             1110000     1110000
+                1080000             1220000     1220000
+                1200000             1240000     1240000
+                1320000             1320000     1320000
+                1500000             1320000     1320000
             >;
 	};
     };
 //$$ DEVICE="meson_vcck_dvfs_driver"
 //$$ L2 PROP_STR = "status"
-//$$ L2 PROP_U32 = "default_uV"
 //$$ L2 PROP_STR = "pinctrl-names"
 //$$ L2 PROP_CHOICE "meson_vcck_dvfs_pin_0_match" = "pinctrl-0"
 //$$ L2 PROP_U32 = "use_pwm"
@@ -513,7 +512,6 @@ void root_func(){
         compatible = "amlogic, meson_vcck_dvfs";
         dev_name = "meson_vcck_dvfs_driver";
         status = "ok";
-        default_uV = <1280000>;
         pinctrl-names = "default";
         pinctrl-0 = <&aml_pwm_pins>;
         use_pwm = <1>; 
@@ -674,13 +672,13 @@ void root_func(){
 	adc_keypad{
 		compatible = "amlogic,adc_keypad";
 		status = "okay";
-		key_num = <5>;
+		key_num = <6>;
 		name_len = <20>;
-		key_name = "menu","vol-","vol+","back","home";
-		key_code = <139 114 115 158 102>;
-		key_chan = <4 4 4 4 4>;
-		key_val = <9 275 150 392 513>;
-		key_tolerance = <40 40 40 40 40>;
+		key_name = "menu","vol-","vol+","back","home","ok";
+		key_code = <139 114 115 158 102 232>;
+		key_chan = <4 4 4 4 4 4>;
+		key_val = <9 150 275 392 513 639>;
+		key_tolerance = <40 40 40 40 40 40>;
 	};
 //$$ DEVICE="key_input"
 //$$ L2 PROP_STR = "status"

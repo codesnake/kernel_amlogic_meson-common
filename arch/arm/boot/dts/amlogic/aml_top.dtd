@@ -295,6 +295,8 @@ sub_file /drivers/amlogic/usb/aml.dtd
 //$$ MODULE="LCD"
 #device backlight
 sub_file /drivers/amlogic/display/backlight/aml.dtd
+#device backlight_extern
+sub_file /drivers/amlogic/display/backlight/aml_bl_extern/aml.dtd
 #device lcd
 sub_file /drivers/amlogic/display/vout/aml_lcd.dtd
 #device lcd_extern

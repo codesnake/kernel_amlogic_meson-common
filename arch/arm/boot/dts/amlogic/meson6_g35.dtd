@@ -37,7 +37,7 @@ void root_func(){
         cpu@1 {
             device_type = "cpu";
             compatible = "arm,cortex-a9";
-            reg = <0x1>;
+            reg = <0x1>; 
         };
     };
 /// ***************************************************************************************
@@ -115,7 +115,7 @@ void root_func(){
 		reserve-iomap = "true";
 	  vmode = <0>; /*0:VMODE_720P 1:VMODE_LCD  2:VMODE_LVDS_1080P 3:VMODE_1080P*/
 	  scale_mode = <0>; /*0:default 1:new*/
-	  display_size_default = <1280 720 1280 1440 32>;  // osd0:8M, osd1:1m  1280*720*4*3 = 11,059,200
+	  display_size_default = <1280 720 1280 2160 32>;  // osd0:8M, osd1:1m  1280*720*4*3 = 11,059,200
 	};
 //$$ DEVICE="deinterlace"
 //$$ L2 PROP_STR = "status"
@@ -181,6 +181,7 @@ void root_func(){
 		compatible = "amlogic,mesonvout";
 		dev_name = "mesonvout";
 		status = "okay";
+		power_level = <1>;							//  0: normal;  1: power save mode for g35
 	};
 
 /// ***************************************************************************************
@@ -520,12 +521,12 @@ void root_func(){
                 /* NOTE: frequent in this table must be ascending order */
                 /* frequent(Khz)    min_uV      max_uV                  */
                  200000             1010000     1010000
-                 600000             1010000     1010000
-                 792000             1010000     1010000
-                 816000             1110000     1110000
+                 720000             1010000     1010000
+                 792000             1060000     1060000
+                 816000             1060000     1060000
                  840000             1110000     1110000
                  984000             1110000     1110000
-                1000000             1110000     1110000
+                1000000             1160000     1160000
                 1080000             1210000     1210000
                 1200000             1210000     1210000
                 1320000             1350000     1350000
@@ -535,7 +536,6 @@ void root_func(){
     };
 //$$ DEVICE="meson_vcck_dvfs_driver"
 //$$ L2 PROP_STR = "status"
-//$$ L2 PROP_U32 = "default_uV"
 //$$ L2 PROP_STR = "pinctrl-names"
 //$$ L2 PROP_CHOICE "meson_vcck_dvfs_pin_0_match" = "pinctrl-0"
 //$$ L2 PROP_U32 = "use_pwm"
@@ -545,12 +545,11 @@ void root_func(){
         compatible = "amlogic, meson_vcck_dvfs";
         dev_name = "meson_vcck_dvfs_driver";
         status = "ok";
-        default_uV = <1210000>;
         pinctrl-names = "default";
         pinctrl-0 = <&aml_pwm_pins>;
         use_pwm = <1>; 
         pmw_controller = "PWM_C";
-        table_count = <4>;
+        table_count = <6>;
         cs_voltage_table = <
         /*   
          * Note: This table is hardware depended, If your hardware use PWM method,
@@ -564,7 +563,9 @@ void root_func(){
          *  PWM value       VCCK voltage 
          */   
             0x140008        1010000
+            0x11000b        1060000
             0x0e000e        1110000
+            0x0b0011        1160000
             0x080014        1210000
             0x060016        1350000
         >;   
@@ -678,10 +679,10 @@ void root_func(){
 //$$ MODULE="Input"
 //$$ DEVICE="saradc"
 //$$ L2 PROP_STR = "status"
-	saradc{
-		compatible = "amlogic,saradc";
-		status = "okay";
-	};
+//	saradc{
+//		compatible = "amlogic,saradc";
+//		status = "okay";
+//	};
 //$$ DEVICE="adc_keypad"
 //$$ L2 PROP_STR = "status"
 //$$ L2 PROP_STR 5 = "key_name"
@@ -691,17 +692,17 @@ void root_func(){
 //$$ L2 PROP_U32 5 = "key_chan"
 //$$ L2 PROP_U32 5 = "key_val"
 //$$ L2 PROP_U32 5 = "key_tolerance"
-	adc_keypad{
-		compatible = "amlogic,adc_keypad";
-		status = "okay";
-		key_num = <5>;
-		name_len = <20>;
-		key_name = "menu","vol-","vol+","back","home";
-		key_code = <139 114 115 158 102>;
-		key_chan = <4 4 4 4 4>;
-		key_val = <9 275 150 392 513>;
-		key_tolerance = <40 40 40 40 40>;
-	};
+//	adc_keypad{
+//		compatible = "amlogic,adc_keypad";
+//		status = "okay";
+//		key_num = <5>;
+//		name_len = <20>;
+//		key_name = "menu","vol-","vol+","back","home";
+//		key_code = <139 114 115 158 102>;
+//		key_chan = <4 4 4 4 4>;
+//		key_val = <9 275 150 392 513>;
+//		key_tolerance = <40 40 40 40 40>;
+//	};
 //$$ DEVICE="key_input"
 //$$ L2 PROP_STR = "status"
 //$$ L2 PROP_U32 = "scan_period"
@@ -709,15 +710,15 @@ void root_func(){
 //$$ L2 PROP_U32 = "key_code_list"
 //$$ L2 PROP_U32 = "key_num"
 //$$ L2 PROP_U32 = "config"
-	key_input{
-		compatible = "amlogic,key_input";
-		status = "okay";
-		scan_period = <20>;
-		fuzz_time = <60>;
-		key_code_list = <116>;
-		key_num = <1>;
-		config = <0>;
-	};
+//	key_input{
+//		compatible = "amlogic,key_input";
+//		status = "okay";
+//		scan_period = <20>;
+//		fuzz_time = <60>;
+//		key_code_list = <116>;
+//		key_num = <1>;
+//		config = <0>;
+//	};
 //$$ DEVICE="aml_remote"
 //$$ L2 PROP_STR = "status"
 //$$ L2 PROP_U32 = "ao_baseaddr"
@@ -826,45 +827,9 @@ void root_func(){
 			t_rea = <20>;
 			t_rhoh = <15>;
 			chip_num = <2>;
-			part_num = <8>;
-			partition = <&nand_partitions>;
 			rb_detect = <1>;
 		};
 				
-		nand_partitions:nand_partition{
-			logo{
-				offset=<0x0 0x4800000>;
-				size=<0x0 0x800000>;
-			};
-			aml_logo{
-				offset=<0x0 0x5800000>;
-				size=<0x0 0x800000>;
-			};
-			recovery{
-				offset=<0x0 0x6800000>;
-				size=<0x0 0x800000>;
-			};
-			boot{
-				offset=<0x0 0x8800000>;
-				size=<0x0 0x800000>;
-			};
-			system{
-				offset=<0x0 0xa800000>;
-				size=<0x0 0x40000000>;
-			};
-			cache{
-				offset=<0x0 0x4a800000>;
-				size=<0x0 0x20000000>;
-			};
-			backup{
-				offset=<0x0 0x6a800000>;
-				size=<0x0 0x10000000>;
-			};
-			userdata{
-				offset=<0xffffffff 0xffffffff>;
-				size=<0x0 0x0>;
-			};
-		};
 	};	
 
 /// ***************************************************************************************
@@ -913,8 +878,8 @@ void root_func(){
         vend_data: vend_data{
             vendor_name = "Amlogic";           /* Max Chars: 8     */
             vendor_id = <0x000000>;                 /* Refer to http://standards.ieee.org/develop/regauth/oui/oui.txt   */
-            product_desc = "MX MBox G18Ref";        /* Max Chars: 16    */
-            cec_osd_string = "Amlogic MBox";        /* Max Chars: 14    */
+            product_desc = "MX Dongle G35Ref";        /* Max Chars: 16    */
+            cec_osd_string = "Amlogic Dongle";        /* Max Chars: 14    */
         };
         
 //$$ MATCH "HDMI_pwr-ctrl_match" = <&pwr_ctrl>
@@ -931,6 +896,7 @@ void root_func(){
             pwr_3v3_off = "";
             pwr_hpll_vdd_on = "";
             pwr_hpll_vdd_off = "";
+            pwr_level = <1>;				//  0: normal;  1: power save mode for g35
         };
 	};
 	
@@ -1225,81 +1191,6 @@ void root_func(){
 							3 0x1000000>;
 			amlogic,clrmask=<9 0x380c4e>;
 			amlogic,pins = "GPIOE_1","GPIOE_2","GPIOE_3","GPIOE_4","GPIOC_9";
-		};
-//$$ MATCH "Bl_pin_0_match" = "&lcd_backlight_pins"
-//$$ L2 PROP_U32 2 = "amlogic,setmask"
-//$$ L2 PROP_U32 2 = "amlogic,clrmask"
-//$$ L2 PROP_STR = "amlogic,pins"	
-		lcd_backlight_pins:lcd_backlight{
-			amlogic,setmask=<2 0x8>;
-			amlogic,clrmask=<1 0x10000000>;
-			amlogic,pins = "GPIOD_1";
-		};
-		lcd_ttl_hvsync_pins_on:lcd_ttl_hvsync_on{
-			amlogic,setmask=<1 0xc0000>;
-			amlogic,clrmask=<0 0xc00000>;
-			amlogic,pins = "GPIOD_2","GPIOD_3";
-		};
-		lcd_ttl_hvsync_pins_off:lcd_ttl_hvsync_off{
-			amlogic,clrmask=<0 0xc00000 1 0xc0000>;
-			amlogic,pins = "GPIOD_2","GPIOD_3";
-			amlogic,enable-output=<1>;
-		};
-		lcd_ttl_de_pins_on:lcd_ttl_de_on{
-			amlogic,setmask=<1 0x20000>;
-			amlogic,clrmask=<0 0x1000000>;
-			amlogic,pins = "GPIOD_4";
-		};
-		lcd_ttl_de_pins_off:lcd_ttl_de_off{
-			amlogic,clrmask=<0 0x1000000 1 0x20000>;
-			amlogic,pins = "GPIOD_4";
-			amlogic,enable-output=<1>;
-		};
-		lcd_ttl_clk_pins_on:lcd_ttl_clk_on{
-			amlogic,setmask=<1 0x4000>;
-			amlogic,clrmask=<0 0x8000000  1 0x3800>;
-			amlogic,pins = "GPIOD_7";
-		};
-		lcd_ttl_clk_pins_off:lcd_ttl_clk_off{
-			amlogic,clrmask=<0 0x8000000  1 0x7800>;
-			amlogic,pins = "GPIOD_7";
-			amlogic,enable-output=<1>;
-		};
-		lcd_ttl_rgb_8bit_pins_on:lcd_ttl_rgb_8bit_on{
-			amlogic,setmask=<0 0x3f>;
-			amlogic,clrmask=<5 0xff8000>;
-			amlogic,pins = "GPIOB_0","GPIOB_1","GPIOB_2","GPIOB_3","GPIOB_4","GPIOB_5","GPIOB_6","GPIOB_7",		//R0~R7
-						"GPIOB_8","GPIOB_9","GPIOB_10","GPIOB_11","GPIOB_12","GPIOB_13","GPIOB_14","GPIOB_15",	//G0~G7
-						"GPIOB_16","GPIOB_17","GPIOB_18","GPIOB_19","GPIOB_20","GPIOB_21","GPIOB_22","GPIOB_23";//B0~B7
-		};
-		lcd_ttl_rgb_8bit_pins_off:lcd_ttl_rgb_8bit_off{
-			amlogic,clrmask=<0 0x3f 5 0xff8000>;
-			amlogic,pins = "GPIOB_0","GPIOB_1","GPIOB_2","GPIOB_3","GPIOB_4","GPIOB_5","GPIOB_6","GPIOB_7",		//R0~R7
-						"GPIOB_8","GPIOB_9","GPIOB_10","GPIOB_11","GPIOB_12","GPIOB_13","GPIOB_14","GPIOB_15",	//G0~G7
-						"GPIOB_16","GPIOB_17","GPIOB_18","GPIOB_19","GPIOB_20","GPIOB_21","GPIOB_22","GPIOB_23";//B0~B7
-			amlogic,enable-output=<1>;
-		};
-		lcd_ttl_rgb_6bit_pins_on:lcd_ttl_rgb_6bit_on{
-			amlogic,setmask=<0 0x15>;
-			amlogic,clrmask=<5 0xf98000>;
-			amlogic,pins = "GPIOB_2","GPIOB_3","GPIOB_4","GPIOB_5","GPIOB_6","GPIOB_7",		//R2~R7
-						"GPIOB_10","GPIOB_11","GPIOB_12","GPIOB_13","GPIOB_14","GPIOB_15",	//G2~G7
-						"GPIOB_18","GPIOB_19","GPIOB_20","GPIOB_21","GPIOB_22","GPIOB_23";	//B2~B7
-		};
-		lcd_ttl_rgb_6bit_pins_off:lcd_ttl_rgb_6bit_off{
-			amlogic,clrmask=<0 0x15 5 0xf98000>;
-			amlogic,pins = "GPIOB_2","GPIOB_3","GPIOB_4","GPIOB_5","GPIOB_6","GPIOB_7",		//R2~R7
-						"GPIOB_10","GPIOB_11","GPIOB_12","GPIOB_13","GPIOB_14","GPIOB_15",	//G2~G7
-						"GPIOB_18","GPIOB_19","GPIOB_20","GPIOB_21","GPIOB_22","GPIOB_23";	//B2~B7
-			amlogic,enable-output=<1>;
-		};
-		
-//$$ MATCH "Camera_pin_match" = "&aml_cam_pins"
-//$$ L2 PROP_U32 2 = "amlogic,setmask"
-//$$ L2 PROP_STR = "amlogic,pins"
-		aml_cam_pins: aml_cam_pins{
-			amlogic,setmask=<9 0x1000>;
-			amlogic,pins = "GPIOZ_12";
 		};
 
 //$$ MATCH "Spi_pin_0_match" = "&aml_spi_nor_pins"

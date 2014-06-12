@@ -849,7 +849,7 @@ sdio{
 		
 		/* backlight power ctrl */
 		bl_power_on_delay=<100>; /** delay time before backlight power on(unit: ms) */
-		bl_ctrl_method=<3>;	/** backlight control method(0=gpio, 1=pwm_negative, 2=pwm_positive, 3=pwm_combo. decided by hardware design) */
+		bl_ctrl_method=<3>;	/** backlight control method(0=gpio, 1=pwm_negative, 2=pwm_positive, 3=pwm_combo. 4=extern. decided by hardware design) */
 		
 		bl_gpio_port="GPIODV_28";	/** backlight control gpio port */
 		bl_gpio_dim_max_min=<0x0 0xf>;	/** brightness diming level_max, level_min : (0x0~0xf, negative logic, only for gpio control method) */
@@ -864,6 +864,46 @@ sdio{
 		bl_pwm_combo_high_freq_duty_max_min=<300000 96 89>;	/** backlight pwm_combo level_high port frequency(unit: Hz), duty_max, duty_min : (unit: %, positive logic) */
 		bl_pwm_combo_low_freq_duty_max_min=<10000 100 10>;	/** backlight pwm_combo level_low port frequency(unit: Hz), duty_max, duty_min : (unit: %, positive logic) */
 	};
+
+//******************************************************************************
+//bl extern
+//Notice: only one dev support
+//******************************************************************************
+//$$ DEVICE = "bl_extern_pmu_aml1218"
+//$$ L2 PROP_STR = "status"
+//$$ L2 PROP_STR 2 = "gpio_enable"
+//$$ L2 PROP_U32 = "type"
+//$$ L2 PROP_U32 2 = "dim_max_min"
+	bl_extern_pmu_aml1218{
+		compatible = "amlogic,bl_pmu_aml1218";
+		dev_name ="bl_pmu_aml1218";
+		status = "disabled"; /** "disabled" or "okay" */
+
+		gpio_enable = "GPIODV_28"; /** "n" for none */
+		type = <2>;	/** bl_extern_driver type: 0=i2c, 1=spi, 2=other */
+		dim_max_min = <0x1 0x1b>;
+	};
+
+//$$ DEVICE = "bl_extern_i2c_lp8556"
+//$$ L2 PROP_STR = "status"
+//$$ L2 PROP_STR 2 = "gpio_enable"
+//$$ L2 PROP_U32 = "type"
+//$$ L2 PROP_STR = "i2c_bus"
+//$$ L2 PROP_U32 2 = "dim_max_min"
+	bl_extern_i2c_lp8556{
+		compatible = "amlogic,bl_i2c_lp8556";
+		dev_name ="bl_i2c_lp8556";
+		status = "disabled"; /** "disabled" or "okay" */
+
+		gpio_enable = "GPIODV_28"; /** "n" for none */
+		type = <0>;	/** bl_extern_driver type: 0=i2c, 1=spi, 2=other */
+		i2c_address = <0x2c>; /** 7bit i2c address */
+		i2c_bus = "i2c_bus_b";
+		dim_max_min = <255 10>;
+	};
+
+//******************************************************************************
+
 //$$ DEVICE="lcd"
 //$$ L2 PROP_STR = "status"
 
@@ -947,9 +987,7 @@ sdio{
  		lcd_bits_user=<6>;	/** user defined lcd bits(6 or 8, decided by hardware design; only valid when lcd_bits_option=1) */
 
 		/* below configs are decided by hardware design, you can modify them if needed. */
-		//ttl config
 		ttl_rb_bit_swap=<0 0>;	/** ttl rb_swap, bit_swap : (0=normal, 1=swap) */
-		//lvds config
 		lvds_channel_pn_swap=<0>;	/** lvds channel pn swap(0=normal, 1=swap) */
 
 		/* recommend settings, you can modify them if needed. */
@@ -1057,7 +1095,8 @@ sdio{
 //$$ L2 PROP_U32 2 = "pol_hsync_vsync"
 //$$ L2 PROP_U32 = "dsi_lane_num"
 //$$ L2 PROP_U32 2 = "dsi_bit_rate_min_max"
-//$$ L2 PROP_U32 2 = "dsi_sleep_out_display_on_delay"
+//$$ L2 PROP_U32 12 = "dsi_init_on"
+//$$ L2 PROP_U32 12 = "dsi_init_off"
 	lcd_B080XAN01:lcd_B080XAN01{	//k101
 		model_name="B080XAN01";	/** lcd model name */
 		interface="mipi";		/** lcd_interface(mipi, lvds, edp, ttl) */
@@ -1072,9 +1111,18 @@ sdio{
 		vsync_width_backporch=<50 80>;	/** vsync_width, vsync_backporch(include vsync_width) */
 		pol_hsync_vsync=<0 0>;	/** hsync_polarity, vsync_polarity : (0=negative, 1=positive) */
 
-        dsi_lane_num=<4>;/** mipi dsi data lane number */
-        dsi_bit_rate_min_max=<500 600>;/** range of mipi dsi data lane bit rate(unit: MHz) */
-        dsi_sleep_out_display_on_delay=<20 20>; /** mipi dsi basic delay: (unit: ms) */
+		dsi_lane_num=<4>;/** mipi dsi data lane number */
+		dsi_bit_rate_min_max=<500 600>;/** range of mipi dsi data lane bit rate(unit: MHz) */
+		dsi_init_on=<0x05 0x11 0 //sleep out
+					0xff 20      //delay 20ms
+					0x05 0x29 0  //display on
+					0xff 20      //delay 20ms
+					0xff 0xff>;/** mipi command(data_type, command, para_num, parameters). 0xff,0xff is ending flag. 0xff,n(n<0xff) means delay n(unit: ms) */
+		dsi_init_off=<0x05 0x28 0 //display off
+					0xff 10       //delay 10ms
+					0x05 0x10 0   //sleep in
+					0xff 10       //delay 10ms
+					0xff 0xff>;/** mipi command(data_type, command, para_num, parameters). 0xff,0xff is ending flag. 0xff,n(n<0xff) means delay n(unit: ms) */
 	};
 
 //$$ MATCH "lcd_model_config_match" = <&lcd_CLAP070NJ02>
@@ -1167,45 +1215,87 @@ sdio{
 //$$ L2 PROP_U32 2 = "vsync_width_backporch"
 //$$ L2 PROP_U32 2 = "pol_hsync_vsync"
 //$$ L2 PROP_U32 = "dsi_lane_num"
-//$$ L2 PROP_U32 = "pclk_lanebyteclk_factor"
 //$$ L2 PROP_U32 2 = "dsi_bit_rate_min_max"
+//$$ L2 PROP_U32 = "pclk_lanebyteclk_factor"
+//$$ L2 PROP_U32 2 = "dsi_transfer_ctrl"
+//$$ L2 PROP_U32 12 = "dsi_init_on"
+//$$ L2 PROP_U32 12 = "dsi_init_off"
 //	lcd_CLAA101FP05XG:lcd_CLAA101FP05XG{
 //		model_name="CLAA101FP05XG";	/** lcd model name */
 //		interface="mipi";		/** lcd_interface(mipi, lvds, edp, ttl) */
 //		active_area=<216 135>;		/** lcd active_area or display_area horizontal size, vertical size : (unit in mm, you can find them on the home page of lcd spec) */
-//		lcd_bits_option=<8 1>;		/** lcd_bits(6,8), bits_option(0=only support one mode as lcd_bits define, 1=both support 6/8bit) */
+//		lcd_bits_option=<8 0>;		/** lcd_bits(6,8), bits_option(0=only support one mode as lcd_bits define, 1=both support 6/8bit) */
 
 //		resolution=<1920 1200>;	/** horizontal resolution, vertical resolution */
 //		period=<2080 1235>;		/** horizontal period(htotal), vertical period(vtotal) */
 
 //		clock_hz_pol=<154128000 0>;	/** clock_hz(unit in Hz, both support clk and frame_rate, >200 regard as clk, <200 regard as frame_rate), clk_pol(only valid for TTL) */
-//		hsync_width_backporch=<32 80>;	/** hsync_width, hsync_backporch(include hsync_width) */
+//		hsync_width_backporch=<32 112>;	/** hsync_width, hsync_backporch(include hsync_width) */
 //		vsync_width_backporch=<6 26>;	/** vsync_width, vsync_backporch(include vsync_width) */
 //		pol_hsync_vsync=<0 0>;	/** hsync_polarity, vsync_polarity : (0=negative, 1=positive) */
 
-//        dsi_lane_num=<4>;/** mipi dsi data lane number */
-//        dsi_bit_rate_min_max=<900 1000>;/** range of mipi dsi data lane bit rate(unit: MHz) */
-//        pclk_lanebyteclk_factor =<15>;/** special adjust, default is 0 */
+//		dsi_lane_num=<4>;/** mipi dsi data lane number */
+//		dsi_bit_rate_min_max=<900 1000>;/** range of mipi dsi data lane bit rate(unit: MHz) */
+//		pclk_lanebyteclk_factor =<15>;/** special adjust, default is 0 */
+//		dsi_transfer_ctrl=<1 0>; /** clk_lane auto stop in LP mode: (0=disable, 1=enable), transfer switch between LP and HS: (0=auto, 1=standard, 2=slow). default is <0 0> */
+//		dsi_init_on=<0x05 0x11 0 //sleep out
+//				0xff 100     //delay 100ms
+//				0x05 0x29 0  //display on
+//				0xff 100     //delay 100ms
+//				0xff 0xff>;  /** mipi command(data_type, command, para_num, parameters). 0xff,0xff is ending flag. 0xff,n(n<0xff) means delay n(unit: ms) */
+//		dsi_init_off=<0x05 0x28 0 //display off
+//				0xff 10       //delay 10ms
+//				0x05 0x10 0   //sleep in
+//				0xff 10       //delay 10ms
+//				0xff 0xff>;   /** mipi command(data_type, command, para_num, parameters). 0xff,0xff is ending flag. 0xff,n(n<0xff) means delay n(unit: ms) */
 //	};
 
-//$$ DEVICE="lcd_extern"
+//******************************************************************************
+//lcd extern
+//Notice: only one dev support
+//******************************************************************************
+//$$ DEVICE = "lcd_extern_i2c_tc101"
 //$$ L2 PROP_STR = "status"
-	lcd_extern{
-		compatible = "amlogic,lcd_extern";
+//$$ L2 PROP_U32 = "type"
+//$$ L2 PROP_STR = "i2c_bus"
+	lcd_extern_i2c_tc101{
+		compatible = "amlogic,lcd_i2c_tc101";
+		dev_name ="lcd_i2c_tc101";
 		status = "disabled";
 
-//$$ DEVICE = "lcd_extern_tc101"
-//$$ L2 PROP_STR = "i2c_bus"
-//$$ L2 PROP_U32 = "reg"
-//$$ L2 PROP_STR = "status"
-		lcd_extern_tc101{
-			dev_name ="lcd_tc101";
-			type = <0>;	/** lcd_extern_driver type: 0=i2c, 1=spi */
-			address = <0x7e>;
-			i2c_bus = "i2c_bus_a";
-			status = "disabled";
-		};
+		type = <0>;	/** lcd_extern_driver type: 0=i2c, 1=spi, 2=mipi */
+		i2c_address = <0x7e>; /** i2c address */
+		i2c_bus = "i2c_bus_a";
 	};
+
+//$$ DEVICE = "lcd_extern_spi_LD070WS2"
+//$$ L2 PROP_STR = "status"
+//$$ L2 PROP_U32 = "type"
+//$$ L2 PROP_U32 = "gpio_spi_cs"
+//$$ L2 PROP_U32 = "gpio_spi_clk"
+//$$ L2 PROP_U32 = "gpio_spi_data"
+	lcd_extern_spi_LD070WS2{
+		compatible = "amlogic,lcd_spi_LD070WS2";
+		dev_name ="lcd_spi_LD070WS2";
+		status = "disabled";
+
+		type = <1>;	/** lcd_extern_driver type: 0=i2c, 1=spi, 2=mipi */
+		gpio_spi_cs="GPIODV_1";
+		gpio_spi_clk="GPIODV_16";
+		gpio_spi_data="GPIODV_17";
+	};
+
+//$$ DEVICE = "lcd_extern_mipi_N070ICN"
+//$$ L2 PROP_STR = "status"
+//$$ L2 PROP_U32 = "type"
+	lcd_extern_mipi_N070ICN{
+		compatible = "amlogic,lcd_mipi_N070ICN";
+		dev_name ="lcd_mipi_N070ICN";
+		status = "disabled";
+
+		type = <2>;	/** lcd_extern_driver type: 0=i2c, 1=spi, 2=mipi */
+	};
+
 /// ***************************************************************************************
 ///     -       Sensors
 //$$ MODULE="Sensors"
@@ -1394,6 +1484,7 @@ sdio{
             "MICBIAS","MAIN MIC",
             "LINPUT1","MICBIAS";
         mute_gpio = "GPIOY_15";
+        sleep_time = <50>;
         I2S_MCLK = "GPIOAO_8";
         I2S_SCLK = "GPIOAO_9";
         I2S_LRCLK = "GPIOAO_10";
