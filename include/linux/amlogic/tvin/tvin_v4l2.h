@@ -695,10 +695,16 @@ typedef enum vdin_cmd_e {
 	VDIN_CMD_SET_CSC,
 	VDIN_CMD_SET_CM2,
 	VDIN_CMD_ISR,
+	VDIN_CMD_MPEGIN_START,
+	VDIN_CMD_GET_HISTGRAM,
+	VDIN_CMD_MPEGIN_STOP,
+	VDIN_CMD_FORCE_GO_FIELD,
 } vdin_cmd_t;
 
 typedef struct vdin_arg_s {
 	vdin_cmd_t cmd;
+	unsigned int h_active;
+	unsigned int v_active;
 	unsigned char matrix_id;
 	vdin_format_convert_t color_convert;
 	unsigned int *cm2;
