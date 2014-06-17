@@ -32,6 +32,7 @@ typedef struct{
 	struct device* dev;
 	BUF hw;
 	BUF sw;
+	BUF sw_read;
 	int type;
 	
 	/********** for debug ****************/
@@ -47,13 +48,13 @@ static int amaudio_mmap(struct file*file, struct vm_area_struct* vms);
 static long amaudio_ioctl(struct file *file, unsigned int cmd, unsigned long arg);
 
 static long amaudio_utils_ioctl(struct file *file, unsigned int cmd, unsigned long arg);
-                  
-extern unsigned int aml_i2s_playback_start_addr;	
-extern unsigned int aml_i2s_playback_end_addr;
-extern unsigned int aml_pcm_playback_phy_start_addr;
-extern unsigned int aml_pcm_playback_phy_end_addr;
 
-                      
+static ssize_t amaudio_read(struct file *file, char __user *buf, size_t count, loff_t * pos);
+
+extern unsigned int aml_i2s_playback_start_addr;	
+extern unsigned int aml_i2s_playback_phy_start_addr;
+extern unsigned int aml_i2s_alsa_write_addr;
+	
 #define AMAUDIO_IOC_MAGIC  'A'                      
 
 #define AMAUDIO_IOC_GET_SIZE			_IOW(AMAUDIO_IOC_MAGIC, 0x00, int)       
@@ -64,5 +65,9 @@ extern unsigned int aml_pcm_playback_phy_end_addr;
 #define AMAUDIO_IOC_MIC_LEFT_GAIN		_IOW(AMAUDIO_IOC_MAGIC, 0x05, int)
 #define AMAUDIO_IOC_MIC_RIGHT_GAIN		_IOW(AMAUDIO_IOC_MAGIC, 0x06, int)
 #define AMAUDIO_IOC_MUSIC_GAIN			_IOW(AMAUDIO_IOC_MAGIC, 0x07, int)
+#define AMAUDIO_IOC_GET_PTR_READ		_IOW(AMAUDIO_IOC_MAGIC, 0x08, int)
+#define AMAUDIO_IOC_UPDATE_APP_PTR_READ	_IOW(AMAUDIO_IOC_MAGIC, 0x09, int)
+#define AMAUDIO_IOC_OUT_READ_ENABLE		_IOW(AMAUDIO_IOC_MAGIC, 0x0a, int)
+
 
 

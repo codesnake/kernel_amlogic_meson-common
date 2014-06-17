@@ -41,7 +41,8 @@ const static struct file_operations amaudio_out_fops = {
   .owner    =   THIS_MODULE,
   .open     =   amaudio_open,
   .release  =   amaudio_release,
-	.mmap			= 	amaudio_mmap,
+  .mmap     = 	amaudio_mmap,
+  .read     =   amaudio_read,
   .unlocked_ioctl    =   amaudio_ioctl,
 };
 
@@ -49,7 +50,7 @@ const static struct file_operations amaudio_in_fops = {
   .owner    =   THIS_MODULE,
   .open     =   amaudio_open,
   .release  =   amaudio_release,
-  .mmap			= 	amaudio_mmap,
+  .mmap	    = 	amaudio_mmap,
   .unlocked_ioctl    =   amaudio_ioctl,
 };
 
@@ -58,7 +59,8 @@ const static struct file_operations amaudio_ctl_fops = {
   .open     =   amaudio_open,
   .release  =   amaudio_release,
   .unlocked_ioctl    =   amaudio_ioctl,
-};  
+};
+
 const static struct file_operations amaudio_utils_fops = {
   .owner    =   THIS_MODULE,
   .open     =   amaudio_open,
@@ -95,11 +97,16 @@ static int direct_left_gain = 128;
 static int direct_right_gain = 128;
 static int music_gain = 128;
 static int audio_out_mode = 0;
+static int audio_out_read_enable = 0;
 
 static irqreturn_t i2s_out_callback(int irq, void* data);
 static unsigned get_i2s_out_size(void);
 static unsigned get_i2s_out_ptr(void);
-static unsigned latency = 0;
+
+#define SOFT_BUFFER_SIZE (PAGE_SIZE*16)
+#define MAX_LATENCY (64*32*3)
+#define MIN_LATENCY (64*32)
+static unsigned latency = MIN_LATENCY*2; //20ms
 
 static u64 amaudio_pcm_dmamask = DMA_BIT_MASK(32);
 #define HRTIMER_PERIOD (1000000000UL/1000)
@@ -117,19 +124,28 @@ static int amaudio_open(struct inode *inode, struct file *file)
   	if(!this->dev->coherent_dma_mask)
   		this->dev->coherent_dma_mask = 0xffffffff;
   		
-  	amaudio->sw.addr = (char*)dma_alloc_coherent(this->dev, PAGE_SIZE*16, &amaudio->sw.paddr, GFP_KERNEL);
-  	amaudio->sw.size = PAGE_SIZE*16;
+  	amaudio->sw.addr = (char*)dma_alloc_coherent(this->dev, SOFT_BUFFER_SIZE, &amaudio->sw.paddr, GFP_KERNEL);
+  	amaudio->sw.size = SOFT_BUFFER_SIZE;
   	if(!amaudio->sw.addr){
   		res = -ENOMEM;
+		printk(KERN_ERR "amaudio2 out soft DMA buffer alloc failed\n");
   		goto error;
   	}
+
+	amaudio->sw_read.addr = (char*)kzalloc((SOFT_BUFFER_SIZE), GFP_KERNEL);
+	if(amaudio->sw_read.addr == 0){
+		res = -ENOMEM;
+		printk(KERN_ERR "amaudio2 out read soft buffer alloc failed\n");
+		goto error;
+	}
+	amaudio->sw_read.size = SOFT_BUFFER_SIZE;
 	
   	amaudio->hw.addr = (char*)aml_i2s_playback_start_addr;
-  	amaudio->hw.paddr = aml_pcm_playback_phy_start_addr;
+  	amaudio->hw.paddr = aml_i2s_playback_phy_start_addr;
   	amaudio->hw.size = get_i2s_out_size();
   	amaudio->hw.rd = get_i2s_out_ptr();
 		
-	//printk(" amaudio->sw.addr=%08x,amaudio->sw.paddr=%08x \n amaudio->hw.addr=%08x,amaudio->hw.paddr=%08x\n",
+	//printk(KERN_DEBUG "amaudio->sw.addr=%08x,amaudio->sw.paddr=%08x \n amaudio->hw.addr=%08x,amaudio->hw.paddr=%08x\n",
 	//(unsigned int)amaudio->sw.addr,amaudio->sw.paddr,(unsigned int)amaudio->hw.addr,amaudio->hw.paddr);
 	
   	WRITE_MPEG_REG_BITS(AIU_MEM_I2S_MASKS,0, 16, 16);
@@ -139,6 +155,7 @@ static int amaudio_open(struct inode *inode, struct file *file)
   	}
   	spin_lock_init(&amaudio->sw.lock);
   	spin_lock_init(&amaudio->hw.lock);
+	spin_lock_init(&amaudio->sw_read.lock);
   	
   }else if(iminor(inode) == 1){
   	printk(KERN_DEBUG "amaudio2_in opened\n");
@@ -174,17 +191,21 @@ static int amaudio_release(struct inode *inode, struct file *file)
 	
 	amaudio_t * amaudio = (amaudio_t *)file->private_data;
 	
-	spin_lock_irqsave(&amaudio->hw.lock,irqflags);
+	//spin_lock_irqsave(&amaudio->hw.lock,irqflags);
 
 	free_irq(INT_AMRISC_DC_PCMLAST, amaudio);
 
-	spin_unlock_irqrestore(&amaudio->hw.lock,irqflags);
+	//spin_unlock_irqrestore(&amaudio->hw.lock,irqflags);
 	
 	if(amaudio->sw.addr){
 		dma_free_coherent(amaudio->dev, amaudio->sw.size, (void*)amaudio->sw.addr, amaudio->sw.paddr);
 		amaudio->sw.addr = 0;
 	}
-	
+
+	if(amaudio->sw_read.addr){
+		kfree(amaudio->sw_read.addr);
+		amaudio->sw_read.addr = 0;
+	}
 	kfree(amaudio);
 	return 0;
 }
@@ -195,9 +216,25 @@ static int amaudio_mmap(struct file*file, struct vm_area_struct* vma)
 	if(amaudio->type == 0){
 		int mmap_flag = dma_mmap_coherent(amaudio->dev, vma, (void*)amaudio->sw.addr, 
 													amaudio->sw.paddr, amaudio->sw.size);
-		//printk(" amaudio->sw.addr=%08x,amaudio->sw.paddr=%08x, mmap_flag = %08x \n",
+		//printk(KERN_DEBUG " amaudio->sw.addr=%08x,amaudio->sw.paddr=%08x, mmap_flag = %08x \n",
 		//						(unsigned int)amaudio->sw.addr,amaudio->sw.paddr,mmap_flag);
 		return mmap_flag;
+	}else if(amaudio->type == 1){
+		
+	}else{
+		return -ENODEV;
+	}
+	return 0;
+}
+
+static ssize_t amaudio_read(struct file *file, char __user *buf, size_t count, loff_t * pos){
+
+	int ret = 0;
+	amaudio_t * amaudio = (amaudio_t *)file->private_data;
+	BUF* sw_read = &amaudio->sw_read;
+	if(amaudio->type == 0){
+		ret = copy_to_user((void*)buf, (void*)(sw_read->addr+sw_read->rd), count);
+		return (count - ret);
 	}else if(amaudio->type == 1){
 		
 	}else{
@@ -216,91 +253,192 @@ static unsigned get_i2s_out_ptr(void)
 	return READ_MPEG_REG(AIU_MEM_I2S_RD_PTR) - READ_MPEG_REG(AIU_MEM_I2S_START_PTR);
 }
 
-void cover_memcpy(BUF*hw, BUF*sw, int a, int b, unsigned c)
+void cover_memcpy(BUF *des, int a, BUF *src, int b, unsigned count)
 {
 	int i=0;
-	char* pa,*pb;
-	pa = hw->addr+a;
-	pb = sw->addr+b;
-	for(i=0;i<c;i++){
-		pa[i] = pb[i];
+	char *in,*out;
+	out = des->addr + a;
+	in = src->addr + b;
+	for(i = 0; i < count; i++){
+		out[i] = in[i];
 	}
 }
 
-void mix_memcpy(BUF*hw, BUF*sw, int a, int b, unsigned c)
+void direct_mix_memcpy(BUF *des, int a, BUF *src, int b, unsigned count)
+{
+	int i,j;
+	short sampL,sampR;
+	int samp;
+	
+	short *des_left = (short*)(des->addr + a);
+	short *des_right = des_left + 16;
+	short *src_left = (short*)(src->addr + b);
+	short *src_right = src_left + 16;
+
+	for(i = 0; i < count; i += 64){
+		for(j = 0; j < 16; j ++){
+			sampL = *src_left++;
+			sampR = *src_right++;
+			
+			samp = (((*des_left)*music_gain) + sampL*direct_left_gain)>>8;
+			if(samp > 0x7fff) samp = 0x7fff;
+			if(samp < -0x8000) samp = -0x8000;
+			*des_left++ = (short)(samp&0xffff);
+
+			samp = (((*des_right)*music_gain) + sampR*direct_right_gain)>>8;
+			if(samp > 0x7fff) samp = 0x7fff;
+			if(samp < -0x8000) samp = -0x8000;
+			*des_right++ = (short)(samp&0xffff);
+		}
+		src_left += 16;
+		src_right += 16;
+		des_left += 16;
+		des_right += 16;
+	}
+}
+
+void inter_mix_memcpy(BUF *des, int a, BUF *src, int b, unsigned count)
 {
 	int i,j;
 	short sampL,sampR;
 	int samp, sampLR;
 	
-	short *des_left = (short*)(hw->addr+a);
+	short *des_left = (short*)(des->addr+a);
 	short *des_right = des_left + 16;
-	short *src_left = (short*)(sw->addr+b);
+	short *src_left = (short*)(src->addr+b);
 	short *src_right = src_left + 16;
-	
-    for(i = 0; i < c; i += 64){
-      for(j = 0; j < 16; j ++){ 
-          sampL = *src_left++;
-          sampR = *src_right++;
-		  
-		  //Here has risk to distortion. Linein signals are always weak, so add them direct.
-          sampLR = sampL * direct_left_gain + sampR * direct_right_gain;
-          samp = (((*des_left)*music_gain) + sampLR)>>8;
-		  
-          if(samp > 0x7fff) samp = 0x7fff;
-          if(samp < -0x8000) samp = -0x8000;
-          *des_left++ = (short)(samp&0xffff);
 
-          samp = (((*des_right)*music_gain) + sampLR)>>8;
-          if(samp > 0x7fff) samp = 0x7fff;
-          if(samp < -0x8000) samp = -0x8000;
-          *des_right++ = (short)(samp&0xffff);
-      }
-      src_left += 16;
-      src_right += 16;
-	  des_left += 16;
-	  des_right += 16;
-    }
+	for(i = 0; i < count; i += 64){
+		for(j = 0; j < 16; j ++){
+			sampL = *src_left++;
+			sampR = *src_right++;
+
+			//Here has risk to distortion. Linein signals are always weak, so add them direct.
+			sampLR = sampL*direct_left_gain + sampR*direct_right_gain;
+			samp = (((*des_left)*music_gain) + sampLR)>>8;
+			if(samp > 0x7fff) samp = 0x7fff;
+			if(samp < -0x8000) samp = -0x8000;
+			*des_left++ = (short)(samp&0xffff);
+
+			samp = (((*des_right)*music_gain) + sampLR)>>8;
+			if(samp > 0x7fff) samp = 0x7fff;
+			if(samp < -0x8000) samp = -0x8000;
+			*des_right++ = (short)(samp&0xffff);
+		}
+		src_left += 16;
+		src_right += 16;
+		des_left += 16;
+		des_right += 16;
+	}
+}
+
+void interleave_memcpy(BUF *des, int a, BUF *src, int b, unsigned count)
+{
+	int i,j;
+	short *out = (short*)(des->addr + a);
+	short *in_left = (short*)(src->addr + b);
+	short *in_right = in_left + 16;
+	
+	for(i = 0; i < count; i += 64){
+		for(j = 0; j < 16; j ++){
+			*out++ = *in_left++;
+			*out++ = *in_right++;
+		}
+		in_left += 16;
+		in_right += 16;
+	}
 }
 
 #define INT_NUM		(16)	//min 2, max 32
 #define I2S_BLOCK	(64)
 #define INT_BLOCK ((INT_NUM)*(I2S_BLOCK))
 
+//#define AMAUDIO2_DEBUG
+#ifdef AMAUDIO2_DEBUG
+static int counter = 0;
+#endif
 static void i2s_copy(amaudio_t* amaudio)
 {
 	BUF* hw = &amaudio->hw;
 	BUF* sw = &amaudio->sw;
+	BUF* sw_read = &amaudio->sw_read;
 	unsigned valid_data;
-	unsigned long irqflags;
+	unsigned long swirqflags, hwirqflags, sw_readirqflags;
+	unsigned i2s_out_ptr = get_i2s_out_ptr();
+	unsigned alsa_delay = (aml_i2s_alsa_write_addr + hw->size - i2s_out_ptr)%hw->size;
+	unsigned amaudio_delay = (hw->wr + hw->size - i2s_out_ptr)%hw->size;
 	
+	spin_lock_irqsave(&hw->lock,hwirqflags);
+	hw->rd = (int)i2s_out_ptr;
+	hw->level -= INT_BLOCK;
 	if(hw->level <= INT_BLOCK){
 		hw->wr = ((hw->rd+latency)%hw->size);
 		hw->wr /= INT_BLOCK;
 		hw->wr *= INT_BLOCK;
 		hw->level = latency;
+		goto EXIT;
 	}
-	valid_data = sw->level&~0x3f;
-	if(valid_data < INT_BLOCK) {
-		return;
+
+	if((alsa_delay - amaudio_delay) <= INT_BLOCK){
+		//printk(KERN_DEBUG "Reset hw pointer: alsa_delay:%x, amaudio_delay:%x, latency = %x\n",
+		//	alsa_delay,amaudio_delay,latency);
+		goto EXIT;
 	}
 	
+#ifdef AMAUDIO2_DEBUG
+	if(counter >= 500){
+		//printk(KERN_DEBUG "alsa_delay:%x, amaudio_delay:%x, hw->level = %x\n",
+		//	alsa_delay,amaudio_delay,hw->level);
+		printk(KERN_DEBUG "sw->level = %x\n",sw->level);
+		counter = 0;
+	}
+	counter++;
+#endif
+
+	if(audio_out_mode != 3){
+		valid_data = sw->level&~0x3f;
+		if(valid_data < INT_BLOCK) {
+			goto EXIT;
+		}
+	}
+	
+	if(audio_out_read_enable == 1){
+		valid_data = sw_read->level&~0x3f;
+		if(valid_data < INT_BLOCK) {
+			goto EXIT;
+		}
+	}
+
 	BUG_ON((hw->wr+INT_BLOCK>hw->size)||(sw->rd+INT_BLOCK>sw->size));
 	BUG_ON((hw->wr<0)||(sw->rd<0));
 
 	if(audio_out_mode == 0){
-		cover_memcpy(hw,sw,hw->wr,sw->rd,INT_BLOCK);
-	}else{
-		mix_memcpy(hw,sw,hw->wr,sw->rd,INT_BLOCK);
+		cover_memcpy(hw,hw->wr,sw,sw->rd,INT_BLOCK);
+	}else if(audio_out_mode == 1){
+		inter_mix_memcpy(hw,hw->wr,sw,sw->rd,INT_BLOCK);
+	}else if(audio_out_mode == 2){
+		direct_mix_memcpy(hw,hw->wr,sw,sw->rd,INT_BLOCK);
+	}
+
+	if(audio_out_read_enable == 1){
+		interleave_memcpy(sw_read,sw_read->wr,hw,hw->wr,INT_BLOCK);
+		spin_lock_irqsave(&sw_read->lock,sw_readirqflags);
+		sw_read->wr = (sw_read->wr + INT_BLOCK)%sw_read->size;
+		sw_read->level -= INT_BLOCK;
+		spin_unlock_irqrestore(&sw_read->lock,sw_readirqflags);
 	}
 	
 	hw->wr = (hw->wr + INT_BLOCK)%hw->size;
 	hw->level += INT_BLOCK;
 	
-	spin_lock_irqsave(&sw->lock,irqflags);
+	spin_lock_irqsave(&sw->lock,swirqflags);
 	sw->rd = (sw->rd + INT_BLOCK)%sw->size;
 	sw->level -= INT_BLOCK;
-	spin_unlock_irqrestore(&sw->lock,irqflags);
+	spin_unlock_irqrestore(&sw->lock,swirqflags);
+	
+EXIT:
+	spin_unlock_irqrestore(&hw->lock,hwirqflags);
+	return;
 }
 
 static irqreturn_t i2s_out_callback(int irq, void* data)
@@ -308,32 +446,16 @@ static irqreturn_t i2s_out_callback(int irq, void* data)
 	amaudio_t* amaudio = (amaudio_t*)data;
 	BUF* hw = &amaudio->hw;
 	unsigned tmp;
-	unsigned last_rd = hw->rd;
-	unsigned long irqflags;
-	
-	spin_lock_irqsave(&hw->lock,irqflags);
-	hw->rd = get_i2s_out_ptr();
-	
-	tmp = (hw->rd - last_rd + hw->size) % hw->size;
-	if(tmp > 2*INT_BLOCK){
-		printk("timeout 2: [%d:%d]\n", last_rd, hw->rd);
-	}else if(tmp > INT_BLOCK + (INT_BLOCK >> 1)){
-		printk("timeout 1: [%d:%d]\n", last_rd, hw->rd);
-	}
-	
-	hw->level -= INT_BLOCK;	//1ms = 48*4
-	if(hw->level < 0) hw->level = 0;
-	
+
 	//printk("irq: hw: rd=%d, wr=%d,level=%d\n", hw->rd, hw->wr, hw->level);
 	tmp = READ_MPEG_REG_BITS(AIU_MEM_I2S_MASKS, 16, 16);
   	//printk("rd=%d, tmp=%d\n", hw->rd, tmp);
-  	tmp = (tmp + INT_NUM + (amaudio->hw.size>>6)) % (amaudio->hw.size>>6);
+  	tmp = (tmp + INT_NUM + (hw->size>>6)) % (hw->size>>6);
   	WRITE_MPEG_REG_BITS(AIU_MEM_I2S_MASKS, tmp, 16, 16);
 	
   	i2s_copy(amaudio);
-  	spin_unlock_irqrestore(&hw->lock,irqflags);
-	
-  return IRQ_HANDLED;
+  	
+  	return IRQ_HANDLED;
 }
 
 //------------------------control interface-----------------------------------------
@@ -342,7 +464,7 @@ static long amaudio_ioctl(struct file *file,unsigned int cmd, unsigned long arg)
 {
 	amaudio_t * amaudio = (amaudio_t *)file->private_data;
 	s32 r = 0;
-	unsigned long swirqflags, hwirqflags;
+	unsigned long swirqflags, hwirqflags, sw_readirqflags;
 	switch(cmd){
 		case AMAUDIO_IOC_GET_SIZE:		
 			// total size of internal buffer
@@ -363,7 +485,7 @@ static long amaudio_ioctl(struct file *file,unsigned int cmd, unsigned long arg)
 				amaudio->sw.level += (amaudio->sw.size + amaudio->sw.wr - last_wr)%amaudio->sw.size;
 				spin_unlock_irqrestore(&amaudio->sw.lock, swirqflags);
 				if(amaudio->sw.wr % 64){
-					printk("wr:%x, not 64 Bytes align\n", amaudio->sw.wr);
+					printk(KERN_WARNING "wr:%x, not 64 Bytes align\n", amaudio->sw.wr);
 				}
 			}
 			break;
@@ -371,7 +493,13 @@ static long amaudio_ioctl(struct file *file,unsigned int cmd, unsigned long arg)
 			// reset the internal write buffer pointer to get a given latency
 			// this api should be called before fill datas
 			spin_lock_irqsave(&amaudio->hw.lock, hwirqflags);
-			latency = arg;
+			/*
+			latency = arg;    //now can't allow user to set latency.
+			if(latency < MIN_LATENCY)  latency = MIN_LATENCY;
+			if(latency > MAX_LATENCY)  latency = MAX_LATENCY;
+			if(latency%64)  latency = (latency >> 6) << 6;
+			*/
+			
 			amaudio->hw.rd = -1;
 			amaudio->hw.wr = -1;
 			amaudio->hw.level = 0;
@@ -382,12 +510,21 @@ static long amaudio_ioctl(struct file *file,unsigned int cmd, unsigned long arg)
 			amaudio->sw.rd = 0;
 			amaudio->sw.level = 0;
 			spin_unlock_irqrestore(&amaudio->sw.lock, swirqflags);
+			// empty the out read buffer
+			spin_lock_irqsave(&amaudio->sw_read.lock, sw_readirqflags);
+			amaudio->sw_read.wr = 0;
+			amaudio->sw_read.rd = 0;
+			amaudio->sw_read.level = 0;
+			spin_unlock_irqrestore(&amaudio->sw_read.lock, sw_readirqflags);
 			
-			printk(KERN_INFO "reset: latency=%d \n", latency);
+			printk(KERN_INFO "Reset amaudio2: latency=%d bytes\n", latency);
 			break;
 		case AMAUDIO_IOC_AUDIO_OUT_MODE:
-			// audio_out_mode = 0, TV mode; audio_out_mode = 1 karaOK mode
-			if(arg < 0 || arg > 1){
+			// audio_out_mode = 0, covered alsa audio mode; 
+			// audio_out_mode = 1, karaOK mode, Linein left and right channel inter mixed with android alsa audio;
+			// audio_out_mode = 2, TV in direct mix with android audio; 
+			// audio_out_mode = 3, don't copy data to Hardware buffer 
+			if(arg < 0 || arg > 3){
               return -EINVAL;
             }
             audio_out_mode = arg;
@@ -397,20 +534,47 @@ static long amaudio_ioctl(struct file *file,unsigned int cmd, unsigned long arg)
 			if(arg < 0 || arg > 256){
               return -EINVAL;
             }
-            direct_left_gain= arg;
+            direct_left_gain = arg;
 			break;
 		case AMAUDIO_IOC_MIC_RIGHT_GAIN:
 			if(arg < 0 || arg > 256){
               return -EINVAL;
             }
-            direct_right_gain= arg;
+            direct_right_gain = arg;
 			break;
 		case AMAUDIO_IOC_MUSIC_GAIN:
 			//music volume can be set from 0-256
 			if(arg < 0 || arg > 256){
               return -EINVAL;
             }
-            music_gain= arg;
+            music_gain = arg;
+			break;
+		case AMAUDIO_IOC_GET_PTR_READ:
+			// the write pointer of internal read buffer
+			spin_lock_irqsave(&amaudio->sw_read.lock, sw_readirqflags);
+			r = amaudio->sw_read.wr;
+			spin_unlock_irqrestore(&amaudio->sw_read.lock, sw_readirqflags);
+			break;	
+		case AMAUDIO_IOC_UPDATE_APP_PTR_READ:
+			// the user space read pointer of the read buffer
+			{
+				unsigned int last_rd = amaudio->sw_read.rd;
+				spin_lock_irqsave(&amaudio->sw_read.lock, sw_readirqflags);
+				amaudio->sw_read.rd = arg;
+				amaudio->sw_read.level += (amaudio->sw_read.size + amaudio->sw_read.rd - last_rd)
+															%amaudio->sw_read.size;
+				spin_unlock_irqrestore(&amaudio->sw_read.lock, sw_readirqflags);
+				if(amaudio->sw_read.rd % 64){
+					printk(KERN_WARNING "rd:%x, not 64 Bytes align\n", amaudio->sw_read.rd);
+				}
+			}
+			break;
+		case AMAUDIO_IOC_OUT_READ_ENABLE:
+			//enable amaudio output read from hw buffer
+			if(arg != 0 && arg != 1){
+              return -EINVAL;
+            }
+            audio_out_read_enable = arg;
 			break;
 		default:
 			break;
@@ -464,11 +628,17 @@ static ssize_t store_audio_out_mode(struct class* class, struct class_attribute*
    const char* buf, size_t count )
 {
 	if(buf[0] == '0'){
+		printk(KERN_INFO "Audio_in data covered the android local data as output!\n");
 		audio_out_mode = 0;
-		printk("Audio_in data covered the android local data as output!\n");
 	}else if(buf[0] == '1'){
-		printk("Audio_in data mixed with the android local data as output!\n");
+		printk(KERN_INFO "Audio_in left/right channels and the android local data inter mixed as output!\n");
 		audio_out_mode = 1;
+	}else if(buf[0] == '2'){
+		printk(KERN_INFO "Audio_in data direct mixed with the android local data as output!\n");
+		audio_out_mode = 2;
+	}else if(buf[0] == '3'){
+		printk(KERN_INFO "Audio_in don't copy data to hardware buffer!\n");
+		audio_out_mode = 3;
 	}
 	return count;
 }
@@ -490,7 +660,7 @@ static ssize_t store_direct_left_gain(struct class* class, struct class_attribut
   	if(val > 256) val = 256;
 
   	direct_left_gain = val;
-  	printk("direct_left_gain set to 0x%x\n", direct_left_gain);
+  	printk(KERN_INFO "direct_left_gain set to 0x%x\n", direct_left_gain);
   	return count;
 }
 
@@ -511,7 +681,7 @@ static ssize_t store_direct_right_gain(struct class* class, struct class_attribu
   	if(val > 256) val = 256;
 
   	direct_right_gain = val;
-  	printk("direct_right_gain set to 0x%x\n", direct_right_gain);
+  	printk(KERN_INFO "direct_right_gain set to 0x%x\n", direct_right_gain);
   	return count;
 }
 
@@ -532,7 +702,28 @@ static ssize_t store_music_gain(struct class* class, struct class_attribute* att
   	if(val > 256) val = 256;
 
   	music_gain = val;
-  	printk("music_gain set to 0x%x\n", music_gain);
+  	printk(KERN_INFO "music_gain set to 0x%x\n", music_gain);
+  	return count;
+}
+
+static ssize_t show_audio_read_enable(struct class* class, struct class_attribute* attr,
+    char* buf)
+{
+	return sprintf(buf, "%d\n", audio_out_read_enable);
+}
+
+static ssize_t store_audio_read_enable(struct class* class, struct class_attribute* attr,
+   const char* buf, size_t count )
+{
+	if(buf[0] == '0'){
+		printk(KERN_INFO "Read audio data is disable!\n");
+		audio_out_read_enable = 0;
+	}else if(buf[0] == '1'){
+		printk(KERN_INFO "Read audio data is enable!\n");
+		audio_out_read_enable = 1;
+	}else{
+		printk(KERN_INFO "Invalid argument!\n");
+	}
   	return count;
 }
 
@@ -541,6 +732,7 @@ static struct class_attribute amaudio_attrs[]={
 	__ATTR(aml_direct_left_gain,  S_IRUGO | S_IWUSR, show_direct_left_gain, store_direct_left_gain),
 	__ATTR(aml_direct_right_gain,  S_IRUGO | S_IWUSR, show_direct_right_gain, store_direct_right_gain),
 	__ATTR(aml_music_gain,  S_IRUGO | S_IWUSR, show_music_gain, store_music_gain),
+	__ATTR(aml_audio_read_enable,  S_IRUGO | S_IWUSR, show_audio_read_enable, store_audio_read_enable),
 	__ATTR_RO(status),
 	__ATTR_NULL
 };
