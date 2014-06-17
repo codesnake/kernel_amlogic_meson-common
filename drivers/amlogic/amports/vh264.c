@@ -38,6 +38,9 @@
 #include <asm/atomic.h>
 #include <plat/io.h>
 #include <linux/module.h>
+#include <linux/slab.h>
+#include "amports_priv.h"
+
 
 #include "vdec.h"
 #include "vdec_reg.h"
@@ -48,7 +51,7 @@
 #define MODULE_NAME "amvdec_h264"
 
 #define HANDLE_H264_IRQ
-#define DEBUG_PTS
+//#define DEBUG_PTS
 #define DROP_B_FRAME_FOR_1080P_50_60FPS
 
 #define RATE_MEASURE_NUM 8
@@ -73,15 +76,15 @@ static DEFINE_MUTEX(vh264_mutex);
 #define DEFAULT_MEM_SIZE        (32*1024*1024)
 #define AVIL_DPB_BUFF_SIZE      0x01ec2000
 
-#define DEF_BUF_START_ADDR            0x81000000
-#define DEF_BUF_START_BASE            (0x81000000 + buf_offset)
-#define MEM_HEADER_CPU_BASE           (0x81110000 + buf_offset)
-#define MEM_DATA_CPU_BASE             (0x81111000 + buf_offset)
-#define MEM_MMCO_CPU_BASE             (0x81112000 + buf_offset)
-#define MEM_LIST_CPU_BASE             (0x81113000 + buf_offset)
-#define MEM_SLICE_CPU_BASE            (0x81114000 + buf_offset)
+
+#define DEF_BUF_START_ADDR            0x1000000
+#define MEM_HEADER_CPU_OFFSET         (0x110000)
+#define MEM_DATA_CPU_OFFSET           (0x111000)
+#define MEM_MMCO_CPU_OFFSET           (0x112000)
+#define MEM_LIST_CPU_OFFSET           (0x113000)
+#define MEM_SLICE_CPU_OFFSET          (0x114000)
 #define MEM_SWAP_SIZE                 (0x5000*4)
-#define V_BUF_ADDR_START              0x8113e000
+#define V_BUF_ADDR_OFFSET             (0x13e000)
 
 #define PIC_SINGLE_FRAME        0
 #define PIC_TOP_BOT_TOP         1
@@ -168,6 +171,7 @@ static struct timer_list recycle_timer;
 static u32 stat;
 static u32 buf_start, buf_size;
 static s32 buf_offset;
+static u32 ucode_map_start;
 static u32 pts_outside = 0;
 static u32 sync_outside = 0;
 static u32 dec_control = 0;
@@ -214,6 +218,7 @@ static uint ucode_type = 0;
 #ifdef DEBUG_PTS
 static unsigned long pts_missed, pts_hit;
 #endif
+static uint debugfirmware=0;
 
 static atomic_t vh264_active = ATOMIC_INIT(0);
 static struct work_struct error_wd_work;
@@ -567,15 +572,21 @@ static void vh264_set_params(void)
     if (max_dpb_size > 5) {
         if (actual_dpb_size < max_dpb_size + 3) {
             actual_dpb_size = max_dpb_size + 3;
+        if (actual_dpb_size > 24) {    
+            actual_dpb_size = 24;
+        }            
             max_reference_size = (frame_buffer_size - mb_total * 384 * actual_dpb_size) / (mb_total * mb_mv_byte);
         }
     } else {
         if (actual_dpb_size < max_dpb_size + 4) {
             actual_dpb_size = max_dpb_size + 4;
+        if (actual_dpb_size > 24) {
+            actual_dpb_size = 24;
+        }            
             max_reference_size = (frame_buffer_size - mb_total * 384 * actual_dpb_size) / (mb_total * mb_mv_byte);
         }
     }
-
+ 
     if (!(READ_VREG(AV_SCRATCH_F) & 0x1)) {
         addr = buf_start;
 
@@ -709,10 +720,10 @@ static void vh264_set_params(void)
 
     if (aspect_ratio_info_present_flag) {
         if (aspect_ratio_idc == EXTEND_SAR) {
-            printk("v264dec: aspect_ratio_idc = EXTEND_SAR, aspect_ratio_info = 0x%x\n", aspect_ratio_info);
+            //printk("v264dec: aspect_ratio_idc = EXTEND_SAR, aspect_ratio_info = 0x%x\n", aspect_ratio_info);
             h264_ar = div_u64(256ULL * (aspect_ratio_info >> 16) * frame_height, (aspect_ratio_info & 0xffff) * frame_width);
         } else {
-            printk("v264dec: aspect_ratio_idc = %d\n", aspect_ratio_idc);
+            //printk("v264dec: aspect_ratio_idc = %d\n", aspect_ratio_idc);
 
             switch (aspect_ratio_idc) {
             case 1:
@@ -1139,8 +1150,19 @@ static void vh264_isr(void)
         fatal_error_flag = 0x10;
         // this is fatal error, need restart
         printk("fatal error happend\n");
-    if(!fatal_error_reset)
-        schedule_work(&error_wd_work);
+        if (!fatal_error_reset) {
+            schedule_work(&error_wd_work);
+        }
+    } else if ((cpu_cmd & 0xff) == 7) {
+        vh264_running = 0;
+        frame_width = (READ_VREG(AV_SCRATCH_1) + 1) * 16;
+        printk("Over decoder supported size, width = %d\n", frame_width);
+        fatal_error_flag = 0x10;
+    } else if ((cpu_cmd & 0xff) == 8) {
+        vh264_running = 0;
+        frame_height = (READ_VREG(AV_SCRATCH_1) + 1) * 16;
+        printk("Over decoder supported size, height = %d\n", frame_height);
+        fatal_error_flag = 0x10;
     }
 
 #ifdef HANDLE_H264_IRQ
@@ -1377,8 +1399,8 @@ static void vh264_prot_init(void)
         CLEAR_VREG_MASK(AV_SCRATCH_F, 1<<6);
     }
 
-#if MESON_CPU_TYPE == MESON_CPU_TYPE_MESON8
-    printk("vh264 meson8 prot init\n");
+#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8
+    //printk("vh264 meson8 prot init\n");
     WRITE_VREG(MDEC_PIC_DC_THRESH, 0x404038aa);
 #endif
 }
@@ -1459,18 +1481,19 @@ static void vh264_local_init(void)
     return;
 }
 
+
 static s32 vh264_init(void)
 {
     int trickmode_fffb = 0;
-    void __iomem *p = ioremap_nocache(DEF_BUF_START_BASE, V_BUF_ADDR_START - DEF_BUF_START_ADDR);
-    void __iomem *p1 = (void __iomem *)((ulong)(p) + MEM_HEADER_CPU_BASE - DEF_BUF_START_BASE);
-
+    int firmwareloaded=0;
+    void __iomem *p = ioremap_nocache(ucode_map_start, V_BUF_ADDR_OFFSET);
+    void __iomem *p1 = (void __iomem *)((ulong)(p) + MEM_HEADER_CPU_OFFSET);
     if (!p) {
         printk("\nvh264_init: Cannot remap ucode swapping memory\n");
         return -ENOMEM;
     }
 
-    printk("\nvh264_init\n");
+    //printk("\nvh264_init\n");
     init_timer(&recycle_timer);
 
     stat |= STAT_TIMER_INIT;
@@ -1483,31 +1506,85 @@ static s32 vh264_init(void)
     query_video_status(0, &trickmode_fffb);
 
     if (!trickmode_fffb) {
-        memset(p, 0, V_BUF_ADDR_START - DEF_BUF_START_ADDR);
+        memset(p, 0, V_BUF_ADDR_OFFSET);
     }
 
     amvdec_enable();
 
-    if (amvdec_loadmc(vh264_mc) < 0) {
-        amvdec_disable();
-        return -EBUSY;
-    }
-
-    memcpy(p1,
-           vh264_header_mc, sizeof(vh264_header_mc));
-
-    memcpy((void *)((ulong)p1 + 0x1000),
-           vh264_data_mc, sizeof(vh264_data_mc));
-
-    memcpy((void *)((ulong)p1 + 0x2000),
-           vh264_mmco_mc, sizeof(vh264_mmco_mc));
-
-    memcpy((void *)((ulong)p1 + 0x3000),
-           vh264_list_mc, sizeof(vh264_list_mc));
-
-    memcpy((void *)((ulong)p1 + 0x4000),
-           vh264_slice_mc, sizeof(vh264_slice_mc));
-
+	/*while for easy break out, always  run once.*/
+    while(debugfirmware){
+		int size;
+        printk("start debug load firmware ...\n");
+        char *mbuf=kmalloc(4096 * 4*6, GFP_KERNEL);
+        if (!mbuf) {
+            printk("vh264_init: Cannot malloc mbuf  memory1\n");
+            break;
+        }
+        memset(mbuf,0,4096 * 4*6);
+        size=request_video_firmware("vh264_mc",mbuf,4096 * 4*6);
+        if(size<0 || size < (0x800 + 0x400*4)*4){
+            printk("vh264_init: not valied ucode for vh264");
+            kfree(mbuf);
+            break;
+        }
+        const char *pvh264_header_mc=mbuf+(0x800 + 0x400*2)*4;
+        const char *pvh264_data_mc=mbuf+(0x800 + 0x400*1)*4;
+        const char *pvh264_mmco_mc=mbuf+(0x800 + 0x400*4)*4;
+        const char *pvh264_list_mc=mbuf+(0x800 + 0x400*3)*4;
+        const char *pvh264_slice_mc=mbuf+(0x800 + 0x400*0)*4;
+        char *mc=kmalloc(4096 * 4, GFP_KERNEL);
+        if (!mc) {
+            kfree(mbuf);
+            printk("vh264_init: Cannot malloc mbuf  memory3\n");
+            break;
+        }
+        memcpy(mc,mbuf,0x800*4);
+        memcpy(mc+0x800*4,pvh264_data_mc,0x400*4);
+        memcpy(mc+0x800*4+0x400*4,pvh264_list_mc,0x400*4);
+        if (amvdec_loadmc(mc) < 0) {
+            kfree(mbuf);
+            kfree(mc);
+            break;
+        }
+        memcpy(p1,
+        pvh264_header_mc, 0x400*4);//vh264_header_mc   //0x4000
+        memcpy((void *)((ulong)p1 + 0x1000),
+        pvh264_data_mc, 0x400*4);//vh264_data_mc //0x3000
+        memcpy((void *)((ulong)p1 + 0x2000),
+        pvh264_mmco_mc, 0x400*4);//vh264_mmco_mc//0x6000
+        memcpy((void *)((ulong)p1 + 0x3000),
+        pvh264_list_mc, 0x400*4);//vh264_list_mc//0x5000
+        memcpy((void *)((ulong)p1 + 0x4000),
+        pvh264_slice_mc, 0x400*4);//vh264_slice_mc //0x2000
+        kfree(mbuf);
+        kfree(mc);
+		firmwareloaded=1;
+		break;
+    };
+	
+	if(!firmwareloaded){
+        printk("start load orignal firmware ...\n");
+        if (amvdec_loadmc(vh264_mc) < 0) {
+            amvdec_disable();
+            iounmap(p);
+            return -EBUSY;
+        }
+        
+        memcpy(p1,
+        vh264_header_mc, sizeof(vh264_header_mc));
+        
+        memcpy((void *)((ulong)p1 + 0x1000),
+        vh264_data_mc, sizeof(vh264_data_mc));
+        
+        memcpy((void *)((ulong)p1 + 0x2000),
+        vh264_mmco_mc, sizeof(vh264_mmco_mc));
+        
+        memcpy((void *)((ulong)p1 + 0x3000),
+        vh264_list_mc, sizeof(vh264_list_mc));
+        
+        memcpy((void *)((ulong)p1 + 0x4000),
+        vh264_slice_mc, sizeof(vh264_slice_mc));
+    }	
     iounmap(p);
 
     stat |= STAT_MC_LOAD;
@@ -1751,14 +1828,14 @@ static int amvdec_h264_probe(struct platform_device *pdev)
 {
     struct resource *mem;
     mutex_lock(&vh264_mutex);
-    printk("amvdec_h264 probe start.\n");
+    //printk("amvdec_h264 probe start.\n");
 
     if (!(mem = platform_get_resource(pdev, IORESOURCE_MEM, 0))) {
         printk("\namvdec_h264 memory resource undefined.\n");
         mutex_unlock(&vh264_mutex);
         return -EFAULT;
     }
-
+    ucode_map_start=mem->start;
     buf_size = mem->end - mem->start + 1;
     if (buf_size < DEFAULT_MEM_SIZE) {
         printk("\namvdec_h264 memory size not enough.\n");
@@ -1766,8 +1843,8 @@ static int amvdec_h264_probe(struct platform_device *pdev)
     }
 
     buf_offset = mem->start - DEF_BUF_START_ADDR;
-    buf_start = V_BUF_ADDR_START + buf_offset;
-
+    buf_start = V_BUF_ADDR_OFFSET + mem->start;
+    printk("mem-addr=%x,buff_offset=%x,buf_start=%x\n",mem->start,buf_offset,buf_start);
     memcpy(&vh264_amstream_dec_info, (void *)mem[1].start, sizeof(vh264_amstream_dec_info));
 
     if (vh264_init() < 0) {
@@ -1781,13 +1858,15 @@ static int amvdec_h264_probe(struct platform_device *pdev)
 
     atomic_set(&vh264_active, 1);
 
-    printk("amvdec_h264 probe end.\n");
+    //printk("amvdec_h264 probe end.\n");
     mutex_unlock(&vh264_mutex);
     return 0;
 }
 
 static int amvdec_h264_remove(struct platform_device *pdev)
 {
+     cancel_work_sync(&error_wd_work);
+     cancel_work_sync(&stream_switching_work);
     mutex_lock(&vh264_mutex);
     vh264_stop();
 
@@ -1855,6 +1934,9 @@ module_param(max_refer_buf, uint, 0664);
 MODULE_PARM_DESC(max_refer_buf, "\n amvdec_h264 decoder buffering or not for reference frame \n");
 module_param(ucode_type, uint, 0664);
 MODULE_PARM_DESC(ucode_type, "\n amvdec_h264 decoder buffering or not for reference frame \n");
+module_param(debugfirmware, uint, 0664);
+MODULE_PARM_DESC(debugfirmware, "\n amvdec_h264 debug load firmware \n");
+
 module_init(amvdec_h264_driver_init_module);
 module_exit(amvdec_h264_driver_remove_module);
 

@@ -2,12 +2,16 @@
 #ifndef __H264_H__
 #define __H264_H__
 
-#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8
 #define AMVENC_DEV_VERSION "AML-M8"
+#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8
 #define INT_AMVENCODER INT_DOS_MAILBOX_2
+#define HCODEC_IRQ_MBOX_CLR HCODEC_ASSIST_MBOX2_CLR_REG
+#define HCODEC_IRQ_MBOX_MASK HCODEC_ASSIST_MBOX2_MASK
 #else
-#define AMVENC_DEV_VERSION "AML-MT"
+//#define AMVENC_DEV_VERSION "AML-MT"
 #define INT_AMVENCODER INT_MAILBOX_1A
+#define HCODEC_IRQ_MBOX_CLR HCODEC_ASSIST_MBOX1_CLR_REG
+#define HCODEC_IRQ_MBOX_MASK HCODEC_ASSIST_MBOX1_MASK
 #endif
 
 #define VDEC_166M()  WRITE_MPEG_REG(HHI_VDEC_CLK_CNTL, (5 << 9) | (1 << 8) | (5))
@@ -54,7 +58,6 @@
 #define AMVENC_AVC_IOC_FLUSH_DMA 				_IOW(AMVENC_AVC_IOC_MAGIC, 0x0b, unsigned int)
 #define AMVENC_AVC_IOC_GET_BUFFINFO 				_IOW(AMVENC_AVC_IOC_MAGIC, 0x0c, unsigned int)
 
-#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8
 #define AMVENC_AVC_IOC_SET_IE_ME_MB_TYPE 		_IOW(AMVENC_AVC_IOC_MAGIC, 0x0d, unsigned int)
 #define AMVENC_AVC_IOC_SET_ME_PIXEL_MODE 		_IOW(AMVENC_AVC_IOC_MAGIC, 0x0e, unsigned int)
 
@@ -83,7 +86,6 @@ typedef enum{
     FMT_RGBA8888,
     MAX_FRAME_FMT 
 }amvenc_frame_fmt;
-#endif
 
 
 // Memory Address 
@@ -201,7 +203,6 @@ typedef enum{
 #define ANC0_BUFFER_ID					HENC_SCRATCH_A
 #define QPPICTURE						HENC_SCRATCH_B
 
-#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8
 #define START_POSITION					HENC_SCRATCH_C
 #define IE_ME_MB_TYPE					HENC_SCRATCH_D
 #define IE_ME_MODE						HENC_SCRATCH_E  //bit 0-4, IE_PIPPELINE_BLOCK, bit 5 me half pixel, bit 6, me step2 sub pixel
@@ -209,7 +210,6 @@ typedef enum{
 
 #define LOW_LATENCY_EN_REG			DOS_SCRATCH9
 #define PREVIOUS_FNUM_REG				DOS_SCRATCH10
-#endif
 
 //---------------------------------------------------
 // ENCODER_STATUS define

@@ -93,6 +93,15 @@ config AM_VDEC_H264_4K2K
         help
           Driver for h264 4Kx2K video decoder.
 
+config AM_VDEC_H265
+        tristate "Amlogic H265 Video Decoder"
+        depends on ARCH_MESON8B
+        default y
+
+        select AM_PTSSERVER
+        help
+          Driver for h265 video decoder.
+
 config AM_VDEC_MJPEG
 	tristate "Amlogic Motion JPEG Video Decoder"
 	default y
@@ -157,5 +166,11 @@ config AM_SUBTITLE
 	default y
 	help 
 		Internal Sub Title support driver
+
+config AM_VIDEOCAPTURE
+	bool "Amlogic Video Capture support"
+	default y
+	help
+		Internal Video Capture driver
 endmenu
 

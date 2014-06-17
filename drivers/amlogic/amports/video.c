@@ -63,11 +63,13 @@
 #include <asm/fiq.h>
 #include <asm/uaccess.h>
 
+#include "amports_config.h"
+
 #if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8
 #include <mach/vpu.h>
 #endif
-
 #include "videolog.h"
+#include "amvideocap_priv.h"
 
 #ifdef CONFIG_AM_VIDEO_LOG
 #define AMLOG
@@ -94,6 +96,7 @@ static int output_fps = 0;
 
 #define RECEIVER_NAME "amvideo"
 static int video_receiver_event_fun(int type, void* data, void*);
+static int ext_end_frame_capture(void);
 
 static const struct vframe_receiver_op_s video_vf_receiver =
 {
@@ -183,6 +186,8 @@ static int video_onoff_state = VIDEO_ENABLE_STATE_IDLE;
         vpu_mem_power_off_count = VPU_MEM_POWEROFF_DELAY; \
         spin_unlock_irqrestore(&delay_work_lock, flags); \
     } while (0)
+
+#if HAS_VPU_PROT
 #define PROT_MEM_POWER_ON() \
     do { \
         unsigned long flags; \
@@ -201,6 +206,10 @@ static int video_onoff_state = VIDEO_ENABLE_STATE_IDLE;
         vpu_mem_power_off_count = VPU_MEM_POWEROFF_DELAY; \
         spin_unlock_irqrestore(&delay_work_lock, flags); \
     } while (0)
+#else
+#define PROT_MEM_POWER_ON() 
+#define PROT_MEM_POWER_OFF()
+#endif
 #else
 #define VD1_MEM_POWER_ON()
 #define VD2_MEM_POWER_ON()
@@ -225,7 +234,7 @@ static int video_onoff_state = VIDEO_ENABLE_STATE_IDLE;
         video_onoff_state = VIDEO_ENABLE_STATE_OFF_REQ; \
         spin_unlock_irqrestore(&video_onoff_lock, flags); \
     } while (0)
-#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8
+#if HAS_VPU_PROT
 #define EnableVideoLayer()  \
     do { \
         if(get_vpu_mem_pd_vmod(VPU_VIU_VD1) == VPU_MEM_POWER_DOWN || \
@@ -273,7 +282,7 @@ static int video_onoff_state = VIDEO_ENABLE_STATE_IDLE;
          } \
     } while (0)
 
-#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8
+#if  MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8
 #define DisableVideoLayer_NoDelay() \
     do { \
          CLEAR_VCBUS_REG_MASK(VPP_MISC + cur_dev->vpp_off, \
@@ -370,6 +379,7 @@ const char video_dev_id[] = "amvideo-dev";
 
 const char video_dev_id2[] = "amvideo-dev2";
 
+int onwaitendframe=0;
 typedef struct{
     int vpp_off;
     int viu_off;
@@ -386,10 +396,10 @@ static int cur_dev_idx = 0;
 typedef struct {
     int event;
     u32 vpp_misc;
-#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8
     int mem_pd_vd1;
     int mem_pd_vd2;
     int mem_pd_di_post;
+#if HAS_VPU_PROT
     int mem_pd_prot2;
     int mem_pd_prot3;
 #endif
@@ -411,10 +421,10 @@ static u32 video_scaler_mode = 0;
 static int content_top = 0, content_left = 0, content_w = 0, content_h = 0;
 static int scaler_pos_changed = 0;
 #endif
-
+static struct amvideocap_req *capture_frame_req=NULL;
 static video_prot_t video_prot;
 static u32 video_angle = 0;
-#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8
+#if HAS_VPU_PROT
 static u32 use_prot = 0;
 u32 get_prot_status(void) { return video_prot.status; }
 EXPORT_SYMBOL(get_prot_status);
@@ -711,6 +721,7 @@ static inline vframe_t *video_vf_get(void)
 
     if (vf) {
 	video_notify_flag |= VIDEO_NOTIFY_PROVIDER_GET;
+    atomic_set(&vf->use_cnt,1);/*always to 1,for first get from vfm provider*/
 #ifdef TV_3D_FUNCTION_OPEN
 	/*can be moved to h264mvc.c*/
 	if((vf->type & VIDTYPE_MVC)&&(process_3d_type&MODE_3D_ENABLE)&&vf->trans_fmt) {
@@ -743,10 +754,52 @@ static int  vf_get_states(vframe_states_t *states)
 static inline void video_vf_put(vframe_t *vf)
 {
     struct vframe_provider_s *vfp = vf_get_provider(RECEIVER_NAME);
-    if (vfp) {
+    if (vfp && atomic_dec_and_test(&vf->use_cnt)) {
         vf_put(vf, RECEIVER_NAME);
         video_notify_flag |= VIDEO_NOTIFY_PROVIDER_PUT;
     }
+}
+int ext_get_cur_video_frame(vframe_t **vf,int *canvas_index)
+{
+	if(cur_dispbuf==NULL)
+		return -1;
+	atomic_inc(&cur_dispbuf->use_cnt);
+	*canvas_index = READ_VCBUS_REG(VD1_IF0_CANVAS0 + cur_dev->viu_off);
+	*vf=cur_dispbuf;
+	return 0;
+}
+int ext_put_video_frame(vframe_t *vf)
+{
+	if(vf==&vf_local){
+		return 0;
+	}
+	video_vf_put(vf);
+	return 0;
+}
+int ext_register_end_frame_callback(struct amvideocap_req *req)
+{
+	mutex_lock(&video_module_mutex);
+	capture_frame_req=req;
+	mutex_unlock(&video_module_mutex);
+	return 0;
+}
+static int ext_frame_capture_poll(int endflags)
+{
+	mutex_lock(&video_module_mutex);
+	if(capture_frame_req && capture_frame_req->callback){
+		vframe_t *vf;
+		int index;
+		int ret;
+		struct amvideocap_req *req=capture_frame_req;
+		ret=ext_get_cur_video_frame (&vf,&index);
+		if(!ret){
+			req->callback(req->data,vf,index);
+			capture_frame_req =NULL;
+		}
+	}
+endexit:
+	mutex_unlock(&video_module_mutex);
+	return 0;
 }
 
 static void vpp_settings_h(vpp_frame_par_t *framePtr)
@@ -1188,13 +1241,13 @@ static void vsync_toggle_frame(vframe_t *vf)
 #endif
 	VSYNC_WR_MPEG_REG(VD2_IF0_CANVAS1, disp_canvas[rdma_canvas_id][1]);
         next_rdma_canvas_id = rdma_canvas_id?0:1;
-#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8
+#if HAS_VPU_PROT
         if (use_prot) {
             video_prot.prot2_canvas = disp_canvas[rdma_canvas_id][0] & 0xff;
             video_prot.prot3_canvas = (disp_canvas[rdma_canvas_id][0] >> 8) & 0xff;
              VSYNC_WR_MPEG_REG_BITS(VPU_PROT2_DDR, video_prot.prot2_canvas, 0, 8);
              VSYNC_WR_MPEG_REG_BITS(VPU_PROT3_DDR, video_prot.prot3_canvas, 0, 8);
-        }
+        }	 
 #endif
 #else
         canvas_copy(vf->canvas0Addr & 0xff, disp_canvas_index[0]);
@@ -1217,7 +1270,7 @@ static void vsync_toggle_frame(vframe_t *vf)
 	VSYNC_WR_MPEG_REG(VD2_IF0_CANVAS0, disp_canvas[0]);
 	VSYNC_WR_MPEG_REG(VD2_IF0_CANVAS1, disp_canvas[1]);
 #endif
-#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8
+#if HAS_VPU_PROT
         if (use_prot) {
             video_prot.prot2_canvas = disp_canvas_index[0];
             video_prot.prot3_canvas = disp_canvas_index[1];
@@ -1273,7 +1326,7 @@ static void vsync_toggle_frame(vframe_t *vf)
         ((cur_dispbuf->type_backup & VIDTYPE_INTERLACE) !=
          (vf->type_backup & VIDTYPE_INTERLACE)) ||
          (cur_dispbuf->type != vf->type)
-#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8
+#if HAS_VPU_PROT
          || video_prot.angle_changed
 #endif
          ) {
@@ -1296,7 +1349,7 @@ amlog_mask(LOG_MASK_FRAMEINFO,
 #endif
         next_frame_par = (&frame_parms[0] == next_frame_par) ?
                          &frame_parms[1] : &frame_parms[0];
-#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8
+#if HAS_VPU_PROT
         if (use_prot) {
             vframe_t tmp_vf = *vf;
             if (video_prot.angle_changed || cur_dispbuf->width != vf->width || cur_dispbuf->height != vf->height) {
@@ -1407,7 +1460,7 @@ static void viu_set_dcu(vpp_frame_par_t *frame_par, vframe_t *vf)
             r |= VDIF_FORMAT_RGB888_YUV444 | VDIF_DEMUX_MODE_RGB_444;
         }
     }
-#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8
+#if HAS_VPU_PROT
     if (video_prot.status && use_prot) {
         r |= VDIF_DEMUX_MODE | VDIF_LAST_LINE | 3 << VDIF_BURSTSIZE_Y_BIT | 1 << VDIF_BURSTSIZE_CB_BIT | 1 << VDIF_BURSTSIZE_CR_BIT;
         r &= 0xffffffbf;
@@ -1426,7 +1479,7 @@ static void viu_set_dcu(vpp_frame_par_t *frame_par, vframe_t *vf)
     } else {
         VSYNC_WR_MPEG_REG_BITS(VD1_IF0_GEN_REG2 + cur_dev->viu_off, 0,0,1);
     }
-#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8
+#if HAS_VPU_PROT
     if (use_prot) {
         if (video_prot.angle == 2) {
             VSYNC_WR_MPEG_REG_BITS(VD1_IF0_GEN_REG2 + cur_dev->viu_off, 0xf, 2, 4);
@@ -1501,7 +1554,7 @@ static void viu_set_dcu(vpp_frame_par_t *frame_par, vframe_t *vf)
                        (((vf->type & VIDTYPE_VIU_422) ? 0x10 : 0x08) << VFORMATTER_PHASE_BIT) |
                        VFORMATTER_EN);
     }
-#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8
+#if HAS_VPU_PROT
     if (video_prot.status && use_prot) {
         VSYNC_WR_MPEG_REG_BITS(VIU_VD1_FMT_CTRL + cur_dev->viu_off, 0, VFORMATTER_INIPHASE_BIT, 4);
         VSYNC_WR_MPEG_REG_BITS(VIU_VD1_FMT_CTRL + cur_dev->viu_off, 0, 16, 1);
@@ -1645,6 +1698,14 @@ static int detect_vout_type(void)
             default:
                 break;
         }
+#ifdef CONFIG_VSYNC_RDMA    
+        if (is_vsync_rdma_enable()){        
+            if(vout_type == VOUT_TYPE_TOP_FIELD)            
+                vout_type = VOUT_TYPE_BOT_FIELD;        
+            else if(vout_type == VOUT_TYPE_BOT_FIELD)           
+                vout_type = VOUT_TYPE_TOP_FIELD;    
+        }
+#endif
     }
 
     return vout_type;
@@ -2118,7 +2179,9 @@ static irqreturn_t vsync_isr(int irq, void *dev_id)
 	/* amvecm video latch function */
 	amvecm_video_latch();
 #endif
+
 #if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8
+
     vdin_ops=get_vdin_v4l2_ops();
     if(vdin_ops){
 	arg.cmd = VDIN_CMD_ISR;
@@ -2193,7 +2256,7 @@ static irqreturn_t vsync_isr(int irq, void *dev_id)
         dispbuf_to_put_num = 0;
     }
 #endif
-#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8
+#if HAS_VPU_PROT
     use_prot = get_use_prot();
     if (video_prot.video_started) {
         video_prot.video_started = 0;
@@ -2915,7 +2978,7 @@ static void video_vf_light_unreg_provider(void)
         vf_local = *cur_dispbuf;
         cur_dispbuf = &vf_local;
     }
-#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8
+#if HAS_VPU_PROT
     if(get_vpu_mem_pd_vmod(VPU_VIU_VD1) == VPU_MEM_POWER_DOWN ||
             get_vpu_mem_pd_vmod(VPU_PIC_ROT2) == VPU_MEM_POWER_DOWN ||
             aml_read_reg32(P_VPU_PROT3_CLK_GATE) == 0) {
@@ -3025,7 +3088,9 @@ unsigned int vf_keep_current(void)
         return 0;
     }
 
-    if (blackout|force_blackout) {
+	ext_frame_capture_poll(1); /*pull  if have capture end frame */
+
+	if (blackout|force_blackout) {
         return 0;
     }
 
@@ -4638,26 +4703,31 @@ static int amvideo_class_suspend(struct device *dev, pm_message_t state)
         pm_state.vpp_misc = READ_VCBUS_REG(VPP_MISC + cur_dev->vpp_off);
 
 #if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8
+
         pm_state.mem_pd_vd1 = get_vpu_mem_pd_vmod(VPU_VIU_VD1);
         pm_state.mem_pd_vd2 = get_vpu_mem_pd_vmod(VPU_VIU_VD2);
         pm_state.mem_pd_di_post = get_vpu_mem_pd_vmod(VPU_DI_POST);
+#if HAS_VPU_PROT
         pm_state.mem_pd_prot2 = get_vpu_mem_pd_vmod(VPU_PIC_ROT2);
         pm_state.mem_pd_prot3 = get_vpu_mem_pd_vmod(VPU_PIC_ROT3);
 #endif
-
+#endif
         DisableVideoLayer_NoDelay();
 
         msleep(50);
-
 #if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8
+
         switch_vpu_mem_pd_vmod(VPU_VIU_VD1, VPU_MEM_POWER_DOWN);
         switch_vpu_mem_pd_vmod(VPU_VIU_VD2, VPU_MEM_POWER_DOWN);
         switch_vpu_mem_pd_vmod(VPU_DI_POST, VPU_MEM_POWER_DOWN);
+#if HAS_VPU_PROT
         switch_vpu_mem_pd_vmod(VPU_PIC_ROT2, VPU_MEM_POWER_DOWN);
         switch_vpu_mem_pd_vmod(VPU_PIC_ROT3, VPU_MEM_POWER_DOWN);
+#endif
 
         vpu_delay_work_flag = 0;
 #endif
+
     }
 
     return 0;
@@ -4676,18 +4746,19 @@ static int amvideo_class_resume(struct device *dev)
   ((VPP_VD2_ALPHA_MASK << VPP_VD2_ALPHA_BIT) | VPP_VD2_PREBLEND | VPP_VD1_PREBLEND | VPP_VD2_POSTBLEND | VPP_VD1_POSTBLEND | VPP_POSTBLEND_EN)
 
     if (pm_state.event == PM_EVENT_SUSPEND) {
-#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8
+#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8		
         switch_vpu_mem_pd_vmod(VPU_VIU_VD1, pm_state.mem_pd_vd1);
         switch_vpu_mem_pd_vmod(VPU_VIU_VD2, pm_state.mem_pd_vd2);
         switch_vpu_mem_pd_vmod(VPU_DI_POST, pm_state.mem_pd_di_post);
+#if HAS_VPU_PROT
         switch_vpu_mem_pd_vmod(VPU_PIC_ROT2, pm_state.mem_pd_prot2);
         switch_vpu_mem_pd_vmod(VPU_PIC_ROT3, pm_state.mem_pd_prot3);
-
+#endif
+#endif
         WRITE_VCBUS_REG(VPP_MISC + cur_dev->vpp_off,
             (READ_VCBUS_REG(VPP_MISC + cur_dev->vpp_off) & (~VPP_MISC_VIDEO_BITS_MASK)) | (pm_state.vpp_misc & VPP_MISC_VIDEO_BITS_MASK));
-#else
         WRITE_VCBUS_REG(VPP_MISC + cur_dev->vpp_off, pm_state.vpp_misc);
-#endif
+
         pm_state.event = -1;
         if(debug_flag& DEBUG_FLAG_BLACKOUT){
             printk("%s write(VPP_MISC,%x)\n",__func__, pm_state.vpp_misc);
@@ -4888,11 +4959,9 @@ static int __init video_early_init(void)
 {
     logo_object_t  *init_logo_obj=NULL;
 
-#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8
     /* todo: move this to clock tree, enable VPU clock */
     //WRITE_CBUS_REG(HHI_VPU_CLK_CNTL, (1<<9) | (1<<8) | (3)); // fclk_div3/4 = ~200M
     //WRITE_CBUS_REG(HHI_VPU_CLK_CNTL, (3<<9) | (1<<8) | (0)); // fclk_div7/1 = 364M	//moved to vpu.c, default config by dts
-#endif
 
 #ifdef CONFIG_AM_LOGO
     init_logo_obj = get_current_logo_obj();

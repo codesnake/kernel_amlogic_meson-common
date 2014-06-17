@@ -1250,13 +1250,6 @@ static int vh264_4k2k_stop(void)
     int i;
     u32 disp_addr = 0xffffffff;
 
-    if (is_vpp_postblend()) {
-        canvas_t cur_canvas;
-
-        canvas_read((READ_VCBUS_REG(VD1_IF0_CANVAS0) & 0xff), &cur_canvas);
-        disp_addr = cur_canvas.addr;
-    }
-
     if (stat & STAT_VDEC_RUN) {
         amvdec_stop();
         amvdec2_stop();
@@ -1290,6 +1283,13 @@ static int vh264_4k2k_stop(void)
 
     amvdec_disable();
     amvdec2_disable();
+
+    if (is_vpp_postblend()) {
+        canvas_t cur_canvas;
+
+        canvas_read((READ_VCBUS_REG(VD1_IF0_CANVAS0) & 0xff), &cur_canvas);
+        disp_addr = cur_canvas.addr;
+    }
 
     for (i=0; i<ARRAY_SIZE(buffer_spec); i++) {
         if (buffer_spec[i].alloc_pages) {
@@ -1361,7 +1361,7 @@ static int amvdec_h264_4k2k_probe(struct platform_device *pdev)
 
 static int amvdec_h264_4k2k_remove(struct platform_device *pdev)
 {
-    printk("amvdec_h264_4k2k_remove\n");
+    cancel_work_sync(&alloc_work);
 
     mutex_lock(&vh264_4k2k_mutex);
 
@@ -1380,6 +1380,7 @@ static int amvdec_h264_4k2k_remove(struct platform_device *pdev)
 
     mutex_unlock(&vh264_4k2k_mutex);
     
+    printk("amvdec_h264_4k2k_remove\n");
     return 0;
 }
 

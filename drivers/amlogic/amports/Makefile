@@ -26,27 +26,36 @@ ifeq ($(CONFIG_ARCH_MESON8),y)
 obj-y = m8/
 endif
 
+ifeq ($(CONFIG_ARCH_MESON8B),y)
+obj-y = m8/
+endif
+
 obj-$(CONFIG_AM_STREAMING) += amports.o
 
+AMPROT_OBJS = amstream.o streambuf.o vdec.o adec.o tsdemux.o psparser.o esparser.o rmparser.o amvdec.o amstream_profile.o
 
-ifeq ($(CONFIG_ARCH_MESON8),y)
-amports-objs := amstream.o streambuf.o vdec.o adec.o tsdemux.o psparser.o esparser.o rmparser.o amvdec.o amstream_profile.o
+ifeq ($(CONFIG_ARCH_MESON8B),y)
 amports-y    := amstream.o streambuf.o vdec.o adec.o tsdemux.o psparser.o esparser.o rmparser.o amvdec.o amstream_profile.o
+else
+ifeq ($(CONFIG_ARCH_MESON8),y)
+amports-objs := $(AMPROT_OBJS)
+amports-y    := $(AMPROT_OBJS)
 else
 ifeq ($(CONFIG_ARCH_MESON6),y)
-amports-objs := amstream.o streambuf.o vdec.o adec.o tsdemux.o psparser.o esparser.o rmparser.o amvdec.o amstream_profile.o
-amports-y    := amstream.o streambuf.o vdec.o adec.o tsdemux.o psparser.o esparser.o rmparser.o amvdec.o amstream_profile.o
+amports-objs := $(AMPROT_OBJS)
+amports-y    := $(AMPROT_OBJS)
 else
 ifeq ($(CONFIG_ARCH_MESON6TV),y)
-amports-objs := amstream.o streambuf.o vdec.o adec.o tsdemux.o psparser.o esparser.o rmparser.o amvdec.o amstream_profile.o
-amports-y    := amstream.o streambuf.o vdec.o adec.o tsdemux.o psparser.o esparser.o rmparser.o amvdec.o amstream_profile.o
+amports-objs := $(AMPROT_OBJS)
+amports-y    := $(AMPROT_OBJS)
 else
 ifeq ($(CONFIG_ARCH_MESON6TVD),y)
-amports-objs := amstream.o streambuf.o vdec.o adec.o tsdemux.o psparser.o esparser.o rmparser.o amvdec.o amstream_profile.o
-amports-y    := amstream.o streambuf.o vdec.o adec.o tsdemux.o psparser.o esparser.o rmparser.o amvdec.o amstream_profile.o
+amports-objs := $(AMPROT_OBJS)
+amports-y    := $(AMPROT_OBJS)
 else
-amports-objs := amstream.o streambuf.o vdec.o adec.o tsdemux.o psparser.o esparser.o rmparser.o amvdec.o amve.o amcm.o amstream_profile.o
-amports-y    := amstream.o streambuf.o vdec.o adec.o tsdemux.o psparser.o esparser.o rmparser.o amvdec.o amve.o amcm.o amstream_profile.o
+amports-objs := $(AMPROT_OBJS) amve.o amcm.o
+amports-y    := $(AMPROT_OBJS) amve.o amcm.o
+endif
 endif
 endif
 endif
@@ -76,6 +85,10 @@ obj-$(CONFIG_AM_VDEC_H264_4K2K) += amvdec_h264_4k2k.o
 amvdec_h264_4k2k-objs := vh264_4k2k.o
 amvdec_h264_4k2k-y    := vh264_4k2k.o
 
+obj-$(CONFIG_AM_VDEC_H265) += amvdec_h265.o
+amvdec_h265-objs := vh265.o
+amvdec_h265-y    := vh265.o
+
 obj-$(CONFIG_AM_VDEC_MJPEG) += amvdec_mjpeg.o
 amvdec_mjpeg-objs := vmjpeg.o
 amvdec_mjpeg-y    := vmjpeg.o
@@ -84,10 +97,16 @@ obj-$(CONFIG_AM_VDEC_REAL) += amvdec_real.o
 amvdec_real-objs := vreal.o
 amvdec_real-y    := vreal.o
 
+ifeq ($(CONFIG_ARCH_MESON6TV),y)
+obj-$(CONFIG_AM_VDEC_AVS) += amvdec_avs.o
+amvdec_avs-objs := vavs.o
+amvdec_avs-y    := vavs.o
+else
 ifeq ($(CONFIG_ARCH_MESON6TVD),y)
 obj-$(CONFIG_AM_VDEC_AVS) += amvdec_avs.o
 amvdec_avs-objs := vavs.o
 amvdec_avs-y    := vavs.o
+endif
 endif
 
 obj-$(CONFIG_AM_JPEGDEC) += jpegdec.o
@@ -101,6 +120,11 @@ amvideo-y    := video.o vpp.o video_prot.o
 else
 amvideo-objs := video.o vpp.o
 amvideo-y    := video.o vpp.o
+endif
+
+ifeq ($(CONFIG_AM_VIDEOCAPTURE),y)
+amports-objs +=  amvideocap.o
+amports-y   +=  amvideocap.o
 endif
 
 obj-$(CONFIG_AM_VIDEO2) += amvideo2.o

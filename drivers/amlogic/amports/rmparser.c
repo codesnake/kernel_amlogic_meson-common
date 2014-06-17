@@ -36,7 +36,7 @@
 #include "streambuf.h"
 #include "streambuf_reg.h"
 #include "rmparser.h"
-#include "ampotrs_priv.h"
+#include "amports_priv.h"
 #include <linux/delay.h>
 
 #define MANAGE_PTS

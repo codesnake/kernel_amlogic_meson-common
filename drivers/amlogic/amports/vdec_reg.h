@@ -37,8 +37,8 @@
 #define SET_VREG_MASK(r, mask) WRITE_VREG(r, READ_VREG(r) | (mask))
 #define CLEAR_VREG_MASK(r, mask) WRITE_VREG(r, READ_VREG(r) & ~(mask))
 
-#define READ_HREG(r) (__raw_readl((volatile void __iomem *)DOS_REG_ADDR(r)))
-#define WRITE_HREG(r, val) __raw_writel(val, (volatile void __iomem *)DOS_REG_ADDR(r))
+#define READ_HREG(r) (__raw_readl((volatile void __iomem *)DOS_REG_ADDR(r|0x1000)))
+#define WRITE_HREG(r, val) __raw_writel(val, (volatile void __iomem *)DOS_REG_ADDR(r|0x1000))
 #define WRITE_HREG_BITS(r, val, start, len) \
     WRITE_HREG(r, (READ_HREG(r) & ~(((1L<<(len))-1)<<(start)))|((unsigned)((val)&((1L<<(len))-1)) << (start)))
 #define SET_HREG_MASK(r, mask) WRITE_HREG(r, READ_HREG(r) | (mask))

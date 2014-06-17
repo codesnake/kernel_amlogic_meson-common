@@ -402,7 +402,7 @@ static ssize_t _tsdemux_write(const char __user *buf, size_t count)
         ret = wait_event_interruptible_timeout(wq, fetch_done != 0, HZ/2);
         if (ret == 0) {
             WRITE_MPEG_REG(PARSER_FETCH_CMD, 0);
-			printk("write timeout, retry\n");
+            printk("write timeout, retry\n");
             return -EAGAIN;
         } else if (ret < 0) {
             return -ERESTARTSYS;
@@ -415,7 +415,11 @@ static ssize_t _tsdemux_write(const char __user *buf, size_t count)
     return count - r;
 }
 
+#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8B
+s32 tsdemux_init(u32 vid, u32 aid, u32 sid, bool is_hevc)
+#else
 s32 tsdemux_init(u32 vid, u32 aid, u32 sid)
+#endif
 {
     s32 r;
     u32 parser_sub_start_ptr;
@@ -494,11 +498,35 @@ s32 tsdemux_init(u32 vid, u32 aid, u32 sid)
     }
 
     /* hook stream buffer with PARSER */
-    WRITE_MPEG_REG(PARSER_VIDEO_START_PTR,
-                   READ_VREG(VLD_MEM_VIFIFO_START_PTR));
-    WRITE_MPEG_REG(PARSER_VIDEO_END_PTR,
-                   READ_VREG(VLD_MEM_VIFIFO_END_PTR));
-    CLEAR_MPEG_REG_MASK(PARSER_ES_CONTROL, ES_VID_MAN_RD_PTR);
+#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8B
+    if (is_hevc) {
+        WRITE_MPEG_REG(PARSER_VIDEO_START_PTR,
+                       READ_VREG(HEVC_STREAM_START_ADDR));
+        WRITE_MPEG_REG(PARSER_VIDEO_END_PTR,
+                       READ_VREG(HEVC_STREAM_END_ADDR) - 8);
+
+        CLEAR_MPEG_REG_MASK(PARSER_ES_CONTROL, ES_VID_MAN_RD_PTR);
+
+        WRITE_VREG(DOS_GEN_CTRL0, 3<<1);    // set vififo_vbuf_rp_sel=>hevc
+
+        SET_VREG_MASK(HEVC_STREAM_CONTROL, (1<<3)|(0<<4)); // set use_parser_vbuf_wp
+        SET_VREG_MASK(HEVC_STREAM_CONTROL, 1); // set stream_fetch_enable
+        SET_VREG_MASK(HEVC_STREAM_FIFO_CTL, (1<<29)); // set stream_buffer_hole with 256 bytes
+    } else {
+#endif
+        WRITE_MPEG_REG(PARSER_VIDEO_START_PTR,
+                       READ_VREG(VLD_MEM_VIFIFO_START_PTR));
+        WRITE_MPEG_REG(PARSER_VIDEO_END_PTR,
+                       READ_VREG(VLD_MEM_VIFIFO_END_PTR));
+        CLEAR_MPEG_REG_MASK(PARSER_ES_CONTROL, ES_VID_MAN_RD_PTR);
+
+        WRITE_VREG(VLD_MEM_VIFIFO_BUF_CNTL, MEM_BUFCTRL_INIT);
+        CLEAR_VREG_MASK(VLD_MEM_VIFIFO_BUF_CNTL, MEM_BUFCTRL_INIT);
+
+#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8B
+        WRITE_VREG(DOS_GEN_CTRL0, 0);    // set vififo_vbuf_rp_sel=>vdec
+    }
+#endif
 
     WRITE_MPEG_REG(PARSER_AUDIO_START_PTR,
                    READ_MPEG_REG(AIU_MEM_AIFIFO_START_PTR));
@@ -511,9 +539,6 @@ s32 tsdemux_init(u32 vid, u32 aid, u32 sid)
                    (1  << PS_CFG_MAX_ES_WR_CYCLE_BIT) |
                    (16 << PS_CFG_MAX_FETCH_CYCLE_BIT));
 
-    WRITE_VREG(VLD_MEM_VIFIFO_BUF_CNTL, MEM_BUFCTRL_INIT);
-    CLEAR_VREG_MASK(VLD_MEM_VIFIFO_BUF_CNTL, MEM_BUFCTRL_INIT);
-
     WRITE_MPEG_REG(AIU_MEM_AIFIFO_BUF_CNTL, MEM_BUFCTRL_INIT);
     CLEAR_MPEG_REG_MASK(AIU_MEM_AIFIFO_BUF_CNTL, MEM_BUFCTRL_INIT);
 
@@ -522,8 +547,12 @@ s32 tsdemux_init(u32 vid, u32 aid, u32 sid)
     WRITE_MPEG_REG(PARSER_SUB_RP, parser_sub_rp);
     SET_MPEG_REG_MASK(PARSER_ES_CONTROL, (7 << ES_SUB_WR_ENDIAN_BIT) | ES_SUB_MAN_RD_PTR);
 
+#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8B
+    if ((r = pts_start((is_hevc) ? PTS_TYPE_HEVC : PTS_TYPE_VIDEO)) < 0) {
+#else
     if ((r = pts_start(PTS_TYPE_VIDEO)) < 0) {
-        printk("Video pts start  failed.(%d)\n", r);
+#endif
+        printk("Video pts start failed.(%d)\n", r);
         goto err1;
     }
 
@@ -581,7 +610,11 @@ err4:
 err3:
     pts_stop(PTS_TYPE_AUDIO);
 err2:
+#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8B
+    pts_stop((is_hevc) ? PTS_TYPE_HEVC : PTS_TYPE_VIDEO);
+#else
     pts_stop(PTS_TYPE_VIDEO);
+#endif
 err1:
     printk("TS Demux init failed.\n");
     return -ENOENT;

@@ -69,7 +69,11 @@
 #endif
 
 
+#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8B
+extern s32 tsdemux_init(u32 vid, u32 aid, u32 sid, bool is_hevc);
+#else
 extern s32 tsdemux_init(u32 vid, u32 aid, u32 sid);
+#endif
 
 extern void tsdemux_release(void);
 
@@ -78,8 +82,8 @@ extern ssize_t tsdemux_write(struct file *file,
                              struct stream_buf_s *abuf,
                              const char __user *buf, size_t count);
 
-int     tsdemux_class_register(void);
-void  tsdemux_class_unregister(void);
+int  tsdemux_class_register(void);
+void tsdemux_class_unregister(void);
 void tsdemux_change_avid(unsigned int vid, unsigned int aid);
 void tsdemux_change_sid(unsigned int sid);
 void tsdemux_audio_reset(void);

@@ -114,14 +114,12 @@ static u32 log2_max_frame_num =4 ;
 static u32 anc0_buffer_id =0;
 static u32 qppicture  =26;
 static u32 process_irq = 0;
-#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8
 static u32 ie_me_mb_type  = 0;
 static u32 ie_me_mode  = 0;
 static u32 me_start_position = 0;
 static u32 ie_pippeline_block = 3;
 static u32 ie_cur_ref_sel = 0;
 static u32 half_ucode_mode = 0;
-#endif
 static int encode_inited = 0;
 static int encode_opened = 0;
 static int encoder_status = 0;
@@ -415,7 +413,6 @@ static void avc_canvas_init(void)
     debug_level(0,"dblk_buf_canvas is %d ; ref_buf_canvas is %d \n",dblk_buf_canvas , ref_buf_canvas);
 }
 
-#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8
 static void avc_init_ie_me_parameter(void)
 {
     me_start_position = 0;
@@ -620,7 +617,6 @@ static int  set_input_format (amvenc_mem_type type, amvenc_frame_fmt fmt, unsign
         mfdin_basic(input,iformat,oformat,picsize_x,picsize_y,r2y_en);
     return ret;
 }
-#endif
 
 static void encode_isr_tasklet(ulong data)
 {
@@ -642,7 +638,7 @@ static void encode_isr_tasklet(ulong data)
 static irqreturn_t enc_isr(int irq, void *dev_id)
 {
 
-	WRITE_HREG(HCODEC_ASSIST_MBOX2_CLR_REG, 1);
+	WRITE_HREG(HCODEC_IRQ_MBOX_CLR, 1);
 	encoder_status  = READ_HREG(ENCODER_STATUS);
 	if((encoder_status == ENCODER_IDR_DONE)
 	||(encoder_status == ENCODER_NON_IDR_DONE)
@@ -819,7 +815,7 @@ static void avc_prot_init(void)
     WRITE_HREG(QDCT_MB_CONTROL,
                 (1<<9) | // mb_info_soft_reset
                 (1<<0)); // mb read buffer soft reset
-#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8              
+
     if(half_ucode_mode == 0){
         WRITE_HREG(QDCT_MB_CONTROL,
                   (0<<28) | // ignore_t_p8x8
@@ -861,28 +857,7 @@ static void avc_prot_init(void)
                   (1<<1) | // mb_read_en
                   (0<<0));   // soft reset
     }
-#else
-    WRITE_HREG(QDCT_MB_CONTROL,
-              (0<<28) | // ignore_t_p8x8
-              (0<<27) | // zero_mc_out_null_non_skipped_mb
-              (0<<26) | // no_mc_out_null_non_skipped_mb
-              (0<<25) | // mc_out_even_skipped_mb
-              (0<<24) | // mc_out_wait_cbp_ready
-              (0<<23) | // mc_out_wait_mb_type_ready
-              (1<<22) | // i_pred_int_enable
-              (1<<19) | // i_pred_enable
-              (1<<20) | // ie_sub_enable
-              (1<<18) | // iq_enable
-              (1<<17) | // idct_enable
-              (1<<14) | // mb_pause_enable
-              (1<<13) | // q_enable
-              (1<<12) | // dct_enable
-              (1<<10) | // mb_info_en
-              (avc_endian<<3) | // endian
-              (1<<1) | // mb_read_en
-              (0<<0));   // soft reset
-#endif
-#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8
+
     if(half_ucode_mode == 0){
         WRITE_HREG(SAD_CONTROL,
                   (0<<3) | // ie_result_buff_enable
@@ -944,7 +919,6 @@ static void avc_prot_init(void)
 
         WRITE_HREG(IE_DATA_FEED_BUFF_INFO,0);
     }
-#endif
 
     WRITE_HREG(HCODEC_CURR_CANVAS_CTRL,0);
     //debug_level(0,"current endian is %d \n" , avc_endian);
@@ -953,10 +927,10 @@ static void avc_prot_init(void)
     WRITE_HREG(VLC_CONFIG , data32);	
     
     /* clear mailbox interrupt */
-    WRITE_HREG(HCODEC_ASSIST_MBOX2_CLR_REG, 1);
+    WRITE_HREG(HCODEC_IRQ_MBOX_CLR, 1);
 
     /* enable mailbox interrupt */
-    WRITE_HREG(HCODEC_ASSIST_MBOX2_MASK, 1);
+    WRITE_HREG(HCODEC_IRQ_MBOX_MASK, 1);
 }
 
 void amvenc_reset(void)
@@ -1118,14 +1092,14 @@ bool amvenc_avc_on(void)
 
 #endif
 
-#if MESON_CPU_TYPE == MESON_CPU_TYPE_MESON6TV
+#if MESON_CPU_TYPE < MESON_CPU_TYPE_MESON8
 #define  DMC_SEC_PORT8_RANGE0  0x840
 #define  DMC_SEC_CTRL  0x829
 #endif
 
 void enable_hcoder_ddr_access(void)
 {
-#if MESON_CPU_TYPE == MESON_CPU_TYPE_MESON6TV
+#if MESON_CPU_TYPE < MESON_CPU_TYPE_MESON8
 	WRITE_SEC_REG(DMC_SEC_PORT8_RANGE0 , 0xffff);
 	WRITE_SEC_REG(DMC_SEC_CTRL , 0x80000000);
 #endif
@@ -1216,6 +1190,8 @@ static s32 avc_poweroff(void)
 	switch_mod_gate_by_name("vdec", 0);
 #else
 	hvdec_clock_disable();
+	switch_mod_gate_by_name("vdec", 0);
+
 #endif
 	return 0;
 }
@@ -1228,10 +1204,8 @@ static s32 avc_init(void)
     avc_canvas_init();
     WRITE_HREG(HCODEC_ASSIST_MMC_CTRL1,0x2);
     debug_level(1,"start to load microcode\n");
-#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8
     if(half_ucode_mode == 1)
         p = half_encoder_mc;
-#endif
     if (amvenc_loadmc(p) < 0) {
         //amvdec_disable();
         return -EBUSY;
@@ -1253,10 +1227,8 @@ static s32 avc_init(void)
     avc_init_dblk_buffer(dblk_buf_canvas);   //decoder buffer , need set before each frame start
     avc_init_reference_buffer(ref_buf_canvas); //reference  buffer , need set before each frame start
     avc_init_assit_buffer(); //assitant buffer for microcode
-#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8
     if(half_ucode_mode == 0)
         avc_init_ie_me_parameter();
-#endif
     WRITE_HREG(ENCODER_STATUS , ENCODER_IDLE);
     amvenc_start();
     encode_inited = 1;
@@ -1298,14 +1270,12 @@ void amvenc_avc_start_cmd(int cmd, unsigned* input_info)
 	}
 	avc_init_dblk_buffer(dblk_buf_canvas);   
 	avc_init_reference_buffer(ref_buf_canvas); 
-#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8
 	if(half_ucode_mode == 0){
 		if((cmd == ENCODER_IDR)||(cmd == ENCODER_NON_IDR)){
 			set_input_format((amvenc_mem_type)input_info[0], (amvenc_frame_fmt)input_info[1], input_info[2], input_info[3], input_info[4],(unsigned char)input_info[5]);
 		}
 		avc_init_ie_me_parameter();
 	}
-#endif
 	encoder_status = cmd;
 	WRITE_HREG(ENCODER_STATUS , cmd);
 	if((cmd == ENCODER_IDR)||(cmd == ENCODER_NON_IDR)){
@@ -1437,16 +1407,12 @@ static long amvenc_avc_ioctl(struct file *file,
 		break;    
 	case AMVENC_AVC_IOC_NEW_CMD:
 		amrisc_cmd = *((unsigned*)arg) ;
-#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8
 		if(half_ucode_mode == 0){
 			addr_info = (unsigned*)arg;
 			amvenc_avc_start_cmd(amrisc_cmd, &addr_info[1]);
 		}else{
 			amvenc_avc_start_cmd(amrisc_cmd, NULL);
 		}
-#else
-		amvenc_avc_start_cmd(amrisc_cmd, NULL);
-#endif
 		break;
 	case AMVENC_AVC_IOC_GET_STAGE:
 		*((unsigned*)arg)  = encoder_status;
@@ -1470,14 +1436,12 @@ static long amvenc_avc_ioctl(struct file *file,
 		    encoder_height = *((unsigned*)arg) ;
 		break;	
 	case AMVENC_AVC_IOC_CONFIG_INIT:
-#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8
 		addr_info = (unsigned*)arg;
 		if(*addr_info == 1)
 			half_ucode_mode = 1;
 		else
 			half_ucode_mode = 0;
 		debug_level(1,"avc init as mode %d\n",half_ucode_mode);
-#endif
 		avc_init();
 		break;		
 	case AMVENC_AVC_IOC_FLUSH_CACHE:
@@ -1538,14 +1502,12 @@ static long amvenc_avc_ioctl(struct file *file,
 		addr_info[11] = gAmvencbuff.bufspec->bitstream.buf_start;
 		addr_info[12] = gAmvencbuff.bufspec->bitstream.buf_size;
 		break;
-#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8
 	case AMVENC_AVC_IOC_SET_IE_ME_MB_TYPE:
 		ie_me_mb_type = *((unsigned*)arg);
 		break;
 	case AMVENC_AVC_IOC_SET_ME_PIXEL_MODE:
 		ie_me_mode |= (*((unsigned*)arg) & ME_PIXEL_MODE_MASK)<<ME_PIXEL_MODE_SHIFT;
 		break;
-#endif
 	case AMVENC_AVC_IOC_GET_DEVINFO:
 		strncpy((char *)arg,AMVENC_DEV_VERSION,strlen(AMVENC_DEV_VERSION));
 		break;

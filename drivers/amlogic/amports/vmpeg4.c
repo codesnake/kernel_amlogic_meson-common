@@ -69,7 +69,7 @@ MODULE_AMLOG(LOG_LEVEL_ERROR, 0, LOG_LEVEL_DESC, LOG_DEFAULT_MASK_DESC);
 #define P_PICTURE   1
 #define B_PICTURE   2
 
-#define ORI_BUFFER_START_ADDR   0x81000000
+#define ORI_BUFFER_START_ADDR   0x01000000
 
 #define INTERLACE_FLAG          0x80
 #define BOTTOM_FIELD_FIRST_FLAG 0x40
@@ -723,7 +723,7 @@ static void vmpeg4_prot_init(void)
     SET_VREG_MASK(MDEC_PIC_DC_CTRL, 1<<17);
 #endif
 
-#if MESON_CPU_TYPE == MESON_CPU_TYPE_MESON8
+#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8
     printk("mpeg4 meson8 prot init\n");
     WRITE_VREG(MDEC_PIC_DC_THRESH, 0x404038aa);
 #endif

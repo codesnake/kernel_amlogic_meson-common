@@ -618,7 +618,13 @@ void tsync_avevent_locked(avevent_t event, u32 param)
         break;
 
     case AUDIO_START:		
-		timestamp_apts_set(param);
+        //reset discontinue var
+        tsync_set_sync_adiscont(0);
+        tsync_set_sync_adiscont_diff(0);
+        tsync_set_sync_vdiscont(0);
+        tsync_set_sync_vdiscont_diff(0);
+        
+        timestamp_apts_set(param);
 
 		amlog_level(LOG_LEVEL_INFO, "audio start, reset apts = 0x%x\n", param);
 
@@ -683,11 +689,7 @@ void tsync_avevent_locked(avevent_t event, u32 param)
         }
         apause_flag = 0;
         timestamp_apts_start(0);
-        //reset discontinue var
-        tsync_set_sync_adiscont(0);
-        tsync_set_sync_adiscont_diff(0);
-        tsync_set_sync_vdiscont(0);
-        tsync_set_sync_vdiscont_diff(0);
+       
         break;
 
     case AUDIO_PAUSE:

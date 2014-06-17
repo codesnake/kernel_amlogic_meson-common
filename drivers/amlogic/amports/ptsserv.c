@@ -5,7 +5,7 @@
 #include <linux/amlogic/amports/ptsserv.h>
 #include <linux/amlogic/amports/timestamp.h>
 #include <linux/amlogic/amports/tsync.h>
-#include "ampotrs_priv.h"
+#include "amports_priv.h"
 
 #include <mach/am_regs.h>
 
@@ -175,56 +175,85 @@ EXPORT_SYMBOL(pts_cached_time);
 int calculation_stream_delayed_ms(u8 type,u32 *latestbitrate,u32*avg_bitare)
 {
     pts_table_t *pTable;
-	u32 timestampe_delayed=0;
-	u32 outtime;
+    u32 timestampe_delayed=0;
+    u32 outtime;
 	
     if (type >= PTS_TYPE_MAX) {
         return 0;
     }
 
+#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8B
+    if (type == PTS_TYPE_HEVC) {
+        pTable = &pts_table[PTS_TYPE_VIDEO];
+    } else
+#endif
     pTable = &pts_table[type];
 
-    if((pTable->last_checkin_pts==-1) || (pTable->last_checkout_pts==-1))
-	    return 0;
-	if(type == PTS_TYPE_VIDEO)
-		outtime=timestamp_vpts_get();
-	else if(type ==PTS_TYPE_AUDIO)
-		outtime=timestamp_apts_get();
-	else 
-		outtime=timestamp_pcrscr_get();
-    timestampe_delayed=(pTable->last_checkin_pts-outtime)/90;
-	if((timestampe_delayed<0 ||timestampe_delayed>5*1000) && pTable->last_avg_bitrate>0){
-		int diff=pTable->last_checkin_offset-pTable->last_checkout_offset;
-		int diff2=stbuf_level(get_buf_by_type(type));
-		if((diff-diff2)> (pTable->last_avg_bitrate/8/10) || (diff-diff2*10))
-			diff =diff2;
-		int delay_ms=diff*1000/(1+pTable->last_avg_bitrate/8);
-		if(timestampe_delayed< 0 ||abs(timestampe_delayed-delay_ms)>3*1000){
-			timestampe_delayed=delay_ms;
-			printk("..recalculated %d ms delay,diff=%d\n",timestampe_delayed,diff);
-		}
-	}
-	if(latestbitrate)
-		*latestbitrate=pTable->last_bitrate;
-	if(avg_bitare)
-		*avg_bitare=pTable->last_avg_bitrate;
-	return timestampe_delayed;
-}
-EXPORT_SYMBOL(calculation_stream_delayed_ms);
-int calculation_stream_ext_delayed_ms(u8 type)
-{
-       pts_table_t *pTable;
-       int extdelay_ms;
-       if (type >= PTS_TYPE_MAX) {
+    if((pTable->last_checkin_pts==-1) || (pTable->last_checkout_pts==-1)) {
         return 0;
     }
-       pTable = &pts_table[type];
-       extdelay_ms=jiffies-pTable->last_checkin_jiffies;
-       if(extdelay_ms<0)
-               extdelay_ms=0;
-       return extdelay_ms*1000/HZ;
-}
 
+#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8B
+    if (type == PTS_TYPE_HEVC) {
+        outtime = timestamp_vpts_get();
+    } else
+#endif
+    if (type == PTS_TYPE_VIDEO) {
+        outtime = timestamp_vpts_get();
+    } else if (type ==PTS_TYPE_AUDIO) {
+        outtime = timestamp_apts_get();
+    } else {
+        outtime = timestamp_pcrscr_get();
+    }
+
+    timestampe_delayed = (pTable->last_checkin_pts-outtime)/90;
+
+    if ((timestampe_delayed<0 ||timestampe_delayed>5*1000) && pTable->last_avg_bitrate>0) {
+        int diff = pTable->last_checkin_offset-pTable->last_checkout_offset;
+        int diff2 = stbuf_level(get_buf_by_type(type));
+
+        if ((diff-diff2) > (pTable->last_avg_bitrate/8/10) || (diff-diff2*10)) {
+            int delay_ms;
+            diff = diff2;
+            delay_ms=diff*1000/(1+pTable->last_avg_bitrate/8);
+
+            if (timestampe_delayed< 0 ||abs(timestampe_delayed-delay_ms)>3*1000) {
+                timestampe_delayed=delay_ms;
+                ///printk("..recalculated %d ms delay,diff=%d\n",timestampe_delayed,diff);
+            }
+	}
+    }
+
+    if (latestbitrate) {
+        *latestbitrate=pTable->last_bitrate;
+    }
+
+    if (avg_bitare) {
+        *avg_bitare=pTable->last_avg_bitrate;
+    }
+
+    return timestampe_delayed;
+}
+EXPORT_SYMBOL(calculation_stream_delayed_ms);
+
+int calculation_stream_ext_delayed_ms(u8 type)
+{
+    pts_table_t *pTable;
+    int extdelay_ms;
+
+    if (type >= PTS_TYPE_MAX) {
+         return 0;
+    }
+
+    pTable = &pts_table[type];
+    extdelay_ms = jiffies-pTable->last_checkin_jiffies;
+
+    if (extdelay_ms < 0) {
+        extdelay_ms=0;
+    }
+
+    return extdelay_ms*1000/HZ;
+}
 #endif
 
 static int pts_checkin_offset_inline(u8 type, u32 offset, u32 val,u64 uS64)
@@ -816,6 +845,11 @@ int pts_start(u8 type)
         return -EINVAL;
     }
 
+#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8B
+    if (type == PTS_TYPE_HEVC) {
+        pTable = &pts_table[PTS_TYPE_VIDEO];
+    } else
+#endif
     pTable = &pts_table[type];
 
     spin_lock_irqsave(&lock, flags);
@@ -826,9 +860,21 @@ int pts_start(u8 type)
         spin_unlock_irqrestore(&lock, flags);
 
         if(alloc_pts_list(pTable)!=0){
-			return -ENOMEM;
+            return -ENOMEM;
         }
 
+#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8B
+        if (type == PTS_TYPE_HEVC) {
+            pTable->buf_start = READ_VREG(HEVC_STREAM_START_ADDR);
+            pTable->buf_size = READ_VREG(HEVC_STREAM_END_ADDR)
+                               - pTable->buf_start;
+            WRITE_MPEG_REG(VIDEO_PTS, 0);
+            timestamp_pcrscr_set(0);//video always need the pcrscr,Clear it to use later
+            pTable->first_checkin_pts = -1;
+            pTable->first_lookup_ok = 0;
+            pTable->first_lookup_is_fail = 0;
+        } else
+#endif
         if (type == PTS_TYPE_VIDEO) {
             pTable->buf_start = READ_VREG(VLD_MEM_VIFIFO_START_PTR);
             pTable->buf_size = READ_VREG(VLD_MEM_VIFIFO_END_PTR)
@@ -845,7 +891,7 @@ int pts_start(u8 type)
             timestamp_pcrscr_set(0);//video always need the pcrscr,Clear it to use later
             pTable->first_checkin_pts = -1;
             pTable->first_lookup_ok = 0;
-	     pTable->first_lookup_is_fail = 0;
+            pTable->first_lookup_is_fail = 0;
         } else if (type == PTS_TYPE_AUDIO) {
             pTable->buf_start = READ_MPEG_REG(AIU_MEM_AIFIFO_START_PTR);
             pTable->buf_size = READ_MPEG_REG(AIU_MEM_AIFIFO_END_PTR)
@@ -892,6 +938,11 @@ int pts_stop(u8 type)
         return -EINVAL;
     }
 
+#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8B
+    if (type == PTS_TYPE_HEVC) {
+        pTable = &pts_table[PTS_TYPE_VIDEO];
+    } else
+#endif
     pTable = &pts_table[type];
 
     spin_lock_irqsave(&lock, flags);

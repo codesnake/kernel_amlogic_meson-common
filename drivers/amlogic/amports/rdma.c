@@ -86,7 +86,7 @@ static int rdma_done_line_max = 0;
 
 static int enable = 0;
 
-static int enable_mask = 0xff;
+static int enable_mask = 0x400ff;
 
 static int pre_enable_ = 0;
 
@@ -338,6 +338,7 @@ EXPORT_SYMBOL(vsync_rdma_config_pre);
 static irqreturn_t rdma_isr(int irq, void *dev_id)
 {
     int enc_line;
+    u32 data32;
 
     irq_count++;
     if(post_line_start){
@@ -347,8 +348,10 @@ static irqreturn_t rdma_isr(int irq, void *dev_id)
     }
 
     if(vsync_rdma_config_delay_flag){
+        data32  = Rd(RDMA_ACCESS_AUTO);
+        data32 &= 0xffffedd;
         Wr(RDMA_ACCESS_MAN, 0);
-        Wr(RDMA_ACCESS_AUTO, 0);
+        Wr(RDMA_ACCESS_AUTO, data32);
         rdma_config(1);
         vsync_rdma_config_delay_flag = false;
     }
@@ -606,8 +609,8 @@ EXPORT_SYMBOL(enable_rdma);
 static int  __init rdma_init(void)
 {
 #if 1 // MESON_CPU_TYPE == MESON_CPU_TYPE_MESON6
-    set_output_mode_rdma();
-
+    //set_output_mode_rdma();
+    enable = 1;
     vout_register_client(&display_mode_notifier_nb_v);
 #endif    
     return 0;

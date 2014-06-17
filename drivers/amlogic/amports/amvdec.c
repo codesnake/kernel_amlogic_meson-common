@@ -38,11 +38,13 @@
 #ifdef CONFIG_WAKELOCK
 #include <linux/wakelock.h>
 #endif
+#include "amports_priv.h"
 
 #include <mach/am_regs.h>
 #include <mach/power_gate.h>
 #include "vdec_reg.h"
 #include "amvdec.h"
+#include "amports_config.h"
 
 #define MC_SIZE (4096 * 4)
 
@@ -74,6 +76,7 @@ static void amvdec_pg_enable(bool enable)
 #if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6TVD
         WRITE_VREG(GCLK_EN, 0x3ff);
 #endif
+	CLEAR_VREG_MASK(MDEC_PIC_DC_CTRL, 1<<31);
     } else {
         AMVDEC_CLK_GATE_OFF(AMRISC);
 
@@ -133,7 +136,7 @@ static void amvdec_pg_enable(bool enable)
     }
 }
 
-#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6TVD
+#if HAS_VDEC2
 static void amvdec2_pg_enable(bool enable)
 {
     ulong timeout;
@@ -170,7 +173,53 @@ static void amvdec2_pg_enable(bool enable)
 
         timeout = jiffies + HZ / 10;
 
-        while (READ_VREG(DCAC_DMA_CTRL) & 0x8000) {
+        while (READ_VREG(VDEC2_DCAC_DMA_CTRL) & 0x8000) {
+            if (time_after(jiffies, timeout)) {
+                break;
+            }
+        }
+    }
+}
+#endif
+
+#if HAS_HEVC_VDEC
+static void amhevc_pg_enable(bool enable)
+{
+    ulong timeout;
+    if(!vdec_on(VDEC_HEVC))
+        return;
+    if (enable) {
+//        WRITE_VREG(VDEC2_GCLK_EN, 0x3ff);
+    } else {
+        timeout = jiffies + HZ / 10;
+
+        while (READ_VREG(HEVC_MDEC_PIC_DC_STATUS) != 0) {
+            if (time_after(jiffies, timeout)) {
+                WRITE_VREG_BITS(HEVC_MDEC_PIC_DC_CTRL, 1, 0, 1);
+                WRITE_VREG_BITS(HEVC_MDEC_PIC_DC_CTRL, 0, 0, 1);
+                READ_VREG(HEVC_MDEC_PIC_DC_STATUS);
+                READ_VREG(HEVC_MDEC_PIC_DC_STATUS);
+                READ_VREG(HEVC_MDEC_PIC_DC_STATUS);
+                break;
+            }
+        }
+
+        timeout = jiffies + HZ / 10;
+
+        while (READ_VREG(HEVC_DBLK_STATUS) & 1) {
+            if (time_after(jiffies, timeout)) {
+                WRITE_VREG(HEVC_DBLK_CTRL, 3);
+                WRITE_VREG(HEVC_DBLK_CTRL, 0);
+                READ_VREG(HEVC_DBLK_STATUS);
+                READ_VREG(HEVC_DBLK_STATUS);
+                READ_VREG(HEVC_DBLK_STATUS);
+                break;
+            }
+        }
+
+        timeout = jiffies + HZ / 10;
+
+        while (READ_VREG(HEVC_DCAC_DMA_CTRL) & 0x8000) {
             if (time_after(jiffies, timeout)) {
                 break;
             }
@@ -195,6 +244,32 @@ int amvdec_wake_unlock(void)
 #define amvdec_wake_lock()
 #define amvdec_wake_unlock();
 #endif
+
+
+
+static s32 am_loadmc_ex(const char*name,char *def,s32(* load)(const u32 *))
+{
+    char *mc_addr = kmalloc(4096 * 4, GFP_KERNEL);
+    char *pmc_addr=def;
+	int err;
+    if(mc_addr){
+        int loaded;
+        loaded=request_video_firmware(name,mc_addr,(4096 * 4));
+        if(loaded>0){
+            pmc_addr=mc_addr;
+        }
+    }
+	if(!pmc_addr){
+		kfree(mc_addr);
+		return -1;
+	}
+    if ((err=(*load)((u32*)pmc_addr)) < 0) {
+    	return err;
+    }
+    if(mc_addr)
+       kfree(mc_addr);
+	return err;
+}
 
 s32 amvdec_loadmc(const u32 *p)
 {
@@ -249,7 +324,12 @@ s32 amvdec_loadmc(const u32 *p)
     return ret;
 }
 
-#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6TVD
+s32 amvdec_loadmc_ex(const char*name,char *def)
+{
+	return am_loadmc_ex(name,def,&amvdec_loadmc);
+}
+
+#if HAS_VDEC2
 s32 amvdec2_loadmc(const u32 *p)
 {
     ulong timeout;
@@ -302,10 +382,16 @@ s32 amvdec2_loadmc(const u32 *p)
 
     return ret;
 }
+
+s32 amvdec2_loadmc_ex(const char*name,char *def)
+{
+    return am_loadmc_ex(name,def,&amvdec2_loadmc);
+}
+
 #endif
 
-#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6TVD
-void amhcodec_loadmc(const u32 *p)
+#if HAS_HDEC
+s32 amhcodec_loadmc(const u32 *p)
 {
 #ifdef AMVDEC_USE_STATIC_MEMORY
     if (mc_addr == NULL)
@@ -315,7 +401,7 @@ void amhcodec_loadmc(const u32 *p)
     }
 
     if (!mc_addr) {
-        return;
+        return -ENOMEM;
     }
 
     memcpy(mc_addr, p, MC_SIZE);
@@ -335,6 +421,74 @@ void amhcodec_loadmc(const u32 *p)
 #ifndef AMVDEC_USE_STATIC_MEMORY
     kfree(mc_addr);
 #endif
+
+    return 0;
+}
+
+s32 amhcodec_loadmc_ex(const char*name,char *def)
+{
+    return am_loadmc_ex(name,def,&amhcodec_loadmc);
+}
+
+#endif
+
+#if HAS_HEVC_VDEC
+s32 amhevc_loadmc(const u32 *p)
+{
+    ulong timeout;
+    s32 ret = 0;
+
+#ifdef AMVDEC_USE_STATIC_MEMORY
+    if (mc_addr == NULL)
+#endif
+    {
+        mc_addr = kmalloc(MC_SIZE, GFP_KERNEL);
+    }
+
+    if (!mc_addr) {
+        return -ENOMEM;
+    }
+
+    memcpy(mc_addr, p, MC_SIZE);
+
+    mc_addr_map = dma_map_single(NULL, mc_addr, MC_SIZE, DMA_TO_DEVICE);
+
+    WRITE_VREG(HEVC_MPSR, 0);
+    WRITE_VREG(HEVC_CPSR, 0);
+
+    /* Read CBUS register for timing */
+    timeout = READ_VREG(HEVC_MPSR);
+    timeout = READ_VREG(HEVC_MPSR);
+
+    timeout = jiffies + HZ;
+
+    WRITE_VREG(HEVC_IMEM_DMA_ADR, mc_addr_map);
+    WRITE_VREG(HEVC_IMEM_DMA_COUNT, 0x1000);
+    WRITE_VREG(HEVC_IMEM_DMA_CTRL, (0x8000 | (7 << 16)));
+
+    while (READ_VREG(HEVC_IMEM_DMA_CTRL) & 0x8000) {
+        if (time_before(jiffies, timeout)) {
+            schedule();
+        } else {
+            printk("vdec2 load mc error\n");
+            ret = -EBUSY;
+            break;
+        }
+    }
+
+    dma_unmap_single(NULL, mc_addr_map, MC_SIZE, DMA_TO_DEVICE);
+
+#ifndef AMVDEC_USE_STATIC_MEMORY
+    kfree(mc_addr);
+    mc_addr = NULL;
+#endif
+
+    return ret;
+}
+
+s32 amhevc_loadmc_ex(const char*name, char *def)
+{
+    return am_loadmc_ex(name, def, &amhevc_loadmc);
 }
 #endif
 
@@ -372,7 +526,7 @@ void amvdec_start(void)
     WRITE_VREG(MPSR, 0x0001);
 }
 
-#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6TVD
+#if HAS_VDEC2
 void amvdec2_start(void)
 {
 #ifdef CONFIG_WAKELOCK
@@ -394,10 +548,32 @@ void amvdec2_start(void)
 }
 #endif
 
-#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6TVD
+#if HAS_HDEC
 void amhcodec_start(void)
 {
     WRITE_VREG(HCODEC_MPSR, 0x0001);
+}
+#endif
+
+#if HAS_HEVC_VDEC
+void amhevc_start(void)
+{
+#ifdef CONFIG_WAKELOCK
+    amvdec_wake_lock();
+#endif
+
+    READ_VREG(DOS_SW_RESET3);
+    READ_VREG(DOS_SW_RESET3);
+    READ_VREG(DOS_SW_RESET3);
+
+    WRITE_VREG(DOS_SW_RESET3, (1<<12)|(1<<11));
+    WRITE_VREG(DOS_SW_RESET3, 0);
+
+    READ_VREG(DOS_SW_RESET3);
+    READ_VREG(DOS_SW_RESET3);
+    READ_VREG(DOS_SW_RESET3);
+
+    WRITE_VREG(HEVC_MPSR, 0x0001);
 }
 #endif
 
@@ -440,7 +616,7 @@ void amvdec_stop(void)
 #endif
 }
 
-#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6TVD
+#if HAS_VDEC2
 void amvdec2_stop(void)
 {
     ulong timeout = jiffies + HZ;
@@ -464,10 +640,34 @@ void amvdec2_stop(void)
 }
 #endif
 
-#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6TVD
+#if HAS_HDEC
 void amhcodec_stop(void)
 {
     WRITE_VREG(HCODEC_MPSR, 0);
+}
+#endif
+
+#if HAS_HEVC_VDEC
+void amhevc_stop(void)
+{
+    ulong timeout = jiffies + HZ;
+
+    WRITE_VREG(HEVC_MPSR, 0);
+    WRITE_VREG(HEVC_CPSR, 0);
+
+    while (READ_VREG(HEVC_IMEM_DMA_CTRL) & 0x8000) {
+        if (time_after(jiffies, timeout)) {
+            break;
+        }
+    }
+
+    READ_VREG(DOS_SW_RESET3);
+    READ_VREG(DOS_SW_RESET3);
+    READ_VREG(DOS_SW_RESET3);
+
+#ifdef CONFIG_WAKELOCK
+    amvdec_wake_unlock();
+#endif
 }
 #endif
 
@@ -481,7 +681,7 @@ void amvdec_disable(void)
     amvdec_pg_enable(false);
 }
 
-#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6TVD
+#if HAS_VDEC2
 void amvdec2_enable(void)
 {
     amvdec2_pg_enable(true);
@@ -493,15 +693,30 @@ void amvdec2_disable(void)
 }
 #endif
 
+#if HAS_HEVC_VDEC
+void amhevc_enable(void)
+{
+    amhevc_pg_enable(true);
+}
+
+void amhevc_disable(void)
+{
+    amhevc_pg_enable(false);
+}
+#endif
+
 #ifdef CONFIG_PM
 int amvdec_suspend(struct platform_device *dev, pm_message_t event)
 {
     amvdec_pg_enable(false);
 
-#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6TVD
+#if HAS_VDEC2
     amvdec2_pg_enable(false);
 #endif
 
+#if HAS_HEVC_VDEC
+    amhevc_pg_enable(false);
+#endif
     return 0;
 }
 
@@ -509,10 +724,13 @@ int amvdec_resume(struct platform_device *dev)
 {
     amvdec_pg_enable(true);
 
-#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6TVD 
+#if HAS_VDEC2
     amvdec2_pg_enable(true);
 #endif
 
+#if HAS_HEVC_VDEC
+    amhevc_pg_enable(true);
+#endif
     return 0;
 }
 #endif
@@ -525,10 +743,22 @@ static int vdec_is_paused(void)
     unsigned long wp, rp, level;
     static int  paused_time = 0;
 
+#if HAS_HEVC_VDEC
+    if ((vdec_on(VDEC_HEVC)) && (READ_VREG(HEVC_STREAM_CONTROL) & 1)) {
+        wp = READ_VREG(HEVC_STREAM_WR_PTR);
+        rp = READ_VREG(HEVC_STREAM_RD_PTR);
+        level = READ_VREG(HEVC_STREAM_LEVEL);
+    } else {
+        wp = READ_VREG(VLD_MEM_VIFIFO_WP);
+        rp = READ_VREG(VLD_MEM_VIFIFO_RP);
+        level = READ_VREG(VLD_MEM_VIFIFO_LEVEL);
+    }
+#else    
     wp = READ_VREG(VLD_MEM_VIFIFO_WP);
     rp = READ_VREG(VLD_MEM_VIFIFO_RP);
     level = READ_VREG(VLD_MEM_VIFIFO_LEVEL);
-    if ((rp == old_rp && level > 1024) || /*have data,but output buffer is fulle*/
+#endif
+    if ((rp == old_rp && level > 1024) || /*have data,but output buffer is full */
         (rp == old_rp && wp == old_wp && level == level)) { /*no write && not read*/
         paused_time++;
     } else {
@@ -559,17 +789,17 @@ int amvdev_resume(void)
 
 static void vdec_paused_check_timer(unsigned long arg)
 {
-    if(video_stated_changed){
-	if(!video_running){
-    		if (vdec_is_paused()) {
+    if (video_stated_changed) {
+        if (!video_running) {
+            if (vdec_is_paused()) {
         		printk("vdec paused and release wakelock now\n");
         		amvdec_wake_unlock();
-			video_stated_changed=0;
+                video_stated_changed=0;
 	    	}
-         }else{
+         } else {
 	    	amvdec_wake_lock();
-            	video_stated_changed=0; 
-	}
+            video_stated_changed=0; 
+        }
     }
     mod_timer(&amvdevtimer, jiffies + WAKE_CHECK_INTERVAL);
 }

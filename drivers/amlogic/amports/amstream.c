@@ -63,7 +63,9 @@
 #include "vdec.h"
 #include "adec.h"
 #include "rmparser.h"
-#include "ampotrs_priv.h"
+#include "amvideocap_priv.h"
+#include "amports_priv.h"
+#include <linux/firmware.h>
 
 #include <linux/of.h>
 #include <linux/of_fdt.h>
@@ -216,6 +218,7 @@ const static struct file_operations userdata_fops = {
     .poll     = amstream_userdata_poll,
     .unlocked_ioctl    = amstream_ioctl,
 };
+
 const static struct file_operations amstream_fops = {
     .owner    = THIS_MODULE,
     .open     = amstream_open,
@@ -277,7 +280,15 @@ static stream_port_t ports[] = {
         .name  = "amstream_userdata",
         .type  = PORT_TYPE_USERDATA,
         .fops  = &userdata_fops,
-    }
+    },
+#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8B
+    {
+        .name  = "amstream_hevc",
+        .type  = PORT_TYPE_ES | PORT_TYPE_VIDEO | PORT_TYPE_HEVC,
+        .fops  = &vbuf_fops,
+        .vformat = VFORMAT_HEVC,
+    },
+#endif
 };
 
 static stream_buf_t bufs[BUF_MAX_NUM] = {
@@ -301,7 +312,6 @@ static stream_buf_t bufs[BUF_MAX_NUM] = {
         .buf_start = 0,
         .buf_size = 0,
         .first_tstamp = INVALID_PTS
-
     },
     {
         .reg_base = 0,
@@ -309,8 +319,18 @@ static stream_buf_t bufs[BUF_MAX_NUM] = {
         .buf_start = 0,
         .buf_size = 0,
         .first_tstamp = INVALID_PTS
-    }
+    },
+#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8B
+    {
+        .reg_base = HEVC_STREAM_REG_BASE,
+        .type = BUF_TYPE_HEVC,
+        .buf_start = 0,
+        .buf_size = 0,
+        .first_tstamp = INVALID_PTS
+    },        
+#endif
 };
+
 stream_buf_t *get_buf_by_type(u32  type)
 {
    if(type<BUF_MAX_NUM)
@@ -336,17 +356,21 @@ EXPORT_SYMBOL(get_audio_info);
 
 static void amstream_change_vbufsize(stream_port_t *port,struct stream_buf_s *pvbuf)
 {
-    if (pvbuf->type == BUF_TYPE_VIDEO){ 
+#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8B
+    if ((pvbuf->type == BUF_TYPE_VIDEO) || (pvbuf->type == BUF_TYPE_HEVC)) {
+#else
+    if (pvbuf->type == BUF_TYPE_VIDEO) {
+#endif
         if (port->vformat == VFORMAT_H264_4K2K){				
             pvbuf->buf_size = pvbuf->default_buf_size;
 
-            printk(" amstream_change_vbufsize 4k2k bufsize[0x%x] defaultsize[0x%x]\n",bufs[BUF_TYPE_VIDEO].buf_size,pvbuf->default_buf_size);
+            //printk(" amstream_change_vbufsize 4k2k bufsize[0x%x] defaultsize[0x%x]\n",bufs[BUF_TYPE_VIDEO].buf_size,pvbuf->default_buf_size);
         }else if((pvbuf->default_buf_size > MAX_STREAMBUFFER_SIZE)&& (port->vformat != VFORMAT_H264_4K2K)) {
             pvbuf->buf_size = MAX_STREAMBUFFER_SIZE;
 
-            printk(" amstream_change_vbufsize MAX_STREAMBUFFER_SIZE-[0x%x] defaultsize-[0x%x] vformat-[%d]\n",bufs[BUF_TYPE_VIDEO].buf_size,pvbuf->default_buf_size,port->vformat);
+            //printk(" amstream_change_vbufsize MAX_STREAMBUFFER_SIZE-[0x%x] defaultsize-[0x%x] vformat-[%d]\n",bufs[BUF_TYPE_VIDEO].buf_size,pvbuf->default_buf_size,port->vformat);
         } else {
-            printk(" amstream_change_vbufsize bufsize[0x%x] defaultbufsize [0x%x] \n",bufs[BUF_TYPE_VIDEO].buf_size,pvbuf->default_buf_size);	
+            //printk(" amstream_change_vbufsize bufsize[0x%x] defaultbufsize [0x%x] \n",bufs[BUF_TYPE_VIDEO].buf_size,pvbuf->default_buf_size);	
         }
 
         reset_canuse_buferlevel(10000);
@@ -382,6 +406,16 @@ static  int video_port_init(stream_port_t *port, struct stream_buf_s * pbuf)
 	
     amstream_change_vbufsize(port,pbuf);
 
+#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8B
+    if (port->type & PORT_TYPE_MPTS) {
+        if (pbuf->type == BUF_TYPE_HEVC) {
+            vdec_poweroff(VDEC_1);
+        } else {
+            vdec_poweroff(VDEC_HEVC);
+        }
+    }
+#endif
+
     r = stbuf_init(pbuf);
     if (r < 0) {
         printk("video_port_init %d, stbuf_init failed\n", __LINE__);
@@ -405,6 +439,7 @@ static  int video_port_init(stream_port_t *port, struct stream_buf_s * pbuf)
     }
 
     pbuf->flag |= BUF_FLAG_IN_USE;
+
     return 0;
 }
 
@@ -592,6 +627,12 @@ static  int amstream_port_init(stream_port_t *port)
         pubuf->buf_wp = 0;
         pubuf->buf_rp = 0;
 
+#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8B
+        if (port->vformat == VFORMAT_HEVC) {
+            pvbuf = &bufs[BUF_TYPE_HEVC];
+        }
+#endif
+
         r = video_port_init(port, pvbuf);
         if (r < 0) {
             printk("video_port_init  failed\n");
@@ -608,9 +649,16 @@ static  int amstream_port_init(stream_port_t *port)
     }
 
     if (port->type & PORT_TYPE_MPTS) {
+#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8B
+        r = tsdemux_init((port->flag & PORT_FLAG_VID) ? port->vid : 0xffff,
+                         (port->flag & PORT_FLAG_AID) ? port->aid : 0xffff,
+                         (port->flag & PORT_FLAG_SID) ? port->sid : 0xffff,
+                         (port->vformat == VFORMAT_HEVC));
+#else
         r = tsdemux_init((port->flag & PORT_FLAG_VID) ? port->vid : 0xffff,
                          (port->flag & PORT_FLAG_AID) ? port->aid : 0xffff,
                          (port->flag & PORT_FLAG_SID) ? port->sid : 0xffff);
+#endif
         if (r < 0) {
             printk("tsdemux_init  failed\n");
             goto error4;
@@ -659,6 +707,12 @@ static  int amstream_port_release(stream_port_t *port)
     stream_buf_t *pabuf = &bufs[BUF_TYPE_AUDIO];
     stream_buf_t *psbuf = &bufs[BUF_TYPE_SUBTITLE];
 
+#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8B
+    if (port->vformat == VFORMAT_HEVC) {
+        pvbuf = &bufs[BUF_TYPE_HEVC];
+    }
+#endif
+
     if (port->type & PORT_TYPE_MPTS) {
         tsdemux_release();
     }
@@ -667,9 +721,6 @@ static  int amstream_port_release(stream_port_t *port)
         psparser_release();
     }
 
-    if (port->type & PORT_TYPE_RM) {
-        rmparser_release();
-    }
 
     if (port->type & PORT_TYPE_VIDEO) {
         video_port_release(port, pvbuf, 0);
@@ -725,7 +776,11 @@ static ssize_t amstream_vbuf_write(struct file *file, const char *buf,
                                    size_t count, loff_t * ppos)
 {
     stream_port_t *port = (stream_port_t *)file->private_data;
+#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8B
+    stream_buf_t *pbuf = (port->type & PORT_TYPE_HEVC) ? &bufs[BUF_TYPE_HEVC] : &bufs[BUF_TYPE_VIDEO];
+#else
     stream_buf_t *pbuf = &bufs[BUF_TYPE_VIDEO];
+#endif
     int r;
     if (!(port->flag & PORT_FLAG_INITED)) {
         r = amstream_port_init(port);
@@ -734,11 +789,11 @@ static ssize_t amstream_vbuf_write(struct file *file, const char *buf,
         }
     }
 
-	if (port->flag & PORT_FLAG_DRM){
-		r = drm_write(file, pbuf, buf, count);
-	}else{
-    	r = esparser_write(file, pbuf, buf, count);
-	}
+    if (port->flag & PORT_FLAG_DRM) {
+        r = drm_write(file, pbuf, buf, count);
+    } else {
+        r = esparser_write(file, pbuf, buf, count);
+    }
 #ifdef DATA_DEBUG
     debug_file_write(buf, r);
 #endif
@@ -760,11 +815,11 @@ static ssize_t amstream_abuf_write(struct file *file, const char *buf,
         }
     }
 
-	if (port->flag & PORT_FLAG_DRM){
-		r = drm_write(file, pbuf, buf, count);
-	}else{
-    	r = esparser_write(file, pbuf, buf, count);
-	}
+    if (port->flag & PORT_FLAG_DRM) {
+        r = drm_write(file, pbuf, buf, count);
+    } else {
+        r = esparser_write(file, pbuf, buf, count);
+    }
 
     return r;
 }
@@ -773,7 +828,11 @@ static ssize_t amstream_mpts_write(struct file *file, const char *buf,
                                    size_t count, loff_t * ppos)
 {
     stream_port_t *port = (stream_port_t *)file->private_data;
+#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8B
+    stream_buf_t *pvbuf = (port->vformat == VFORMAT_HEVC) ? &bufs[BUF_TYPE_HEVC] : &bufs[BUF_TYPE_VIDEO];
+#else
     stream_buf_t *pvbuf = &bufs[BUF_TYPE_VIDEO];
+#endif
     stream_buf_t *pabuf = &bufs[BUF_TYPE_AUDIO];
     int r;
     if (!(port->flag & PORT_FLAG_INITED)) {
@@ -858,6 +917,7 @@ static ssize_t amstream_sub_read(struct file *file, char __user *buf, size_t cou
             if (res >= 0) {
                 stbuf_sub_rp_set(sub_rp + data_size - res);
             }
+
             return data_size - res;
         } else {
             if (first_num > 0) {
@@ -865,23 +925,25 @@ static ssize_t amstream_sub_read(struct file *file, char __user *buf, size_t cou
                 if (res >= 0) {
                     stbuf_sub_rp_set(sub_rp + first_num - res);
                 }
+
                 return first_num - res;
             }
 
-
-
-
             res = copy_to_user((void *)buf, (void *)(phys_to_virt(sub_start)), data_size - first_num);
+
             if (res >= 0) {
                 stbuf_sub_rp_set(sub_start + data_size - first_num - res);
             }
+
             return data_size - first_num - res;
         }
     } else {
         res = copy_to_user((void *)buf, (void *)(phys_to_virt(sub_rp)), data_size);
+
         if (res >= 0) {
             stbuf_sub_rp_set(sub_rp + data_size - res);
         }
+
         return data_size - res;
     }
 }
@@ -910,7 +972,6 @@ static ssize_t amstream_sub_write(struct file *file, const char *buf,
     return r;
 }
 
-
 static unsigned int amstream_sub_poll(struct file *file, poll_table *wait_table)
 {
     poll_wait(file, &amstream_sub_wait, wait_table);
@@ -933,6 +994,7 @@ int wakeup_userdata_poll(int wp, int start_phyaddr, int buf_size)
     wake_up_interruptible(&amstream_userdata_wait);
     return userdata_buf->buf_rp;
 }
+
 static unsigned int amstream_userdata_poll(struct file *file, poll_table *wait_table)
 {
     poll_wait(file, &amstream_userdata_wait, wait_table);
@@ -985,6 +1047,7 @@ static ssize_t amstream_userdata_read(struct file *file, char __user *buf, size_
     }
 	return retVal;
 }
+
 static int amstream_open(struct inode *inode, struct file *file)
 {
     s32 i;
@@ -1020,9 +1083,19 @@ static int amstream_open(struct inode *inode, struct file *file)
 
     if (this->type & PORT_TYPE_VIDEO) {
         switch_mod_gate_by_name("vdec", 1);
-#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6TVD
+
+#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8B
+        if (this->type & (PORT_TYPE_MPTS | PORT_TYPE_HEVC)) {
+            vdec_poweron(VDEC_HEVC);
+        }
+
+        if ((this->type & PORT_TYPE_HEVC) == 0) {
+            vdec_poweron(VDEC_1);
+        }
+#elif MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6TVD
         vdec_poweron(VDEC_1);
 #endif
+
         memset(&amstream_dec_info, 0, sizeof(amstream_dec_info));
     }
 
@@ -1074,8 +1147,12 @@ static int amstream_release(struct inode *inode, struct file *file)
 #if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6
     if (this->type & PORT_TYPE_VIDEO) {
 #if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6TVD
+#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8B
+        vdec_poweroff(VDEC_HEVC);
+#endif
         vdec_poweroff(VDEC_1);
 #endif
+
         switch_mod_gate_by_name("vdec", 0);
     }
 
@@ -1109,6 +1186,9 @@ static long amstream_ioctl(struct file *file,
     case AMSTREAM_IOC_VB_START:
         if ((this->type & PORT_TYPE_VIDEO) &&
             ((bufs[BUF_TYPE_VIDEO].flag & BUF_FLAG_IN_USE) == 0)) {
+#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8B
+            bufs[BUF_TYPE_HEVC].buf_start = arg;
+#endif
             bufs[BUF_TYPE_VIDEO].buf_start = arg;
         } else {
             r = -EINVAL;
@@ -1119,6 +1199,9 @@ static long amstream_ioctl(struct file *file,
         if ((this->type & PORT_TYPE_VIDEO) &&
             ((bufs[BUF_TYPE_VIDEO].flag & BUF_FLAG_IN_USE) == 0)) {
             if (bufs[BUF_TYPE_VIDEO].flag & BUF_FLAG_ALLOC) {
+#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8B
+                r = stbuf_change_size(&bufs[BUF_TYPE_HEVC], arg);
+#endif
                 r = stbuf_change_size(&bufs[BUF_TYPE_VIDEO], arg);
             }
         } else {
@@ -1207,8 +1290,11 @@ static long amstream_ioctl(struct file *file,
     case AMSTREAM_IOC_VB_STATUS:
         if (this->type & PORT_TYPE_VIDEO) {
             struct am_io_param *p = (void*)arg;
+#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8B
+            stream_buf_t *buf = (this->vformat == VFORMAT_HEVC) ? &bufs[BUF_TYPE_HEVC] : &bufs[BUF_TYPE_VIDEO];
+#else
             stream_buf_t *buf = &bufs[BUF_TYPE_VIDEO];
-
+#endif
             if (p == NULL) {
                 r = -EINVAL;
             }
@@ -1280,19 +1366,32 @@ static long amstream_ioctl(struct file *file,
         if ((this->type & (PORT_TYPE_AUDIO | PORT_TYPE_VIDEO)) ==
             ((PORT_TYPE_AUDIO | PORT_TYPE_VIDEO))) {
             r = -EINVAL;
-        } else if (this->type & PORT_TYPE_VIDEO) {
+        } 
+#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8B
+        else if (this->type & PORT_TYPE_HEVC) {
+            r = es_vpts_checkin(&bufs[BUF_TYPE_HEVC], arg);
+        }
+#endif
+        else if (this->type & PORT_TYPE_VIDEO) {
             r = es_vpts_checkin(&bufs[BUF_TYPE_VIDEO], arg);
-        } else if (this->type & PORT_TYPE_AUDIO) {
+        }
+        else if (this->type & PORT_TYPE_AUDIO) {
             r = es_apts_checkin(&bufs[BUF_TYPE_AUDIO], arg);
         }
         break;
-	case AMSTREAM_IOC_TSTAMP_uS64:
+
+    case AMSTREAM_IOC_TSTAMP_uS64:
         if ((this->type & (PORT_TYPE_AUDIO | PORT_TYPE_VIDEO)) ==
         	((PORT_TYPE_AUDIO | PORT_TYPE_VIDEO))) {	
         	r = -EINVAL;
         } else{
             u64 pts;
             memcpy(&pts,(void *)arg,sizeof(u64));
+#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8B
+            if (this->type & PORT_TYPE_HEVC) {
+                r = es_vpts_checkin_us64(&bufs[BUF_TYPE_HEVC], pts);
+            } else
+#endif
             if (this->type & PORT_TYPE_VIDEO) {
                 r = es_vpts_checkin_us64(&bufs[BUF_TYPE_VIDEO],pts);
             } else if (this->type & PORT_TYPE_AUDIO) {
@@ -1363,7 +1462,6 @@ static long amstream_ioctl(struct file *file,
         break;
 
     case AMSTREAM_IOC_AUDIO_INFO:
-
         if ((this->type & PORT_TYPE_VIDEO) || (this->type & PORT_TYPE_AUDIO)) {
             if (copy_from_user(&audio_dec_info, (void __user *)arg, sizeof(audio_dec_info))) {
                 r = -EFAULT;
@@ -1500,38 +1598,44 @@ static long amstream_ioctl(struct file *file,
     case AMSTREAM_IOC_SET_DEMUX:
         tsdemux_set_demux((int)arg);
         break;
-	case AMSTREAM_IOC_SET_VIDEO_DELAY_LIMIT_MS:
+    case AMSTREAM_IOC_SET_VIDEO_DELAY_LIMIT_MS:
+#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8B
+        bufs[BUF_TYPE_HEVC].max_buffer_delay_ms = (int)arg;
+#endif
         bufs[BUF_TYPE_VIDEO].max_buffer_delay_ms = (int)arg;
         break;
-	case AMSTREAM_IOC_SET_AUDIO_DELAY_LIMIT_MS:
+    case AMSTREAM_IOC_SET_AUDIO_DELAY_LIMIT_MS:
         bufs[BUF_TYPE_AUDIO].max_buffer_delay_ms = (int)arg;
         break;
-	case AMSTREAM_IOC_GET_VIDEO_DELAY_LIMIT_MS:
+    case AMSTREAM_IOC_GET_VIDEO_DELAY_LIMIT_MS:
         put_user(bufs[BUF_TYPE_VIDEO].max_buffer_delay_ms,(int *)arg);
         break;
-	case AMSTREAM_IOC_GET_AUDIO_DELAY_LIMIT_MS:
+    case AMSTREAM_IOC_GET_AUDIO_DELAY_LIMIT_MS:
         put_user(bufs[BUF_TYPE_AUDIO].max_buffer_delay_ms,(int *)arg);
         break;		
-	case AMSTREAM_IOC_GET_VIDEO_CUR_DELAY_MS:
-		{
-		int delay;
-		delay=calculation_stream_delayed_ms(PTS_TYPE_VIDEO,NULL,NULL);
-		if(delay>=0)
-			put_user(delay,(int *)arg);
-		else 
-			put_user(0,(int *)arg);
+    case AMSTREAM_IOC_GET_VIDEO_CUR_DELAY_MS:
+        {
+            int delay;
+            delay = calculation_stream_delayed_ms(PTS_TYPE_VIDEO,NULL,NULL);
+            if (delay >= 0) {
+                put_user(delay,(int *)arg);
+            } else {
+                put_user(0,(int *)arg);
+            }
+        }
         break;
-		}
-	case AMSTREAM_IOC_GET_AUDIO_CUR_DELAY_MS:
-		{
-		int delay;
-		delay=calculation_stream_delayed_ms(PTS_TYPE_AUDIO,NULL,NULL);
-		if(delay>=0)
-			put_user(delay,(int *)arg);
-		else 
-			put_user(0,(int *)arg);
+
+    case AMSTREAM_IOC_GET_AUDIO_CUR_DELAY_MS:
+        {
+            int delay;
+            delay = calculation_stream_delayed_ms(PTS_TYPE_AUDIO,NULL,NULL);
+            if (delay >= 0) {
+                put_user(delay,(int *)arg);
+            } else {
+                put_user(0,(int *)arg);
+            }
+        }
         break;
-		}
 	case AMSTREAM_IOC_GET_AUDIO_AVG_BITRATE_BPS:
 		{
 		int delay;
@@ -1644,7 +1748,12 @@ static ssize_t bufs_show(struct class *class, struct class_attribute *attr, char
     int i;
     char *pbuf = buf;
     stream_buf_t *p = NULL;
+#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8B
+    char buf_type[][12] = {"Video", "Audio", "Subtitle", "UserData", "HEVC"};
+#else
     char buf_type[][12] = {"Video", "Audio", "Subtitle", "UserData"};
+#endif
+
     for (i = 0; i < sizeof(bufs) / sizeof(stream_buf_t); i++) {
         p = &bufs[i];
         /*type*/
@@ -1675,11 +1784,12 @@ static ssize_t bufs_show(struct class *class, struct class_attribute *attr, char
         /*buf stats*/
 
         pbuf += sprintf(pbuf, "\tbuf addr:%#x\n", p->buf_start);
-        if (p->type != BUF_TYPE_SUBTITLE) {
 
+        if (p->type != BUF_TYPE_SUBTITLE) {
             pbuf += sprintf(pbuf, "\tbuf size:%#x\n", p->buf_size);
             pbuf += sprintf(pbuf, "\tbuf canusesize:%#x\n", p->canusebuf_size);
             pbuf += sprintf(pbuf, "\tbuf regbase:%#lx\n", p->reg_base);
+
             if (p->reg_base && p->flag & BUF_FLAG_IN_USE) {
 #if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6
                 switch_mod_gate_by_name("vdec", 1);
@@ -1690,7 +1800,7 @@ static ssize_t bufs_show(struct class *class, struct class_attribute *attr, char
 #if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6
                 switch_mod_gate_by_name("vdec", 0);
 #endif
-            }else {
+            } else {
                 pbuf += sprintf(pbuf, "\tbuf no used.\n");
             }
         } else {
@@ -1703,7 +1813,7 @@ static ssize_t bufs_show(struct class *class, struct class_attribute *attr, char
                 data_size = p->buf_size - sub_rp + sub_wp;
             }
             pbuf += sprintf(pbuf, "\tbuf size:%#x\n", p->buf_size);
-	     pbuf += sprintf(pbuf, "\tbuf canusesize:%#x\n", p->canusebuf_size);
+	    pbuf += sprintf(pbuf, "\tbuf canusesize:%#x\n", p->canusebuf_size);
             pbuf += sprintf(pbuf, "\tbuf start:%#x\n", stbuf_sub_start_get());
             pbuf += sprintf(pbuf, "\tbuf write pointer:%#x\n", sub_wp);
             pbuf += sprintf(pbuf, "\tbuf read pointer:%#x\n", sub_rp);
@@ -1712,23 +1822,27 @@ static ssize_t bufs_show(struct class *class, struct class_attribute *attr, char
 
         pbuf += sprintf(pbuf, "\tbuf first_stamp:%#x\n", p->first_tstamp);
         pbuf += sprintf(pbuf, "\tbuf wcnt:%#x\n\n", p->wcnt);
-		
-		pbuf += sprintf(pbuf, "\tbuf max_buffer_delay_ms:%dms\n", p->max_buffer_delay_ms);
-		{
-			int calc_delayms=0;
-			u32 bitrate=0,avg_bitrate=0;
-			calc_delayms=calculation_stream_delayed_ms(p->type,&bitrate,&avg_bitrate);
-			if(calc_delayms>=0){
-		    	pbuf += sprintf(pbuf, "\tbuf current delay:%dms\n",calc_delayms);
-		    	pbuf += sprintf(pbuf, "\tbuf bitrate latest:%dbps,avg:%dbps\n",bitrate,avg_bitrate);
-		    	pbuf += sprintf(pbuf, "\tbuf time after last pts:%d ms\n",
-                      calculation_stream_ext_delayed_ms(p->type));
-				pbuf += sprintf(pbuf, "\tbuf time after last write data :%d ms\n",
-					  (int)(jiffies_64 - p->last_write_jiffies64)*1000/HZ);
+        pbuf += sprintf(pbuf, "\tbuf max_buffer_delay_ms:%dms\n", p->max_buffer_delay_ms);
 
-			}
-		}
+        if (p->reg_base && p->flag & BUF_FLAG_IN_USE) {
+            int calc_delayms=0;
+            u32 bitrate=0,avg_bitrate=0;
+
+            calc_delayms = calculation_stream_delayed_ms(p->type, &bitrate, &avg_bitrate);
+
+            if (calc_delayms>=0) {
+                pbuf += sprintf(pbuf, "\tbuf current delay:%dms\n",calc_delayms);
+                pbuf += sprintf(pbuf, "\tbuf bitrate latest:%dbps,avg:%dbps\n",bitrate,avg_bitrate);
+                pbuf += sprintf(pbuf, "\tbuf time after last pts:%d ms\n",
+
+                calculation_stream_ext_delayed_ms(p->type));
+
+                pbuf += sprintf(pbuf, "\tbuf time after last write data :%d ms\n",
+                                (int)(jiffies_64 - p->last_write_jiffies64)*1000/HZ);
+            }
+        }
     }
+
     return pbuf - buf;
 }
 
@@ -1828,7 +1942,42 @@ static struct class_attribute amstream_class_attrs[] = {
 static struct class amstream_class = {
         .name = "amstream",
         .class_attrs = amstream_class_attrs,
-    };
+};
+int request_video_firmware(const char * file_name,char *buf,int size)
+{
+	const struct firmware *firmware;
+	int err=0;
+	struct device *micro_dev;
+	printk("try load %s  ...",file_name);
+	micro_dev = device_create(&amstream_class,
+					    NULL, MKDEV(AMSTREAM_MAJOR, 100),
+					    NULL, "videodec");
+	if(micro_dev ==NULL ){
+		printk("device_create failed =%d\n",err);
+		return -1;
+	}
+	if((err=request_firmware(&firmware,file_name, micro_dev))<0)
+	{
+		printk("can't load the %s,err=%d\n",file_name,err);
+		goto error1;
+	}
+	if(firmware->size>size)
+	{
+		printk("not enough memory size for audiodsp code\n");
+		err=-ENOMEM;
+		goto release;
+	}
+
+	memcpy(buf,(char*)firmware->data,firmware->size);
+    mb();
+	printk("load mcode size=%d\n mcode name %s\n",firmware->size,file_name);
+	err=firmware->size;
+release:	
+	release_firmware(firmware);
+error1:
+	device_destroy(&amstream_class, MKDEV(AMSTREAM_MAJOR, 100));
+	return err;
+}
 
 static struct resource memobj;
 static int  amstream_probe(struct platform_device *pdev)
@@ -1917,6 +2066,17 @@ static int  amstream_probe(struct platform_device *pdev)
         bufs[BUF_TYPE_SUBTITLE].buf_size = DEFAULT_SUBTITLE_BUFFER_SIZE;
         bufs[BUF_TYPE_SUBTITLE].flag = BUF_FLAG_IOMEM;
     }
+
+#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8B
+    bufs[BUF_TYPE_HEVC].buf_start = bufs[BUF_TYPE_VIDEO].buf_start;
+    bufs[BUF_TYPE_HEVC].buf_size  = bufs[BUF_TYPE_VIDEO].buf_size;
+
+    if (bufs[BUF_TYPE_VIDEO].flag & BUF_FLAG_IOMEM) {
+        bufs[BUF_TYPE_HEVC].flag |= BUF_FLAG_IOMEM;
+    }
+
+    bufs[BUF_TYPE_HEVC].default_buf_size = bufs[BUF_TYPE_VIDEO].default_buf_size;
+#endif
 
     if (stbuf_fetch_init() != 0) {
         r = (-ENOMEM);
