@@ -80,6 +80,7 @@ uint field_22lvl;
 pd_detect_threshold_t field_pd_th;
 pd_detect_threshold_t win_pd_th[MAX_WIN_NUM];
 pd_win_prop_t pd_win_prop[MAX_WIN_NUM];
+extern int mpeg2vdin_en;
 
 static bool frame_dynamic = 0;
 MODULE_PARM_DESC(frame_dynamic, "\n frame_dynamic \n");
@@ -352,9 +353,9 @@ void di_hw_init(void)
 
 
 #if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8
-        //need not set DI_CLKG_CTRL, hardware default value of this register is already 0 
+        //need not set DI_CLKG_CTRL, hardware default value of this register is already 0
     //Wr_reg_bits(DI_CLKG_CTRL, 0x0, 0, 2);    // bit 0: 1, no clock; bit 1: 0, auto clock gate
-#endif    
+#endif
 }
 
 void di_hw_uninit(void)
@@ -514,7 +515,10 @@ void enable_di_pre_aml (
                     (0x1 << 30 )      								// pre soft rst, pre frame rst.
                    );
 #endif
-
+#ifdef SUPPORT_MPEG_TO_VDIN
+	if(mpeg2vdin_en)
+		WRITE_MPEG_REG_BITS(DI_PRE_CTRL,1,13,1);// pre sync with vdin vsync
+#endif
 #ifdef DET3D
     if(det3d_en && (!det3d_cfg)) {
         det3d_enable(1);
@@ -1497,7 +1501,10 @@ void initial_di_pre_aml ( int hsize_pre, int vsize_pre, int hold_line )
                     (0 << 29) |        			// pre field number.
                     (0x3 << 30)      			// pre soft rst, pre frame rst.
            	);
-
+#ifdef SUPPORT_MPEG_TO_VDIN
+	if(mpeg2vdin_en)
+		WRITE_MPEG_REG_BITS(DI_PRE_CTRL,1,13,1);// pre sync with vdin vsync
+#endif
     Wr(DI_MC_22LVL0, (Rd(DI_MC_22LVL0) & 0xffff0000 ) | 256);                //   field 22 level
     Wr(DI_MC_32LVL0, (Rd(DI_MC_32LVL0) & 0xffffff00 ) | 16);       				// field 32 level
 }
@@ -1804,7 +1811,11 @@ void di_post_switch_buffer_pd (
                        (blend_mode << 20)                                                            // motion adaptive blend.
                       );
 #else
-        VSYNC_WR_MPEG_REG(DI_BLEND_CTRL, (post_mb_en << 28) |                                                   // post motion blur enable.
+        VSYNC_WR_MPEG_REG(DI_BLEND_CTRL, 
+	#ifdef NEW_DI_V1
+       		       (1<<31) |        //enable new ei(remove from m8b)
+        #endif
+                       (post_mb_en << 28) |                                                   // post motion blur enable.
                        (0 << 27) |                                                                    // mtn3p(l, c, r) max.
                        (0 << 26) |                                                                    // mtn3p(l, c, r) min.
                        (0 << 25) |                                                                    // mtn3p(l, c, r) ave.
@@ -1816,7 +1827,6 @@ void di_post_switch_buffer_pd (
                       );
 #endif
     }
-
     VSYNC_WR_MPEG_REG_BITS(DI_POST_CTRL, post_field_num, 29, 1);
 }
 
@@ -1878,7 +1888,11 @@ void enable_di_post_pd(
                        (blend_mode << 20)                                                            // motion adaptive blend.
                       );
 #else
-        VSYNC_WR_MPEG_REG(DI_BLEND_CTRL, (post_mb_en << 28) |                                                   // post motion blur enable.
+        VSYNC_WR_MPEG_REG(DI_BLEND_CTRL, 
+     	#ifdef NEW_DI_V1
+       		       (1<<31)   |      //enable new ei(remove from m8b)
+       	#endif
+        	       (post_mb_en << 28) |                                                   // post motion blur enable.
                        (0 << 27) |                                                                    // mtn3p(l, c, r) max.
                        (0 << 26) |                                                                    // mtn3p(l, c, r) min.
                        (0 << 25) |                                                                    // mtn3p(l, c, r) ave.
@@ -2087,6 +2101,7 @@ void read_mtn_info(unsigned long* mtn_info, unsigned long * reg_mtn_info)
 }
 void di_post_read_reverse(bool reverse)
 {
+#if ((MESON_CPU_TYPE ==  MESON_CPU_TYPE_MESON6TV)||	(MESON_CPU_TYPE == MESON_CPU_TYPE_MESON6TVD	))
     if(reverse) {
         Wr_reg_bits(DI_IF1_GEN_REG2,    3, 2, 2);
         Wr_reg_bits(VD1_IF0_GEN_REG2, 0xf, 2, 4);
@@ -2096,9 +2111,11 @@ void di_post_read_reverse(bool reverse)
 	Wr_reg_bits(VD1_IF0_GEN_REG2, 0, 2, 4);
 	Wr_reg_bits(VD2_IF0_GEN_REG2, 0, 2, 4);
     }
+#endif    
 }
 void di_post_read_reverse_irq(bool reverse)
 {
+#if ((MESON_CPU_TYPE ==  MESON_CPU_TYPE_MESON6TV)||(MESON_CPU_TYPE == MESON_CPU_TYPE_MESON6TVD	))
     if(reverse) {
         VSYNC_WR_MPEG_REG_BITS(DI_IF1_GEN_REG2,    3, 2, 2);
         VSYNC_WR_MPEG_REG_BITS(VD1_IF0_GEN_REG2, 0xf, 2, 4);
@@ -2110,6 +2127,7 @@ void di_post_read_reverse_irq(bool reverse)
 	VSYNC_WR_MPEG_REG_BITS(VD2_IF0_GEN_REG2, 0, 2, 4);
 	VSYNC_WR_MPEG_REG_BITS(DI_MTNRD_CTRL, 0, 17,4);
     }
+#endif    
 }
 
 static unsigned char pre_power_on = 0;
@@ -2132,9 +2150,9 @@ void di_set_power_control(unsigned char type, unsigned char enable)
         post_power_on = enable;
 #else
 //let video.c handle it
-#endif            
+#endif
     }
-#endif    
+#endif
 }
 
 unsigned char di_get_power_control(unsigned char type)
@@ -2146,12 +2164,12 @@ unsigned char di_get_power_control(unsigned char type)
 #if 1
 //let video.c handle it
         return 1;
-#else        
+#else
         return post_power_on;
-#endif        
+#endif
     }
-    
-}    
+
+}
 
 #ifdef DI_POST_SKIP_LINE
 MODULE_PARM_DESC(di_vscale_skip_mode, "\n di_vscale_skip_mode\n");

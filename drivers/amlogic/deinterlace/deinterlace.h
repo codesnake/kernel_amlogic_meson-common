@@ -5,7 +5,7 @@
 #define DI_VERSION_OLD        0
 #if MESON_CPU_TYPE == MESON_CPU_TYPE_MESON6TV
 #define DI_VERSION_NEW1       1
-#elif (MESON_CPU_TYPE > MESON_CPU_TYPE_MESON6TV) && (MESON_CPU_TYPE < MESON_CPU_TYPE_MESON6TVD) 
+#elif (MESON_CPU_TYPE > MESON_CPU_TYPE_MESON6TV) && (MESON_CPU_TYPE < MESON_CPU_TYPE_MESON6TVD)
 #define DI_VERSION_NEW2       2
 #elif (MESON_CPU_TYPE == MESON_CPU_TYPE_MESON6TVD) || (MESON_CPU_TYPE == MESON_CPU_TYPE_MESON8)
 #define DI_VERSION_NEW3       3
@@ -22,12 +22,17 @@
 #endif
 #define D2D3_SUPPORT
 #define DET3D
+#define SUPPORT_MPEG_TO_VDIN
 #endif
 
 #if (MESON_CPU_TYPE==MESON_CPU_TYPE_MESON6TV)
-#define NEW_DI_V1 //from m6tvc
 #define NEW_DI_TV
-#elif (MESON_CPU_TYPE==MESON_CPU_TYPE_MESON6TVD)||(MESON_CPU_TYPE==MESON_CPU_TYPE_MESON8)
+#define NEW_DI_V1 //from m6tvc
+#elif (MESON_CPU_TYPE==MESON_CPU_TYPE_MESON6TVD)
+#define NEW_DI_TV
+#define NEW_DI_V1 //from m6tvc
+#define NEW_DI_V2 //from m6tvd(noise meter bug fix,improvement for 2:2 pull down)
+#elif (MESON_CPU_TYPE==MESON_CPU_TYPE_MESON8 || MESON_CPU_TYPE==MESON_CPU_TYPE_MESON8B)
 #define NEW_DI_V1 //from m6tvc
 #define NEW_DI_V2 //from m6tvd(noise meter bug fix,improvement for 2:2 pull down)
 #endif
@@ -74,7 +79,7 @@ typedef struct{
     unsigned field_diff_num;    /* the number of pixels with big difference between current field and previous field */
     unsigned frame_diff;        /* total pixels difference between current field and previouse-previouse field */
     unsigned frame_diff_num;    /* the number of pixels with big difference between current field and previouse-previous field */
-    /**/    
+    /**/
     unsigned frame_diff_skew;      /* the difference between current frame_diff and previous frame_diff */
     unsigned frame_diff_num_skew;   /* the difference between current frame_diff_num and previous frame_diff_num */
     /* parameters for detection */
@@ -94,18 +99,18 @@ typedef struct{
 }pulldown_detect_info_t;
 
 typedef struct{
-        /* 
+        /*
             if frame_diff < threshold, cur_field and pre_pre_field is top/bot or bot/top;
             if field_diff < threshold, cur_field and pre_field is top/bot or bot/top;
          */
     unsigned frame_diff_chg_th;
-    unsigned frame_diff_num_chg_th;    
+    unsigned frame_diff_num_chg_th;
     unsigned field_diff_chg_th;
     unsigned field_diff_num_chg_th;
         /*
-            if frame_diff_skew < threshold,  pre_field/cur_filed is top/bot 
+            if frame_diff_skew < threshold,  pre_field/cur_filed is top/bot
         */
-    unsigned frame_diff_skew_th; 
+    unsigned frame_diff_skew_th;
     unsigned frame_diff_num_skew_th;
         /*
         */
@@ -135,7 +140,7 @@ typedef struct di_buf_s{
     unsigned int dp_buf_adr;
     unsigned int dp_buf_size;
     unsigned int reverse_flag;
-#endif    
+#endif
 #ifdef USE_LIST
     struct list_head list;
 #endif
@@ -158,22 +163,23 @@ typedef struct di_buf_s{
 #ifdef NEW_DI_V1
     unsigned int cnt_adr;
     int cnt_canvas_idx;
-#endif    
+#endif
     unsigned int canvas_config_flag; /* 0, configed; 1, config type 1 (prog); 2, config type 2 (interlace) */
     unsigned int canvas_config_size; /* bit [31~16] width; bit [15~0] height */
     /* pull down information */
     pulldown_detect_info_t field_pd_info;
     pulldown_detect_info_t win_pd_info[MAX_WIN_NUM];
 
-	  unsigned long mtn_info[5];
+    unsigned long mtn_info[5];
     int pulldown_mode;
     int win_pd_mode[5];
     process_fun_index_t process_fun_index;
     int early_process_fun_index;
-  	int left_right;/*1,left eye; 0,right eye in field alternative*/
+    int left_right;/*1,left eye; 0,right eye in field alternative*/
     /*below for type of VFRAME_TYPE_POST*/
     struct di_buf_s* di_buf[2];
     struct di_buf_s* di_buf_dup_p[5]; /* 0~4: n-2, n-1, n, n+1, n+2 ; n is the field to display*/
+    struct di_buf_s* di_wr_linked_buf;
 }di_buf_t;
 
 extern uint di_mtn_1_ctrl1;
@@ -313,7 +319,7 @@ void enable_di_pre_aml (
    DI_SIM_MIF_t    *di_contp2rd_mif,
    DI_SIM_MIF_t    *di_contprd_mif,
    DI_SIM_MIF_t    *di_contwr_mif,
-#endif   
+#endif
    		int nr_en, int mtn_en, int pd32_check_en, int pd22_check_en, int hist_check_en,
    		int pre_field_num, int pre_viu_link, int hold_line, int urgent
    	);
@@ -374,7 +380,7 @@ void di_post_switch_buffer_pd(
     int ei_en, int blend_en, int blend_mtn_en, int blend_mode, int di_vpp_en, int di_ddr_en,
     int post_field_num, int hold_line, int urgent);
 
-void read_pulldown_info(pulldown_detect_info_t* field_pd_info, 
+void read_pulldown_info(pulldown_detect_info_t* field_pd_info,
                         pulldown_detect_info_t* win_pd_info);
 
 void read_mtn_info(unsigned long* mtn_info, unsigned long* );
@@ -397,7 +403,7 @@ void reset_pd_his(void);
 void insert_pd_his(pulldown_detect_info_t* pd_info);
 void reset_pd32_status(void);
 int detect_pd32(void);
-extern unsigned int pd32_match_num; 
+extern unsigned int pd32_match_num;
 extern unsigned int pd32_debug_th;
 extern unsigned int pd32_diff_num_0_th;
 extern unsigned int pd22_th;
@@ -425,7 +431,7 @@ typedef struct{
     unsigned int adr;
     unsigned int val;
     unsigned short start;
-    unsigned short len;    
+    unsigned short len;
 }reg_set_t;
 
 #define REG_SET_MAX_NUM 128
@@ -436,7 +442,7 @@ typedef struct reg_cfg_{
     unsigned int pre_post_type; /* pre, 0; post, 1 */
 	unsigned int dtv_defintion_type;/*high defintion,0; stand defintion ,1;common,2*/
     unsigned int sig_fmt_range[FMT_MAX_NUM]; /* {bit[31:16]~bit[15:0]}, include bit[31:16] and bit[15:0]  */
-    reg_set_t reg_set[REG_SET_MAX_NUM];    
+    reg_set_t reg_set[REG_SET_MAX_NUM];
 }reg_cfg_t;
 
 int get_current_vscale_skip_count(vframe_t* vf);

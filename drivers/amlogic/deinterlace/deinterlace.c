@@ -49,9 +49,11 @@
 #include <linux/amlogic/amports/canvas.h>
 #include "deinterlace.h"
 #include "deinterlace_module.h"
+#include <linux/amlogic/tvin/tvin_v4l2.h>
 
-#if defined(CONFIG_ARCH_MESON2)||defined(NEW_DI_TV)
+#if defined(NEW_DI_TV)
 #define FORCE_BOB_SUPPORT
+#define ENABLE_SPIN_LOCK_ALWAYS
 #else
 #define ENABLE_SPIN_LOCK_ALWAYS
 #endif
@@ -59,16 +61,9 @@
 #include "detect3d.h"
 #endif
 
-#if MESON_CPU_TYPE == MESON_CPU_TYPE_MESON8
-    #undef RUN_DI_PROCESS_IN_IRQ
-    #undef RUN_REG_IN_IRQ
-#elif MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6
-    #define RUN_DI_PROCESS_IN_IRQ
-    #ifdef NEW_DI_TV
-        #undef RUN_REG_IN_IRQ
-    #else
-        #define RUN_REG_IN_IRQ
-    #endif
+#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6
+#define RUN_DI_PROCESS_IN_IRQ
+#define RUN_REG_IN_IRQ
 #endif
 
 //#define RUN_DI_PROCESS_IN_TIMER_IRQ
@@ -144,10 +139,17 @@ static DEFINE_SPINLOCK(di_lock2);
 
 #endif
 
+int mpeg2vdin_en = 0;
+module_param(mpeg2vdin_en,int,0644);
+MODULE_PARM_DESC(mpeg2vdin_en,"mpeg2vdin_en");
 
 static bool overturn = false;
 module_param(overturn,bool,0644);
 MODULE_PARM_DESC(overturn,"overturn /disable reverse");
+
+static bool check_start_drop_prog = false;
+module_param(check_start_drop_prog,bool,0644);
+MODULE_PARM_DESC(check_start_drop_prog,"enable/disable progress start drop function");
 #define CHECK_VDIN_BUF_ERROR
 
 #define DEVICE_NAME "deinterlace"
@@ -179,7 +181,7 @@ static dev_t di_id;
 static struct class *di_class;
 
 #define INIT_FLAG_NOT_LOAD 0x80
-static char version_s[] = "2014-03-6";
+static char version_s[] = "2014-05-16a";
 static unsigned char boot_init_flag=0;
 static int receiver_is_amvideo = 1;
 
@@ -187,7 +189,11 @@ static unsigned char new_keep_last_frame_enable = 0;
 static int bypass_state = 1;
 static int bypass_prog = 0;
 static int bypass_hd_prog = 0;
+#if (MESON_CPU_TYPE>=MESON_CPU_TYPE_MESON8) 
+static int bypass_interlace_output = 0;
+#else
 static int bypass_interlace_output = 1;
+#endif
 #ifdef CONFIG_AM_DEINTERLACE_SD_ONLY
 static int bypass_hd = 1;
 #else
@@ -202,7 +208,11 @@ static int invert_top_bot = 0;
 static int skip_top_bot = 0;
 static char interlace_output_flag = 0;
 static int bypass_get_buf_threshold = 4;
-#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6
+
+#if (MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8)
+static int post_hold_line = 17;//for m8 1080i/50 output
+static int force_update_post_reg = 0x10;
+#elif MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6
 static int post_hold_line = 20;
 static int force_update_post_reg = 0x10;/* bit[4], 1 call process_fun every vsync; 0 call process_fun when toggle frame (early_process_fun is called)
                                         bit[3:0] set force_update_post_reg = 1: only update post reg in vsync for one time
@@ -249,18 +259,27 @@ int di_vscale_skip_enable = 1;
 #define CHECK_DI_DONE
 #endif
 
-#ifdef NEW_DI_V1
+#ifdef NEW_DI_TV
 static int input2pre = 1;
+static bool use_2_interlace_buff = true;/*false:process progress by field;true: process progress by frame with 2 interlace buffer*/
 #else
 static int input2pre = 0;
+static bool use_2_interlace_buff = false;
 #endif
 static int input2pre_buf_miss_count = 0;
 static int input2pre_proc_miss_count = 0;
 static int input2pre_throw_count = 6;
+
 #ifdef NEW_DI_V1
 static int input2pre_miss_policy = 0; /* 0, do not force pre_de_busy to 0, use di_wr_buf after de_irq happen; 1, force pre_de_busy to 0 and call pre_de_done_buf_clear to clear di_wr_buf */
 #else
 static int input2pre_miss_policy = 0; /* 0, do not force pre_de_busy to 0, use di_wr_buf after de_irq happen; 1, force pre_de_busy to 0 and call pre_de_done_buf_clear to clear di_wr_buf */
+#endif
+#else
+#ifdef NEW_DI_TV
+static bool use_2_interlace_buff = true;/*false:process progress by field;true: process progress by frame with 2 interlace buffer*/
+#else
+static bool use_2_interlace_buff = false;
 #endif
 #endif
     /* prog_proc_config,
@@ -289,13 +308,10 @@ static int pulldown_detect = 0x10;
 static int skip_wrong_field = 1;
 static int frame_count = 0;
 static int provider_vframe_level = 0;
-static int frame_packing_mode = 1;
 static int disp_frame_count = 0;
 static int start_frame_drop_count = 1;
 //static int start_frame_hold_count = 0;
-#if defined(CONFIG_ARCH_MESON2)
-static int pre_de_irq_check = 0;
-#endif
+
 static int force_trig_cnt = 0;
 static int di_process_cnt = 0;
 static int video_peek_cnt = 0;
@@ -440,7 +456,7 @@ void trigger_pre_di_process(char idx)
 #ifdef FIQ_VSYNC
     fiq_bridge_pulse_trigger(&fiq_handle_item);
 #else
-    Wr(ISA_TIMERC, 1);
+    WRITE_CBUS_REG(ISA_TIMERC, 1);
 #endif
 //#ifndef RUN_REG_IN_IRQ
     if((idx != 'p')&&(idx != 'i')){
@@ -632,7 +648,7 @@ static int __init di_read_canvas_reverse(char *str)
 }
 __setup("panel_reverse=",di_read_canvas_reverse);
 #endif
-unsigned int di_debug_flag = 0;
+unsigned int di_debug_flag = 0x10;//enable rdma even di bypassed
 static unsigned char* di_log_buf=NULL;
 static unsigned int di_log_wr_pos=0;
 static unsigned int di_log_rd_pos=0;
@@ -705,15 +721,15 @@ int di_print(const char *fmt, ...)
     }
     else if(di_log_flag&DI_LOG_PRECISE_TIMESTAMP){
 #if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6
-        len += snprintf(buf+len, avail-len, "%u:", (unsigned int)Rd(ISA_TIMERE));
+        len += snprintf(buf+len, avail-len, "%u:", (unsigned int)READ_CBUS_REG(ISA_TIMERE));
 #else
-        if(Rd(ISA_TIMERB)==0){
-            Wr(ISA_TIMER_MUX, (Rd(ISA_TIMER_MUX)&(~(3<<TIMER_B_INPUT_BIT)))
+        if(READ_CBUS_REG(ISA_TIMERB)==0){
+            WRITE_CBUS_REG(ISA_TIMER_MUX, (READ_CBUS_REG(ISA_TIMER_MUX)&(~(3<<TIMER_B_INPUT_BIT)))
                 |(TIMER_UNIT_100us<<TIMER_B_INPUT_BIT)|(1<<13)|(1<<17));
-            Wr(ISA_TIMERB, 0xffff);
+            WRITE_CBUS_REG(ISA_TIMERB, 0xffff);
             printk("Deinterlace: Init 100us TimerB\n");
         }
-        len += snprintf(buf+len, avail-len, "%u:", (unsigned int)(0x10000-Rd(ISA_TIMERB)));
+        len += snprintf(buf+len, avail-len, "%u:", (unsigned int)(0x10000-READ_CBUS_REG(ISA_TIMERB)));
 #endif
     }
     va_start(args, fmt);
@@ -1081,6 +1097,7 @@ static ssize_t show_vframe_status(struct device *dev, struct device_attribute* a
 
     return ret;
 }
+
 #ifdef NEW_DI_V1
 static ssize_t store_dump_mem(struct device * dev, struct device_attribute *attr, const char * buf, size_t len);
 #endif
@@ -1093,7 +1110,6 @@ static DEVICE_ATTR(dump_pic, 0664, NULL, store_dump_mem);
 static DEVICE_ATTR(log, 0664, show_log, store_log);
 static DEVICE_ATTR(status, 0664, show_status, NULL);
 static DEVICE_ATTR(provider_vframe_status, 0664, show_vframe_status, NULL);
-
 /***************************
 * di buffer management
 ***************************/
@@ -1219,7 +1235,7 @@ typedef struct queue_s{
     int num;
     int in_idx;
     int out_idx;
-    int type; /* 0, first in first out; 1, general */
+    int type; /* 0, first in first out; 1, general;2, fix position for di buf*/
     unsigned int pool[MAX_QUEUE_POOL_SIZE];
 }queue_t;
 static queue_t queue[QUEUE_NUM];
@@ -1247,6 +1263,8 @@ static void queue_init(int local_buffer_num)
         if((i==QUEUE_RECYCLE)||(i==QUEUE_DISPLAY)||(i==QUEUE_TMP)){
             q->type = 1;
         }
+        if((i==QUEUE_LOCAL_FREE) && use_2_interlace_buff)
+       	    q->type = 2;
     }
     if(local_buffer_num > 0){
         di_buf_pool[VFRAME_TYPE_IN-1].di_buf_ptr = &di_buf_in[0];
@@ -1286,7 +1304,7 @@ static di_buf_t* get_di_buf(int queue_idx, int* start_pos)
             idx = MAX_QUEUE_POOL_SIZE;
         }
     }
-    else{
+    else if((q->type == 1)||(q->type == 2)){
         for(idx=(*start_pos); idx<MAX_QUEUE_POOL_SIZE; idx++){
             if(q->pool[idx]!=0){
                 *start_pos = idx+1;
@@ -1435,7 +1453,7 @@ static void queue_out(di_buf_t* di_buf)
                     recovery_flag++;
                 }
             }
-            else{
+            else if(q->type==1){
                 int pool_val = (di_buf->type<<8)|(di_buf->index);
                 for(i=0; i<MAX_QUEUE_POOL_SIZE; i++){
                     if(q->pool[i]==pool_val){
@@ -1456,6 +1474,24 @@ static void queue_out(di_buf_t* di_buf)
                     }
                     recovery_flag++;
                 }
+            }else if(q->type==2){
+            	int pool_val = (di_buf->type<<8)|(di_buf->index);
+            	if((di_buf->index < MAX_QUEUE_POOL_SIZE)&&(q->pool[di_buf->index]==pool_val)){
+            	    q->num--;
+            	    q->pool[di_buf->index]=0;
+            	    di_buf->queue_index = -1;
+                }else{
+#ifdef DI_DEBUG
+                    printk("%s: Error\n", __func__);
+#endif
+                    if(recovery_flag==0){
+                        recovery_log_reason = 5;
+                        recovery_log_queue_idx = di_buf->queue_index;
+                        recovery_log_di_buf = di_buf;
+                    }
+                    recovery_flag++;
+                }
+
             }
         }
     }
@@ -1494,7 +1530,7 @@ static void queue_in(di_buf_t* di_buf, int queue_idx)
     }
     if(di_buf->queue_index != -1){
 #ifdef DI_DEBUG
-        printk("%s:Error, queue_index(%d) is not -1\n", __func__, di_buf->queue_index);
+        printk("%s:%s[%d] Error, queue_index(%d) is not -1\n", __func__, vframe_type_name[di_buf->type], di_buf->index,di_buf->queue_index);
 #endif
         if(recovery_flag==0){
             recovery_log_reason = 8;
@@ -1519,7 +1555,7 @@ static void queue_in(di_buf_t* di_buf, int queue_idx)
         }
         q->num++;
     }
-    else{
+    else if(q->type==1){
         int i;
         for(i=0; i<MAX_QUEUE_POOL_SIZE; i++){
             if(q->pool[i]==0){
@@ -1539,6 +1575,21 @@ static void queue_in(di_buf_t* di_buf, int queue_idx)
             }
             recovery_flag++;
         }
+    }else if(q->type==2){
+    	if((di_buf->index < MAX_QUEUE_POOL_SIZE)&&(q->pool[di_buf->index]==0)){
+    	   q->pool[di_buf->index] = (di_buf->type<<8)|(di_buf->index);
+           di_buf->queue_index = queue_idx;
+           q->num++;
+    	}else{
+#ifdef DI_DEBUG
+            printk("%s: Error\n", __func__);
+#endif
+            if(recovery_flag==0){
+                recovery_log_reason = 9;
+                recovery_log_queue_idx = queue_idx;
+            }
+            recovery_flag++;
+    	}
     }
 #ifdef DI_DEBUG
     if(di_log_flag&DI_LOG_QUEUE){
@@ -1622,7 +1673,7 @@ typedef struct{
     int process_count; /* valid only when prog_proc_type is 0, for progressive source: top field 1, bot field 0 */
     int source_change_flag;
 
-    unsigned char prog_proc_type; /* set by prog_proc_config when source is vdin*/
+    unsigned char prog_proc_type; /* set by prog_proc_config when source is vdin,0:use 2 i serial buffer,1:use 1 p buffer,3:use 2 i paralleling buffer*/
     unsigned char enable_mtnwr;
     unsigned char enable_pulldown_check;
 
@@ -1688,6 +1739,7 @@ typedef struct{
     int next_canvas_id;
     bool toggle_flag;
     bool vscale_skip_flag;
+    uint start_pts;
 }di_post_stru_t;
 static di_post_stru_t di_post_stru;
 #ifdef NEW_DI_V1
@@ -1700,7 +1752,7 @@ static ssize_t store_dump_mem(struct device * dev, struct device_attribute *attr
 	loff_t pos = 0;
 	void * buff = NULL;
 	mm_segment_t old_fs;
-        
+
         if(!buf)
 	    return len;
         buf_orig = kstrdup(buf, GFP_KERNEL);
@@ -1766,10 +1818,10 @@ static ssize_t store_dump_mem(struct device * dev, struct device_attribute *attr
 #endif
 
 #define is_from_vdin(vframe) (vframe->type & VIDTYPE_VIU_422)
-
+static void recycle_vframe_type_pre(di_buf_t* di_buf);
 static void recycle_vframe_type_post(di_buf_t* di_buf);
 #ifdef DI_DEBUG
-static void recycle_vframe_type_post_print(di_buf_t* di_buf, const char* func);
+static void recycle_vframe_type_post_print(di_buf_t* di_buf, const char* func, const int line);
 #endif
 
 reg_cfg_t* reg_cfg_head = NULL;
@@ -2293,6 +2345,11 @@ static unsigned char is_bypass_post(void)
         return (di_debug_flag>>19)&0x1;
     }
 
+#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8
+/*prot is conflict with di post*/
+    if(di_pre_stru.orientation)
+	return 1;
+#endif
     if((bypass_post)||(bypass_dynamic_flag&1)){
         return 1;
     }
@@ -2326,14 +2383,6 @@ static unsigned char is_input2pre(void)
 #endif
     return 0;
 }
-#endif
-
-#ifndef DI_USE_FIXED_CANVAS_IDX
-#if defined(CONFIG_ARCH_MESON2)
-#if ((DEINTERLACE_CANVAS_BASE_INDEX!=0x68)||(DEINTERLACE_CANVAS_MAX_INDEX!=0x7f))
-#error "DEINTERLACE_CANVAS_BASE_INDEX is not 0x68 or DEINTERLACE_CANVAS_MAX_INDEX is not 0x7f, update canvas.h"
-#endif
-#endif
 #endif
 
 #ifdef DI_USE_FIXED_CANVAS_IDX
@@ -2416,8 +2465,8 @@ static int di_init_buf(int width, int height, unsigned char prog_flag)
     disp_frame_count = 0;
     cur_post_ready_di_buf = NULL;
     for(i=0; i<MAX_IN_BUF_NUM; i++){
-			vframe_in[i]=NULL;
-		}
+	vframe_in[i]=NULL;
+    }
     memset(&di_pre_stru, 0, sizeof(di_pre_stru));
 
     if(prog_flag){
@@ -2466,7 +2515,7 @@ static int di_init_buf(int width, int height, unsigned char prog_flag)
         if(local_buf_num > MAX_LOCAL_BUF_NUM){
             local_buf_num = MAX_LOCAL_BUF_NUM;
         }
-        if(local_buf_num >= 9){
+        if(local_buf_num >= 8){
             new_keep_last_frame_enable = 1;
         }
         else{
@@ -2483,7 +2532,7 @@ static int di_init_buf(int width, int height, unsigned char prog_flag)
     for(i=0; i<local_buf_num; i++){
         di_buf_t* di_buf = &(di_buf_local[i]);
         int ii = USED_LOCAL_BUF_MAX;
-        if(new_keep_last_frame_enable){
+        if((used_post_buf_index != -1)&&(new_keep_last_frame_enable)){
             for(ii=0; ii<USED_LOCAL_BUF_MAX; ii++){
                 //printk("%s %d %d\n", __func__, di_buf->index, used_local_buf_index[ii]);
                 if(i == used_local_buf_index[ii]){
@@ -2504,7 +2553,7 @@ static int di_init_buf(int width, int height, unsigned char prog_flag)
             if(prog_flag){
                 di_buf->nr_adr = di_mem_start + (width*canvas_height*2)*i;
 #ifndef DI_USE_FIXED_CANVAS_IDX
-    	          di_buf->nr_canvas_idx = DEINTERLACE_CANVAS_BASE_INDEX+i;
+    	        di_buf->nr_canvas_idx = DEINTERLACE_CANVAS_BASE_INDEX+i;
 #endif
 	              //canvas_config(di_buf->nr_canvas_idx, di_buf->nr_adr, width*2, canvas_height, 0, 0);
                 di_buf->canvas_config_flag = 1;
@@ -2523,7 +2572,7 @@ static int di_init_buf(int width, int height, unsigned char prog_flag)
                 di_buf->nr_adr = di_mem_start + (width*canvas_height*5/4)*i;
 #endif
 #ifndef DI_USE_FIXED_CANVAS_IDX
-    	          di_buf->nr_canvas_idx = DEINTERLACE_CANVAS_BASE_INDEX+i*2;
+    	        di_buf->nr_canvas_idx = DEINTERLACE_CANVAS_BASE_INDEX+i*2;
 #endif
 	              //canvas_config(di_buf->nr_canvas_idx, di_buf->nr_adr, width*2, canvas_height/2, 0, 0);
 #ifdef NEW_DI_V1
@@ -2533,7 +2582,7 @@ static int di_init_buf(int width, int height, unsigned char prog_flag)
                 di_buf->mtn_adr = di_mem_start + (width*canvas_height*5/4)*i + (width*canvas_height);
 #endif
 #ifndef DI_USE_FIXED_CANVAS_IDX
-    	          di_buf->mtn_canvas_idx = DEINTERLACE_CANVAS_BASE_INDEX+i*2+1;
+    	        di_buf->mtn_canvas_idx = DEINTERLACE_CANVAS_BASE_INDEX+i*2+1;
 #endif
 	              //canvas_config(di_buf->mtn_canvas_idx, di_buf->mtn_adr, width/2, canvas_height/2, 0, 0);
                 di_buf->canvas_config_flag = 2;
@@ -2573,9 +2622,9 @@ static int di_init_buf(int width, int height, unsigned char prog_flag)
     }
 
     for(i=0; i<MAX_POST_BUF_NUM; i++){
-        if( i != used_post_buf_index ){
-            di_buf_t* di_buf = &(di_buf_post[i]);
-            if(di_buf){
+    	di_buf_t* di_buf = &(di_buf_post[i]);
+	if(di_buf){
+            if( i != used_post_buf_index ){
                 memset(di_buf, sizeof(di_buf_t), 0);
                 di_buf->type = VFRAME_TYPE_POST;
                 di_buf->index = i;
@@ -2588,9 +2637,9 @@ static int di_init_buf(int width, int height, unsigned char prog_flag)
         }
     }
 
-    printk("%s: version %s, prog_proc_type %d, buf start %x, size %x, buf(w%d,h%d) cur num %d (available %d,  total %d) \n",
-        __func__, version_s, di_pre_stru.prog_proc_type, (unsigned int)di_mem_start,
-        (unsigned int)di_mem_size, width, canvas_height, local_buf_num_valid, local_buf_num_available, local_buf_num);
+//    printk("%s: version %s, prog_proc_type %d, buf start 0x%x, size 0x%x, buf(w%d,h%d) cur num %d (available %d,  total %d) \n",
+//        __func__, version_s, di_pre_stru.prog_proc_type, (unsigned int)di_mem_start,
+//        (unsigned int)di_mem_size, width, canvas_height, local_buf_num_valid, local_buf_num_available, local_buf_num);
 
     return 0;
 }
@@ -2599,49 +2648,57 @@ static void di_uninit_buf(void)
 {
     di_buf_t *p = NULL;//, *ptmp;
     int i, ii=0;
-		int itmp;
+    int itmp;
 
     //vframe_t* cur_vf = get_cur_dispbuf();
 
-		for(i=0; i<USED_LOCAL_BUF_MAX; i++){
+    for(i=0; i<USED_LOCAL_BUF_MAX; i++){
     	used_local_buf_index[i] = -1;
-		}
-		used_post_buf_index = -1;
-
+    }
+    used_post_buf_index = -1;
 
     queue_for_each_entry(p, ptmp, QUEUE_DISPLAY, list) {
         if(p->di_buf[0]->type!=VFRAME_TYPE_IN){
 #if 1
-	        if(p->index == di_post_stru.cur_disp_index){
-	            used_post_buf_index = p->index;
-	            for(i=0; i<USED_LOCAL_BUF_MAX; i++){
-                if(p->di_buf_dup_p[i] != NULL)
-                {
-	        	    used_local_buf_index[ii] = p->di_buf_dup_p[i]->index;
-	        	    ii++;
-                }
+	    if(p->index == di_post_stru.cur_disp_index){
+	        used_post_buf_index = p->index;
+	        for(i=0; i<USED_LOCAL_BUF_MAX; i++){
+                    if(p->di_buf_dup_p[i] != NULL){
+	        	used_local_buf_index[ii] = p->di_buf_dup_p[i]->index;
+			/* prepare for recycle the keep buffer*/
+			p->di_buf_dup_p[i]->pre_ref_count = 0;
+			p->di_buf_dup_p[i]->post_ref_count = 0;
+                        if(is_in_queue(p->di_buf_dup_p[i],p->di_buf_dup_p[i]->queue_index))
+                            queue_out(p->di_buf_dup_p[i]);
+	        	ii++;
+                        if(p->di_buf_dup_p[i]->di_wr_linked_buf)
+                            used_local_buf_index[ii] = p->di_buf_dup_p[i]->di_wr_linked_buf->index;
+                    }
 	        }
+		queue_out(p);
 
 #else
 	        if(cur_vf->private_data == p){
 	            used_post_buf_index = p->index;
 	            for(i=0; i<USED_LOCAL_BUF_MAX; i++){
-                if(p->di_buf_dup_p[i] != NULL)
-                {
+                        if(p->di_buf_dup_p[i] != NULL)
+                        {
 	        	    used_local_buf_index[ii] = p->di_buf_dup_p[i]->index;
 	        	    ii++;
-                }
+	        	    if(p->di_buf_dup_p[i]->di_wr_linked_buf)
+	        	    	used_local_buf_index[ii] = p->di_buf_dup_p[i]->di_wr_linked_buf->index;
+                        }
 	        }
 #endif
-	            printk("%s keep cur di_buf %d (%d %d %d)\n",
+	        printk("%s keep cur di_buf %d (%d %d %d)\n",
 	                __func__, used_post_buf_index, used_local_buf_index[0],
 	                used_local_buf_index[1],used_local_buf_index[2]);
-	            break;
-	          }
-	      }
-	      if(ii>=USED_LOCAL_BUF_MAX){
-	      	break;
-	      }
+	        break;
+	    }
+	}
+        if(ii>=USED_LOCAL_BUF_MAX){
+	    break;
+	}
     }
 
 #ifdef USE_LIST
@@ -2670,8 +2727,8 @@ static void di_uninit_buf(void)
     queue_init(0);
 #endif
     for(i=0; i<MAX_IN_BUF_NUM; i++){
-			vframe_in[i]=NULL;
-		}
+	vframe_in[i]=NULL;
+    }
 
     di_pre_stru.pre_de_process_done = 0;
     di_pre_stru.pre_de_busy = 0;
@@ -2690,7 +2747,7 @@ static void di_clean_in_buf(void)
         di_buf = get_di_buf_head(QUEUE_POST_READY);
         recycle_vframe_type_post(di_buf);
 #ifdef DI_DEBUG
-        recycle_vframe_type_post_print(di_buf, __func__);
+        recycle_vframe_type_post_print(di_buf, __func__, __LINE__);
 #endif
     }
 
@@ -2887,7 +2944,7 @@ static void print_di_buf(di_buf_t* di_buf, int format)
 {
     if(format == 1){
         if(di_buf){
-            printk("    +index %d, 0x%x, type %d, vframetype 0x%x, trans_fmt %u\n", di_buf->index, (unsigned int)di_buf, di_buf->type,
+            printk("    +index %d, 0x%p, type %d, vframetype 0x%x, trans_fmt %u\n", di_buf->index, di_buf, di_buf->type,
                         di_buf->vframe->type,
 #ifdef CONFIG_POST_PROCESS_MANAGER_3D_PROCESS
                         di_buf->vframe->trans_fmt
@@ -2895,20 +2952,32 @@ static void print_di_buf(di_buf_t* di_buf, int format)
                         0
 #endif
                         );
+            if(di_buf->di_wr_linked_buf){
+      	        printk("  linked  +index %d, 0x%p, type %d\n",
+                        di_buf->di_wr_linked_buf->index, di_buf->di_wr_linked_buf,
+                        di_buf->di_wr_linked_buf->type);
+            }
         }
+
 
     }
     else if(format == 2){
         if(di_buf){
-            printk("index %d, %p(vframe %p), type %d, vframetype 0x%x, trans_fmt %u,duration %d pts %d\n",
+            printk("index %d, 0x%p(vframe 0x%p), type %d, vframetype 0x%x, trans_fmt %u,duration %d pts %d\n",
                     di_buf->index, di_buf, di_buf->vframe, di_buf->type, di_buf->vframe->type,
 #ifdef CONFIG_POST_PROCESS_MANAGER_3D_PROCESS
-                        di_buf->vframe->trans_fmt,
+                    di_buf->vframe->trans_fmt,
 #else
-                        0,
+                    0,
 #endif
-                        di_buf->vframe->duration, di_buf->vframe->pts);
+                    di_buf->vframe->duration, di_buf->vframe->pts);
+            if(di_buf->di_wr_linked_buf){
+       	        printk("linked index %d, 0x%p, type %d\n",
+                        di_buf->di_wr_linked_buf->index, di_buf->di_wr_linked_buf,
+                        di_buf->di_wr_linked_buf->type);
+            }
         }
+
 
     }
 
@@ -2922,23 +2991,23 @@ static void dump_state(void)
     dump_state_flag = 1;
     printk("version %s, provider vframe level %d, init_flag %d, is_bypass %d, receiver_is_amvideo %d\n",
         version_s, provider_vframe_level, init_flag, is_bypass(), receiver_is_amvideo);
-    printk("recovery_flag = %d, recovery_log_reason=%d, recovery_log_queue_idx=%d, recovery_log_di_buf=%p\n",
+    printk("recovery_flag = %d, recovery_log_reason=%d, recovery_log_queue_idx=%d, recovery_log_di_buf=0x%p\n",
         recovery_flag, recovery_log_reason, recovery_log_queue_idx, recovery_log_di_buf);
 
-    printk("new_keep_last_frame_enable %d, used_post_buf_index %d(%p), used_local_buf_index:\n", new_keep_last_frame_enable,
+    printk("new_keep_last_frame_enable %d, used_post_buf_index %d(0x%p), used_local_buf_index:\n", new_keep_last_frame_enable,
         used_post_buf_index, (used_post_buf_index==-1)?NULL:&(di_buf_post[used_post_buf_index]));
 		for(i=0; i<USED_LOCAL_BUF_MAX; i++){
 		    int tmp = used_local_buf_index[i];
-    	    printk("%d(%p) ",tmp, (tmp==-1)?NULL:&(di_buf_local[tmp]));
+    	    printk("%d(0x%p) ",tmp, (tmp==-1)?NULL:&(di_buf_local[tmp]));
 		}
 
     printk("\nin_free_list (max %d):\n", MAX_IN_BUF_NUM);
     queue_for_each_entry(p, ptmp, QUEUE_IN_FREE, list) {
-        printk("index %d, 0x%x, type %d\n", p->index, (unsigned int)p, p->type);
+        printk("index %2d, 0x%x, type %d\n", p->index, (unsigned int)p, p->type);
     }
     printk("local_free_list (max %d):\n", local_buf_num);
     queue_for_each_entry(p, ptmp, QUEUE_LOCAL_FREE, list) {
-        printk("index %d, 0x%x, type %d\n", p->index, (unsigned int)p, p->type);
+        printk("index %2d, 0x%p, type %d\n", p->index, p, p->type);
     }
     printk("pre_ready_list:\n");
     queue_for_each_entry(p, ptmp, QUEUE_PRE_READY, list) {
@@ -2946,7 +3015,7 @@ static void dump_state(void)
     }
     printk("post_free_list (max %d):\n", MAX_POST_BUF_NUM);
     queue_for_each_entry(p, ptmp, QUEUE_POST_FREE, list) {
-        printk("index %d, 0x%x, type %d, vframetype 0x%x\n", p->index, (unsigned int)p, p->type ,p->vframe->type);
+        printk("index %2d, 0x%p, type %d, vframetype 0x%x\n", p->index, p, p->type ,p->vframe->type);
     }
     printk("post_ready_list:\n");
     queue_for_each_entry(p, ptmp, QUEUE_POST_READY, list) {
@@ -2962,23 +3031,28 @@ static void dump_state(void)
     }
     printk("recycle_list:\n");
     queue_for_each_entry(p, ptmp, QUEUE_RECYCLE, list) {
-        printk("index %d, 0x%x, type %d, vframetype 0x%x pre_ref_count %d post_ref_count %d\n", p->index, (unsigned int)p, p->type, p->vframe->type, p->pre_ref_count, p->post_ref_count);
+        printk("index %2d, 0x%p, type %d, vframetype 0x%x pre_ref_count %d post_ref_count %d\n", p->index, p, p->type, p->vframe->type, p->pre_ref_count, p->post_ref_count);
+        if(p->di_wr_linked_buf){
+       	    printk("linked index %2d, 0x%p, type %d pre_ref_count %d post_ref_count %d\n",
+                    p->di_wr_linked_buf->index, p->di_wr_linked_buf, p->di_wr_linked_buf->type,
+                    p->di_wr_linked_buf->pre_ref_count, p->di_wr_linked_buf->post_ref_count);
+        }
     }
     if(di_pre_stru.di_inp_buf)
-        printk("di_inp_buf:index %d, 0x%x, type %d\n", di_pre_stru.di_inp_buf->index, (unsigned int)di_pre_stru.di_inp_buf, di_pre_stru.di_inp_buf->type);
+        printk("di_inp_buf:index %d, 0x%p, type %d\n", di_pre_stru.di_inp_buf->index, di_pre_stru.di_inp_buf, di_pre_stru.di_inp_buf->type);
     else
         printk("di_inp_buf: NULL\n");
     if(di_pre_stru.di_wr_buf)
-        printk("di_wr_buf:index %d, 0x%x, type %d\n", di_pre_stru.di_wr_buf->index, (unsigned int)di_pre_stru.di_wr_buf, di_pre_stru.di_wr_buf->type);
+        printk("di_wr_buf:index %d, 0x%p, type %d\n", di_pre_stru.di_wr_buf->index, di_pre_stru.di_wr_buf, di_pre_stru.di_wr_buf->type);
     else
         printk("di_wr_buf: NULL\n");
     dump_di_pre_stru();
     printk("vframe_in[]:");
     for(i=0; i<MAX_IN_BUF_NUM; i++){
-			  printk("%p ",vframe_in[i]);
+			  printk("0x%p ",vframe_in[i]);
 		}
 		printk("\n");
-    printk("vf_peek()=>%p\n",vf_peek(VFM_NAME));
+    printk("vf_peek()=>0x%p\n",vf_peek(VFM_NAME));
     printk("di_process_cnt = %d, video_peek_cnt = %d, force_trig_cnt = %d\n", di_process_cnt, video_peek_cnt, force_trig_cnt);
     dump_state_flag = 0;
 
@@ -3294,7 +3368,15 @@ static void pre_de_process(void)
 		   	);
 #endif
     //Wr(DI_PRE_CTRL, 0x3 << 30); // remove it for M6, can not disalbe it here
-
+#ifdef SUPPORT_MPEG_TO_VDIN
+	if(mpeg2vdin_en){
+	    vdin_arg_t vdin_arg;
+	    vdin_v4l2_ops_t *vdin_ops = get_vdin_v4l2_ops();
+	    vdin_arg.cmd = VDIN_CMD_FORCE_GO_FIELD;
+	    if(vdin_ops->tvin_vdin_func)
+	        vdin_ops->tvin_vdin_func(0,&vdin_arg);
+	}
+#endif
 
     enable_di_pre_aml (  &di_pre_stru.di_inp_mif,               // di_inp
                &di_pre_stru.di_mem_mif,               // di_mem
@@ -3357,6 +3439,11 @@ static void pre_de_done_buf_clear(void)
         di_pre_stru.di_wr_buf->post_ref_count = 0;
         queue_in(di_pre_stru.di_wr_buf, QUEUE_RECYCLE);
         di_pre_stru.di_wr_buf = NULL;
+
+        if((di_pre_stru.prog_proc_type==2) && di_pre_stru.di_wr_buf->di_wr_linked_buf){
+            queue_in(di_pre_stru.di_wr_buf->di_wr_linked_buf,QUEUE_RECYCLE);
+            di_pre_stru.di_wr_buf->di_wr_linked_buf = NULL;
+        }
     }
     if(di_pre_stru.di_inp_buf){
         if(di_pre_stru.di_mem_buf_dup_p == di_pre_stru.di_inp_buf){
@@ -3422,7 +3509,16 @@ static void pre_de_done_buf_config(void)
             }
             else{
                 di_pre_stru.di_mem_buf_dup_p->pre_ref_count = 0;
-                di_pre_stru.di_mem_buf_dup_p = di_pre_stru.di_wr_buf;
+                /*recycle the progress throw buffer*/
+                if(di_pre_stru.di_wr_buf->throw_flag){
+               	    di_pre_stru.di_wr_buf->pre_ref_count = 0;
+                    di_pre_stru.di_mem_buf_dup_p = NULL;
+#ifdef DI_DEBUG
+                    di_print("%s set throw %s[%d] pre_ref_count to 0.\n",__func__,vframe_type_name[di_pre_stru.di_wr_buf->type],di_pre_stru.di_wr_buf->index);
+#endif
+                } else {
+                    di_pre_stru.di_mem_buf_dup_p = di_pre_stru.di_wr_buf;
+                }
 #ifdef DI_DEBUG
                 di_print("%s: set di_mem_buf_dup_p to di_wr_buf\n", __func__);
 #endif
@@ -3442,17 +3538,15 @@ static void pre_de_done_buf_config(void)
                 di_pre_stru.di_wr_buf->new_format_flag = 1;
                 bypass_state = 0;
 //#ifdef DI_DEBUG
-     						di_print("%s:bypass_state change to 0, is_bypass() %d trick_mode %d bypass_all %d\n", __func__, is_bypass(), trick_mode, bypass_all);
+     		di_print("%s:bypass_state change to 0, is_bypass() %d trick_mode %d bypass_all %d\n", __func__, is_bypass(), trick_mode, bypass_all);
 //#endif
             }
 #ifdef CONFIG_VSYNC_RDMA
-			if((di_debug_flag&0x10)==0){
-				if(interlace_output_flag==0)
-            		enable_rdma(1);
+	    if((di_debug_flag&0x10)==0){
+		if(interlace_output_flag==0)
+        	    enable_rdma(1);
             }
 #endif
-	    /*invert the progress buffer passed from decoder which separated by di pre*/
-	    //top_bot_config(di_pre_stru.di_wr_buf);
             queue_in(di_pre_stru.di_wr_buf, QUEUE_PRE_READY);
 #ifdef DI_DEBUG
             di_print("%s: process_count %d, %s[%d] => pre_ready_list\n",
@@ -3474,21 +3568,21 @@ static void pre_de_done_buf_config(void)
             if(di_pre_stru.di_wr_buf->post_proc_flag == 2){
                 //add dummy buf, will not be displayed
                 if(!queue_empty(QUEUE_LOCAL_FREE)){
-                di_buf_t* di_buf_tmp;
+                    di_buf_t* di_buf_tmp;
                     di_buf_tmp = get_di_buf_head(QUEUE_LOCAL_FREE);
                     if(di_buf_tmp){
                         queue_out(di_buf_tmp);
-                di_buf_tmp->pre_ref_count = 0;
-                di_buf_tmp->post_ref_count = 0;
-                di_buf_tmp->post_proc_flag = 3;
-                di_buf_tmp->new_format_flag = 0;
+                        di_buf_tmp->pre_ref_count = 0;
+                        di_buf_tmp->post_ref_count = 0;
+                        di_buf_tmp->post_proc_flag = 3;
+                        di_buf_tmp->new_format_flag = 0;
                         queue_in(di_buf_tmp, QUEUE_PRE_READY);
                     }
 #ifdef DI_DEBUG
-                di_print("%s: dummy %s[%d] => pre_ready_list\n",
+                    di_print("%s: dummy %s[%d] => pre_ready_list\n",
                     __func__, vframe_type_name[di_buf_tmp->type], di_buf_tmp->index);
 #endif
-            }
+               }
             }
             di_pre_stru.di_wr_buf->seq = di_pre_stru.pre_ready_seq++;
 	    di_pre_stru.di_wr_buf->left_right = di_pre_stru.left_right;
@@ -3538,7 +3632,7 @@ static void pre_de_done_buf_config(void)
     }
 }
 
-#if defined(CONFIG_ARCH_MESON2)||defined(NEW_DI_TV)
+#if defined(NEW_DI_TV)
 /* add for di Reg re-init */
 static enum vframe_source_type_e  vframe_source_type = VFRAME_SOURCE_TYPE_OTHERS;
 static void di_set_para_by_tvinfo(vframe_t* vframe)
@@ -3627,13 +3721,76 @@ static void di_set_para_by_tvinfo(vframe_t* vframe)
 
 }
 #endif
+static void recycle_vframe_type_pre(di_buf_t* di_buf)
+{
+    ulong fiq_flag=0, irq_flag2=0;
+    di_lock_irqfiq_save(irq_flag2, fiq_flag);
+
+    queue_in(di_buf, QUEUE_RECYCLE);
+
+    di_unlock_irqfiq_restore(irq_flag2, fiq_flag);
+}
+/*
+* it depend on local buffer queue type is 2
+*/
+static int peek_free_linked_buf(void)
+{
+    di_buf_t *p = NULL, *p_linked = NULL,*ptmp;
+    int itmp, p_index = -2;
+
+    if(list_count(QUEUE_LOCAL_FREE) < 2)
+    	return -1;
+
+    queue_for_each_entry(p, ptmp, QUEUE_LOCAL_FREE, list) {
+        if(abs(p->index - p_index)==1){
+            return min(p->index,p_index);
+        }
+        else{
+            p_index = p->index;
+        }
+    }
+    return -1;
+}
+/*
+* it depend on local buffer queue type is 2
+*/
+static di_buf_t *get_free_linked_buf(int idx)
+{
+    di_buf_t *di_buf=NULL, *di_buf_linked=NULL, *di_buf_tmp;
+    int i = 0, pool_idx = 0, di_buf_idx = 0;
+
+    queue_t *q = &(queue[QUEUE_LOCAL_FREE]);
+    if(list_count(QUEUE_LOCAL_FREE)<2)
+    	return NULL;
+    if(q->pool[idx]!=0 && q->pool[idx+1]!=0){
+    	pool_idx = ((q->pool[idx]>>8)&0xff)-1;
+        di_buf_idx = q->pool[idx]&0xff;
+        if(pool_idx < VFRAME_TYPE_NUM){
+            if(di_buf_idx < di_buf_pool[pool_idx].size){
+                di_buf = &(di_buf_pool[pool_idx].di_buf_ptr[di_buf_idx]);
+                queue_out(di_buf);
+            }
+        }
+        pool_idx = ((q->pool[idx+1]>>8)&0xff)-1;
+        di_buf_idx = q->pool[idx+1]&0xff;
+        if(pool_idx < VFRAME_TYPE_NUM){
+            if(di_buf_idx < di_buf_pool[pool_idx].size){
+                di_buf_linked = &(di_buf_pool[pool_idx].di_buf_ptr[di_buf_idx]);
+                queue_out(di_buf_linked);
+            }
+        }
+        di_buf->di_wr_linked_buf = di_buf_linked;
+
+    }
+    return di_buf;
+}
 
 static unsigned char pre_de_buf_config(void)
 {
-    di_buf_t* di_buf = NULL;
+    di_buf_t *di_buf = NULL;
     vframe_t* vframe;
-    int i;
-    
+    int i, di_linked_buf_idx = -1;
+
     if((queue_empty(QUEUE_IN_FREE)&&(di_pre_stru.process_count==0))||
         queue_empty(QUEUE_LOCAL_FREE)){
         return 0;
@@ -3653,6 +3810,10 @@ static unsigned char pre_de_buf_config(void)
             ){
             return 0;
         }
+    }else if(di_pre_stru.prog_proc_type == 2){
+    	di_linked_buf_idx = peek_free_linked_buf();
+	if(di_linked_buf_idx == -1)
+            return 0;
     }
 
     if(di_pre_stru.di_inp_buf_next){
@@ -3731,7 +3892,7 @@ static unsigned char pre_de_buf_config(void)
         }
 
 #ifdef DI_DEBUG
-        di_print("%s: vf_get => %x\n", __func__, vframe);
+        di_print("%s: vf_get => 0x%p\n", __func__, vframe);
 #endif
         provider_vframe_level--;
         di_buf = get_di_buf_head(QUEUE_IN_FREE);
@@ -3743,6 +3904,16 @@ static unsigned char pre_de_buf_config(void)
         if(di_log_flag&DI_LOG_VFRAME){
             dump_vframe(vframe);
         }
+	#ifdef SUPPORT_MPEG_TO_VDIN
+	if((!is_from_vdin(vframe))&&mpeg2vdin_en){
+	    vdin_arg_t vdin_arg;
+	    vdin_v4l2_ops_t *vdin_ops = get_vdin_v4l2_ops();
+	    vdin_arg.cmd = VDIN_CMD_GET_HISTGRAM;
+	    vdin_arg.private = vframe;
+	    if(vdin_ops->tvin_vdin_func)
+	        vdin_ops->tvin_vdin_func(0,&vdin_arg);
+	}
+	#endif
         memcpy(di_buf->vframe, vframe, sizeof(vframe_t));
 
         di_buf->vframe->private_data = di_buf;
@@ -3753,29 +3924,57 @@ static unsigned char pre_de_buf_config(void)
 
         if(is_source_change(vframe)){ /* source change*/
             if(di_pre_stru.di_mem_buf_dup_p){
-                di_pre_stru.di_mem_buf_dup_p->pre_ref_count = 0;
+            	/*avoid only 2 i field then p field*/
+            	if((di_pre_stru.cur_prog_flag == 0) && use_2_interlace_buff)
+            	    di_pre_stru.di_mem_buf_dup_p->post_proc_flag = -1;
+            	di_pre_stru.di_mem_buf_dup_p->pre_ref_count = 0;
                 di_pre_stru.di_mem_buf_dup_p = NULL;
+
             }
             if(di_pre_stru.di_chan2_buf_dup_p){
-                di_pre_stru.di_chan2_buf_dup_p->pre_ref_count = 0;
+            	/*avoid only 1 i field then p field*/
+            	if((di_pre_stru.cur_prog_flag == 0) && use_2_interlace_buff)
+            	    di_pre_stru.di_chan2_buf_dup_p->post_proc_flag = -1;
+            	di_pre_stru.di_chan2_buf_dup_p->pre_ref_count = 0;
                 di_pre_stru.di_chan2_buf_dup_p = NULL;
             }
 //#ifdef DI_DEBUG
-            printk("%s: source change: %d/%d/%d/%d=>%d/%d/%d/%d\n", __func__,
+            printk("%s: source change: 0x%x/%d/%d/%d=>0x%x/%d/%d/%d\n", __func__,
                 di_pre_stru.cur_inp_type, di_pre_stru.cur_width, di_pre_stru.cur_height, di_pre_stru.cur_source_type,
                 di_buf->vframe->type, di_buf->vframe->width, di_buf->vframe->height, di_buf->vframe->source_type);
 //#endif
             di_pre_stru.cur_width = di_buf->vframe->width;
             di_pre_stru.cur_height= di_buf->vframe->height;
             di_pre_stru.cur_prog_flag = is_progressive(di_buf->vframe);
+            if(di_pre_stru.cur_prog_flag){
+            	if((use_2_interlace_buff)&&!(prog_proc_config&0x10))
+                    di_pre_stru.prog_proc_type = 2;
+                else
+              	    di_pre_stru.prog_proc_type = prog_proc_config&0x10;
+            }
+            else
+            	di_pre_stru.prog_proc_type = 0;
             di_pre_stru.cur_inp_type = di_buf->vframe->type;
             di_pre_stru.cur_source_type = di_buf->vframe->source_type;
             di_pre_stru.cur_sig_fmt = di_buf->vframe->sig_fmt;
 	    di_pre_stru.orientation = di_buf->vframe->orientation;
             di_pre_stru.source_change_flag = 1;
             di_pre_stru.same_field_source_flag = 0;
-#if defined(CONFIG_ARCH_MESON2)||defined (NEW_DI_TV)
+#if defined (NEW_DI_TV)
             di_set_para_by_tvinfo(vframe);
+#endif
+#ifdef SUPPORT_MPEG_TO_VDIN
+	    if(!is_from_vdin(vframe)){
+		vdin_arg_t vdin_arg;
+		vdin_v4l2_ops_t *vdin_ops = get_vdin_v4l2_ops();
+		vdin_arg.cmd = VDIN_CMD_MPEGIN_START;
+		vdin_arg.h_active = di_pre_stru.cur_width;
+		vdin_arg.v_active = di_pre_stru.cur_height;
+		if(vdin_ops->tvin_vdin_func){
+		    vdin_ops->tvin_vdin_func(0,&vdin_arg);
+		}
+		mpeg2vdin_en = 1;
+	    }
 #endif
 #ifdef NEW_DI_V1
             di_pre_stru.field_count_for_cont = 0;
@@ -3797,12 +3996,7 @@ static unsigned char pre_de_buf_config(void)
                         di_pre_stru.same_field_source_flag++;
 
                     if(skip_wrong_field && is_from_vdin(di_buf->vframe)){
-                    	ulong fiq_flag=0, irq_flag2=0;
-                        di_lock_irqfiq_save(irq_flag2, fiq_flag);
-
-                        queue_in(di_buf, QUEUE_RECYCLE);
-
-                        di_unlock_irqfiq_restore(irq_flag2, fiq_flag);
+                        recycle_vframe_type_pre(di_buf);
                         return 0;
                     }
                 }
@@ -3837,13 +4031,10 @@ static unsigned char pre_de_buf_config(void)
 	                }
 
 	    		if(di_pre_stru.di_wr_buf){
-	    		    ulong fiq_flag=0, irq_flag2=0;
 			    di_pre_stru.process_count = 0;
 		            di_pre_stru.di_wr_buf->pre_ref_count = 0;
 		            di_pre_stru.di_wr_buf->post_ref_count = 0;
-                            di_lock_irqfiq_save(irq_flag2, fiq_flag);
-			    queue_in(di_pre_stru.di_wr_buf, QUEUE_RECYCLE);
-                            di_unlock_irqfiq_restore(irq_flag2, fiq_flag);
+                            recycle_vframe_type_pre(di_pre_stru.di_wr_buf);
 
 #ifdef DI_DEBUG
 		            di_print("%s: %s[%d] => recycle_list\n", __func__, vframe_type_name[di_pre_stru.di_wr_buf->type], di_pre_stru.di_wr_buf->index);
@@ -3956,20 +4147,43 @@ static unsigned char pre_de_buf_config(void)
      }
 
      /* di_wr_buf */
-     di_buf= get_di_buf_head(QUEUE_LOCAL_FREE);
-#ifndef DI_USE_FIXED_CANVAS_IDX
-     config_canvas(di_buf);
-#endif
-     if(check_di_buf(di_buf, 11)){
-        return 0;
+     if(di_pre_stru.prog_proc_type == 2){
+     	 di_linked_buf_idx = peek_free_linked_buf();
+     	 if(di_linked_buf_idx != -1)
+             di_buf = get_free_linked_buf(di_linked_buf_idx);
+         else
+             di_buf = NULL;
+	 if(di_buf == NULL){
+	     //recycle_vframe_type_pre(di_pre_stru.di_inp_buf);
+	     /*save for next process*/
+	     di_pre_stru.di_inp_buf_next = di_pre_stru.di_inp_buf;
+	     return 0;
+	 }
+	 di_buf->post_proc_flag = 0;
+	 di_buf->di_wr_linked_buf->pre_ref_count = 0;
+	 di_buf->di_wr_linked_buf->post_ref_count = 0;
+	 di_buf->canvas_config_flag = 1;
+     }else{
+         di_buf= get_di_buf_head(QUEUE_LOCAL_FREE);
+     	 if(check_di_buf(di_buf, 11)){
+ 	     recycle_vframe_type_pre(di_pre_stru.di_inp_buf);
+             return 0;
+     	 }
+	 queue_out(di_buf);
+	 di_buf->di_wr_linked_buf = NULL;
      }
 
-     queue_out(di_buf);
      di_pre_stru.di_wr_buf = di_buf;
      di_pre_stru.di_wr_buf->pre_ref_count = 1;
 
+#ifndef DI_USE_FIXED_CANVAS_IDX
+     config_canvas(di_buf);
+#endif
+
 #ifdef DI_DEBUG
      di_print("%s: %s[%d] => di_wr_buf\n", __func__, vframe_type_name[di_buf->type], di_buf->index);
+     if(di_buf->di_wr_linked_buf)
+         di_print("%s: linked %s[%d] => di_wr_buf\n", __func__, vframe_type_name[di_buf->di_wr_linked_buf->type], di_buf->di_wr_linked_buf->index);
 #endif
 
     memcpy(di_buf->vframe, di_pre_stru.di_inp_buf->vframe, sizeof(vframe_t));
@@ -3977,7 +4191,7 @@ static unsigned char pre_de_buf_config(void)
     di_buf->vframe->canvas0Addr = di_buf->nr_canvas_idx;
     di_buf->vframe->canvas1Addr = di_buf->nr_canvas_idx;
 
-		if(di_pre_stru.prog_proc_type){
+    if(di_pre_stru.prog_proc_type){
         di_buf->vframe->type = VIDTYPE_PROGRESSIVE | VIDTYPE_VIU_422 | VIDTYPE_VIU_SINGLE_PLANE | VIDTYPE_VIU_FIELD;
         if(di_pre_stru.cur_inp_type & VIDTYPE_PRE_INTERLACE){
             di_buf->vframe->type |= VIDTYPE_PRE_INTERLACE;
@@ -3986,11 +4200,11 @@ static unsigned char pre_de_buf_config(void)
     else{
         if(((di_pre_stru.di_inp_buf->vframe->type & VIDTYPE_TYPEMASK) == VIDTYPE_INTERLACE_TOP)
             ||(di_pre_stru.process_count>0)){
-    				di_buf->vframe->type = VIDTYPE_INTERLACE_TOP | VIDTYPE_VIU_422 | VIDTYPE_VIU_SINGLE_PLANE | VIDTYPE_VIU_FIELD;
-    		}
+    	    di_buf->vframe->type = VIDTYPE_INTERLACE_TOP | VIDTYPE_VIU_422 | VIDTYPE_VIU_SINGLE_PLANE | VIDTYPE_VIU_FIELD;
+    	}
         else{
-    				di_buf->vframe->type = VIDTYPE_INTERLACE_BOTTOM | VIDTYPE_VIU_422 | VIDTYPE_VIU_SINGLE_PLANE | VIDTYPE_VIU_FIELD;
-    		}
+    	    di_buf->vframe->type = VIDTYPE_INTERLACE_BOTTOM | VIDTYPE_VIU_422 | VIDTYPE_VIU_SINGLE_PLANE | VIDTYPE_VIU_FIELD;
+    	}
     }
 
     /* */
@@ -4055,15 +4269,14 @@ static int check_recycle_buf(void)
         if((di_buf->pre_ref_count == 0)&&(di_buf->post_ref_count == 0)){
             if(di_buf->type == VFRAME_TYPE_IN){
                 queue_out(di_buf);
-                    if(vframe_in[di_buf->index]){
-                        vf_put(vframe_in[di_buf->index], VFM_NAME);
-
-                        vf_notify_provider(VFM_NAME, VFRAME_EVENT_RECEIVER_PUT, NULL);
+                if(vframe_in[di_buf->index]){
+                    vf_put(vframe_in[di_buf->index], VFM_NAME);
+                    vf_notify_provider(VFM_NAME, VFRAME_EVENT_RECEIVER_PUT, NULL);
 #ifdef DI_DEBUG
-                        di_print("%s: vf_put(%d) %x\n", __func__, di_pre_stru.recycle_seq, vframe_in[di_buf->index]);
+                    di_print("%s: vf_put(%d) %x\n", __func__, di_pre_stru.recycle_seq, vframe_in[di_buf->index]);
 #endif
-                        vframe_in[di_buf->index] = NULL;
-                    }
+                    vframe_in[di_buf->index] = NULL;
+                }
                 di_buf->invert_top_bot_flag = 0;
                 queue_in(di_buf, QUEUE_IN_FREE);
                 di_pre_stru.recycle_seq++;
@@ -4073,6 +4286,13 @@ static int check_recycle_buf(void)
                 queue_out(di_buf);
                 di_buf->invert_top_bot_flag = 0;
                 queue_in(di_buf, QUEUE_LOCAL_FREE);
+                if(di_buf->di_wr_linked_buf){
+               	    queue_in(di_buf->di_wr_linked_buf,QUEUE_LOCAL_FREE);
+#ifdef DI_DEBUG
+            	    di_print("%s: linked %s[%d]=>recycle_list\n",__func__, vframe_type_name[di_buf->di_wr_linked_buf->type], di_buf->di_wr_linked_buf->index);
+#endif
+               	    di_buf->di_wr_linked_buf = NULL;
+                }
                 ret |= 2;
             }
 #ifdef DI_DEBUG
@@ -4526,12 +4746,13 @@ static int de_post_process(void* arg, unsigned zoom_start_x_lines,
      	di_post_stru.next_canvas_id = di_post_stru.canvas_id?0:1;
 #endif
 	    di_post_stru.di_buf0_mif.canvas0_addr0 = di_buf->di_buf_dup_p[1]->nr_canvas_idx;
-	    if ( post_blend_mode == 1 )
+	    if (post_blend_mode == 1 && di_buf->di_buf_dup_p[2])
 	        di_post_stru.di_buf1_mif.canvas0_addr0 = di_buf->di_buf_dup_p[2]->nr_canvas_idx;
 	    else
 	        di_post_stru.di_buf1_mif.canvas0_addr0 = di_buf->di_buf_dup_p[0]->nr_canvas_idx;
 	    di_post_stru.di_mtncrd_mif.canvas_num = di_buf->di_buf_dup_p[1]->mtn_canvas_idx;
-      di_post_stru.di_mtnprd_mif.canvas_num = di_buf->di_buf_dup_p[2]->mtn_canvas_idx;
+        if(di_buf->di_buf_dup_p[2])
+        di_post_stru.di_mtnprd_mif.canvas_num = di_buf->di_buf_dup_p[2]->mtn_canvas_idx;
 
 
     	post_blend_en = 1;
@@ -4689,7 +4910,7 @@ static int de_post_process_pd(void* arg, unsigned zoom_start_x_lines,
 #endif
 
       config_canvas_idx(di_buf->di_buf_dup_p[1], di_post_buf0_canvas_idx[di_post_stru.canvas_id], -1);
-	    if ( post_blend_mode == 1 )
+      if (post_blend_mode == 1)
           config_canvas_idx(di_buf->di_buf_dup_p[2], di_post_buf1_canvas_idx[di_post_stru.canvas_id], -1);
       else
         config_canvas_idx(di_buf->di_buf_dup_p[0], di_post_buf1_canvas_idx[di_post_stru.canvas_id], -1);
@@ -4700,12 +4921,13 @@ static int de_post_process_pd(void* arg, unsigned zoom_start_x_lines,
 #endif
 
 	    di_post_stru.di_buf0_mif.canvas0_addr0 = di_buf->di_buf_dup_p[1]->nr_canvas_idx;
-	    if ( post_blend_mode == 1 )
+	    if (post_blend_mode == 1 && di_buf->di_buf_dup_p[2]){
 	        di_post_stru.di_buf1_mif.canvas0_addr0 = di_buf->di_buf_dup_p[2]->nr_canvas_idx;
-	    else
+	    }else
 	        di_post_stru.di_buf1_mif.canvas0_addr0 = di_buf->di_buf_dup_p[0]->nr_canvas_idx;
 	    di_post_stru.di_mtncrd_mif.canvas_num = di_buf->di_buf_dup_p[1]->mtn_canvas_idx;
-      di_post_stru.di_mtnprd_mif.canvas_num = di_buf->di_buf_dup_p[2]->mtn_canvas_idx;
+      if(di_buf->di_buf_dup_p[2])
+          di_post_stru.di_mtnprd_mif.canvas_num = di_buf->di_buf_dup_p[2]->mtn_canvas_idx;
 
       if((di_post_stru.update_post_reg_flag)&&((force_update_post_reg&0x80)==0))
   	    enable_di_post_pd (
@@ -4927,8 +5149,9 @@ static void recycle_vframe_type_post(di_buf_t* di_buf)
         dec_post_ref_count(di_buf);
     }
     for(i=0;i<2;i++){
-        if(di_buf->di_buf[i])
+        if(di_buf->di_buf[i]){
             queue_in(di_buf->di_buf[i], QUEUE_RECYCLE);
+         }
     }
     queue_out(di_buf); //remove it from display_list_head
     di_buf->invert_top_bot_flag = 0;
@@ -4936,10 +5159,10 @@ static void recycle_vframe_type_post(di_buf_t* di_buf)
 }
 
 #ifdef DI_DEBUG
-static void recycle_vframe_type_post_print(di_buf_t* di_buf, const char* func)
+static void recycle_vframe_type_post_print(di_buf_t* di_buf, const char* func, const int line)
 {
     int i;
-    di_print("%s:", func);
+    di_print("%s:%d ", func,line);
     for(i=0;i<2;i++){
         if(di_buf->di_buf[i]){
             di_print("%s[%d]<%d>=>recycle_list; ", vframe_type_name[di_buf->di_buf[i]->type], di_buf->di_buf[i]->index, i);
@@ -5153,7 +5376,7 @@ static int pulldown_process(di_buf_t* di_buf, int buffer_count)
         if(di_buf->pulldown_mode != -1){
             pulldown_count++;
         }
-#if defined(CONFIG_ARCH_MESON2)||defined(NEW_DI_TV)
+#if defined(NEW_DI_TV)
        if(di_buf->vframe->source_type == VFRAME_SOURCE_TYPE_TUNER)                      {
                  di_buf->pulldown_mode = -1;
                  //printk("2:2 ignore\n");
@@ -5162,10 +5385,10 @@ static int pulldown_process(di_buf_t* di_buf, int buffer_count)
     }
     return pulldown_mode_ret;
 }
-/*
+#ifdef FORCE_BOB_SUPPORT
 static void force_bob_vframe(di_buf_t* di_buf)
 {
-#ifdef FORCE_BOB_SUPPORT
+
     ulong fiq_flag=0, irq_flag2=0;
     di_buf->vframe->type = VIDTYPE_PROGRESSIVE| VIDTYPE_VIU_422 | VIDTYPE_VIU_SINGLE_PLANE | VIDTYPE_VIU_FIELD;
     if((force_bob_flag==1)||(force_bob_flag==2)){
@@ -5186,7 +5409,9 @@ static void force_bob_vframe(di_buf_t* di_buf)
     di_buf->di_buf[0] = di_buf->di_buf_dup_p[0];
     di_buf->di_buf[1] = NULL;
     queue_out(di_buf->di_buf[0]);
-
+    if(frame_count == 0){
+        di_post_stru.start_pts = di_buf->vframe->pts;
+    }
     di_lock_irqfiq_save(irq_flag2, fiq_flag);
     if((frame_count<start_frame_drop_count) ||
        (((di_buf->di_buf_dup_p[1]->vframe->type & VIDTYPE_TYPEMASK)==VIDTYPE_INTERLACE_TOP)
@@ -5197,15 +5422,19 @@ static void force_bob_vframe(di_buf_t* di_buf)
         queue_in(di_buf, QUEUE_TMP);
         recycle_vframe_type_post(di_buf);
 #ifdef DI_DEBUG
-        recycle_vframe_type_post_print(di_buf, __func__);
+        recycle_vframe_type_post_print(di_buf, __func__, __LINE__);
 #endif
     } else {
+    	if(frame_count == start_frame_drop_count){
+            if((di_post_stru.start_pts != 0) && (di_buf->vframe->pts == 0))
+                di_buf->vframe->pts = di_post_stru.start_pts;
+            di_post_stru.start_pts = 0;
+        }
         queue_in(di_buf, QUEUE_POST_READY);
     }
     di_unlock_irqfiq_restore(irq_flag2, fiq_flag);
-#endif
 }
-*/
+#endif
 static int process_post_vframe(void)
 {
 /*
@@ -5243,7 +5472,7 @@ static int process_post_vframe(void)
             i = 0;
             queue_for_each_entry(p, ptmp, QUEUE_PRE_READY, list) {
                 //if(p->post_proc_flag == 0){
-                if(p->type == VFRAME_TYPE_IN){
+                if((p->type == VFRAME_TYPE_IN)||((p->post_proc_flag == 0) && use_2_interlace_buff)){
                     ready_di_buf->post_proc_flag = -1;
                     ready_di_buf->new_format_flag = 1;
                 }
@@ -5292,10 +5521,10 @@ static int process_post_vframe(void)
                 }
 #endif
                 if(di_buf->di_buf_dup_p[1]->post_proc_flag == 3){//dummy, not for display
+               	    inc_post_ref_count(di_buf);
                     di_buf->di_buf[0] = di_buf->di_buf_dup_p[0];
                     di_buf->di_buf[1] = NULL;
                     queue_out(di_buf->di_buf[0]);
-
                     di_lock_irqfiq_save(irq_flag2, fiq_flag);
                     queue_in(di_buf, QUEUE_TMP);
                     recycle_vframe_type_post(di_buf);
@@ -5358,7 +5587,9 @@ static int process_post_vframe(void)
                         di_buf->di_buf[0] = di_buf->di_buf_dup_p[0];
                         di_buf->di_buf[1] = NULL;
                         queue_out(di_buf->di_buf[0]);
-
+			if(frame_count == 0){
+                            di_post_stru.start_pts = di_buf->vframe->pts;
+                    	}
                         di_lock_irqfiq_save(irq_flag2, fiq_flag);
                         if((frame_count<start_frame_drop_count)||
                             (di_buf->di_buf_dup_p[0]->throw_flag)||(di_buf->di_buf_dup_p[1]->throw_flag)||
@@ -5366,10 +5597,15 @@ static int process_post_vframe(void)
                             queue_in(di_buf, QUEUE_TMP);
                             recycle_vframe_type_post(di_buf);
 #ifdef DI_DEBUG
-                            recycle_vframe_type_post_print(di_buf, __func__);
+                            recycle_vframe_type_post_print(di_buf, __func__, __LINE__);
 #endif
                         }
                         else{
+			    if(frame_count == start_frame_drop_count){
+                                if((di_post_stru.start_pts != 0) && (di_buf->vframe->pts == 0))
+                                    di_buf->vframe->pts = di_post_stru.start_pts;
+                                di_post_stru.start_pts = 0;
+                            }
                             queue_in(di_buf, QUEUE_POST_READY);
                         }
                         frame_count++;
@@ -5424,8 +5660,10 @@ static int process_post_vframe(void)
                     i = 0;
                     queue_for_each_entry(p, ptmp, QUEUE_PRE_READY, list) {
                         di_buf->di_buf_dup_p[i++] = p;
-                        if(i>=vframe_process_count)
+                        if(i>=vframe_process_count) {
+                       	    di_buf->di_buf_dup_p[i] = NULL;
                             break;
+                        }
                     }
                     if(i<vframe_process_count){
 #ifdef DI_DEBUG
@@ -5463,31 +5701,15 @@ static int process_post_vframe(void)
                     }
 #endif
 
-                    if(frame_packing_mode == 1){
-#if defined(CONFIG_ARCH_MESON2)
-                        if(di_buf->vframe->trans_fmt == TVIN_TFMT_3D_FP){
-                            if(di_buf->vframe->height == 2205){
-                                di_buf->vframe->height = 1080;
-                            }
-                            if(di_buf->vframe->height == 1470){
-                                di_buf->vframe->height = 720;
-                            }
-                        }
-#endif
-                    }
-                    else{
-                        if(di_buf->vframe->height > 2000){ //work around hw problem
-                            di_buf->vframe->height = 2000;
-                        }
-                    }
                     if(ready_di_buf->new_format_flag){
                         di_buf->vframe->early_process_fun = de_post_disable_fun;
                     }
                     else{
                         if(ready_di_buf->type == VFRAME_TYPE_IN)
                             di_buf->vframe->early_process_fun = do_nothing_fun;
-                        else
+                        else{
                             di_buf->vframe->early_process_fun = do_pre_only_fun;
+                          }
                     }
                     di_buf->vframe->process_fun = NULL;
                     di_buf->process_fun_index = PROCESS_FUN_NULL;
@@ -5502,14 +5724,27 @@ static int process_post_vframe(void)
                     }
 #endif
                     di_lock_irqfiq_save(irq_flag2, fiq_flag);
-                    if((frame_count<start_frame_drop_count)||
+                    bool check_drop = false;
+                    if((check_start_drop_prog && is_progressive(ready_di_buf->vframe))||
+                    	  !is_progressive(ready_di_buf->vframe))
+                        check_drop = true;
+                    if(check_drop && (frame_count == 0)){
+                        di_post_stru.start_pts = di_buf->vframe->pts;
+                    }
+
+                    if((check_drop &&(frame_count<start_frame_drop_count))||
                         (di_buf->di_buf[0]->throw_flag)){
                         queue_in(di_buf, QUEUE_TMP);
                         recycle_vframe_type_post(di_buf);
 #ifdef DI_DEBUG
-                        recycle_vframe_type_post_print(di_buf, __func__);
+                        recycle_vframe_type_post_print(di_buf, __func__, __LINE__);
 #endif
                     } else {
+                        if(check_drop && (frame_count == start_frame_drop_count)){
+                            if((di_post_stru.start_pts != 0) && (di_buf->vframe->pts == 0))
+                                di_buf->vframe->pts = di_post_stru.start_pts;
+                            di_post_stru.start_pts = 0;
+                        }
                         queue_in(di_buf, QUEUE_POST_READY);
                     }
                     frame_count++;
@@ -5537,8 +5772,10 @@ static int process_post_vframe(void)
                 i = 0;
                 queue_for_each_entry(p, ptmp, QUEUE_PRE_READY, list) {
                     di_buf->di_buf_dup_p[i++] = p;
-                    if(i>=2)
+                    if(i>=2) {
+                    	di_buf->di_buf_dup_p[i] = NULL;
                         break;
+                    }
                 }
                 if(i<2){
 #ifdef DI_DEBUG
@@ -5619,15 +5856,22 @@ static int process_post_vframe(void)
                 queue_out(di_buf->di_buf[1]);
 
                 di_lock_irqfiq_save(irq_flag2, fiq_flag);
-                if((frame_count<start_frame_drop_count)||
+                if((frame_count == 0) && check_start_drop_prog){
+                    di_post_stru.start_pts = di_buf->vframe->pts;
+                }
+                if(((frame_count<start_frame_drop_count) && check_start_drop_prog)||
                     (di_buf->di_buf_dup_p[0]->throw_flag)||(di_buf->di_buf_dup_p[1]->throw_flag)){
                     queue_in(di_buf, QUEUE_TMP);
                     recycle_vframe_type_post(di_buf);
 #ifdef DI_DEBUG
-                    recycle_vframe_type_post_print(di_buf, __func__);
+                    recycle_vframe_type_post_print(di_buf, __func__, __LINE__);
 #endif
                 }
                 else{
+                    if((frame_count == start_frame_drop_count) && check_start_drop_prog){   	                          if((di_post_stru.start_pts != 0) && (di_buf->vframe->pts == 0))
+                            di_buf->vframe->pts = di_post_stru.start_pts;
+                        di_post_stru.start_pts = 0;
+                    }
                     queue_in(di_buf, QUEUE_POST_READY);
                 }
                 frame_count++;
@@ -5680,7 +5924,7 @@ static void di_unreg_process(void)
                 di_pre_stru.disable_req_flag = 0;
                 recovery_flag = 0;
                 di_pre_stru.unreg_req_flag = 0;
-                di_pre_stru.unreg_req_flag2 = 0;
+                //di_pre_stru.unreg_req_flag2 = 0; clear in timer irq
             }
 #else
 /* !RUN_REG_IN_IRQ*/
@@ -5767,6 +6011,8 @@ static void di_unreg_process_irq(void)
 
 static void di_reg_process_2(void)
 {
+    /*get vout information first time*/
+    set_output_mode_info();
     vf_provider_init(&di_vf_prov, VFM_NAME, &deinterlace_vf_provider, NULL);
     vf_reg_provider(&di_vf_prov);
     vf_notify_receiver(VFM_NAME,VFRAME_EVENT_PROVIDER_START,NULL);
@@ -5791,9 +6037,8 @@ static void di_reg_process(void)
             di_set_power_control(0,1);
             di_set_power_control(1,1);
 
-            set_output_mode_info();
 /* add for di Reg re-init */
-#if defined(CONFIG_ARCH_MESON2)|| defined(NEW_DI_TV)
+#if defined(NEW_DI_TV)
 di_set_para_by_tvinfo(vframe);
 #endif
             if(di_printk_flag&2){
@@ -5802,11 +6047,11 @@ di_set_para_by_tvinfo(vframe);
 #ifdef DI_DEBUG
             di_print("%s: vframe come => di_init_buf\n", __func__);
 #endif
-            if(is_progressive(vframe)&&
-                    (
-                    (is_from_vdin(vframe)&&(prog_proc_config&0x1))||
-                    ((!is_from_vdin(vframe))&&(prog_proc_config&0x10))
-                    )
+            if(is_progressive(vframe)&&(prog_proc_config&0x10)
+                    //(
+                    //(is_from_vdin(vframe)&&(prog_proc_config&0x1))||
+                    //((!is_from_vdin(vframe))&&(prog_proc_config&0x10))
+                    //)
                 ){
 #if (!(defined RUN_DI_PROCESS_IN_IRQ))||(defined ENABLE_SPIN_LOCK_ALWAYS)
                 spin_lock_irqsave(&plist_lock, flags);
@@ -5976,14 +6221,6 @@ void di_timer_handle(struct work_struct *work)
             else if(timeout_miss_policy==2){
             }
             pr_info("******* DI ********** wait pre_de_irq timeout\n");
-#if defined(CONFIG_ARCH_MESON2)
-            set_foreign_affairs(FOREIGN_AFFAIRS_01);
-            if(pre_de_irq_check){
-	              pr_info("DI: Force RESET\n");
-	              Wr(WATCHDOG_RESET, 0);
-                Wr(WATCHDOG_TC,(1<<WATCHDOG_ENABLE_BIT)|(50));
-            }
-#endif
         }
     }
 
@@ -6051,7 +6288,7 @@ static int di_task_handle(void *data)
     return 0;
 
 }
-#ifdef RUN_DI_PROCESS_IN_IRQ
+#if (defined RUN_DI_PROCESS_IN_IRQ)||(defined RUN_DI_PROCESS_IN_TIMER_IRQ)
 static irqreturn_t timer_irq(int irq, void *dev_instance)
 {
    //unsigned int data32;
@@ -6118,6 +6355,17 @@ static int di_receiver_event_fun(int type, void* data, void* arg)
         while(di_pre_stru.unreg_req_flag){
             msleep(10);
 		    }
+#ifdef SUPPORT_MPEG_TO_VDIN
+	if(mpeg2vdin_en){
+	    vdin_arg_t vdin_arg;
+	    vdin_v4l2_ops_t *vdin_ops = get_vdin_v4l2_ops();
+	    vdin_arg.cmd = VDIN_CMD_MPEGIN_STOP;
+	    if(vdin_ops->tvin_vdin_func){
+		vdin_ops->tvin_vdin_func(0,&vdin_arg);
+	    }
+	    mpeg2vdin_en = 0;
+	}
+#endif
         bypass_state = 1;
 #ifdef RUN_DI_PROCESS_IN_IRQ
         if(vdin_source_flag){
@@ -6267,10 +6515,10 @@ light_unreg:
         char* provider_name = (char*)data;
         bypass_state = 0;
 #if (defined RUN_DI_PROCESS_IN_IRQ)&&(!(defined FIQ_VSYNC))
-        Wr_reg_bits(ISA_TIMER_MUX,0,14,1);// one time
-        Wr_reg_bits(ISA_TIMER_MUX,0,4,2);// 1us
-        Wr_reg_bits(ISA_TIMER_MUX,1,18,1);// enable timer c
-        Wr(ISA_TIMERC, 1);
+        WRITE_CBUS_REG_BITS(ISA_TIMER_MUX,0,14,1);// one time
+        WRITE_CBUS_REG_BITS(ISA_TIMER_MUX,0,4,2);// 1us
+        WRITE_CBUS_REG_BITS(ISA_TIMER_MUX,1,18,1);// enable timer c
+        WRITE_CBUS_REG(ISA_TIMERC, 1);
 #endif
         if(strncmp(provider_name, "vdin", 4)==0){
             vdin_source_flag = 1;
@@ -6393,18 +6641,41 @@ static vframe_t *di_vf_peek(void* arg)
     }
     return vframe_ret;
 }
-
+/*recycle the buffer for keeping buffer*/
+static void recycle_keep_buffer(void)
+{
+    ulong irq_flag2=0, fiq_flag=0;
+    int i=0;
+    if((used_post_buf_index != -1)&&(new_keep_last_frame_enable)){
+	if(di_buf_post[used_post_buf_index].type == VFRAME_TYPE_POST){
+            printk("%s recycle keep cur di_buf %d (",__func__, used_post_buf_index);
+            di_lock_irqfiq_save(irq_flag2, fiq_flag);
+	    for(i=0;i<USED_LOCAL_BUF_MAX;i++){
+		if(di_buf_post[used_post_buf_index].di_buf_dup_p[i]){
+	            queue_in(di_buf_post[used_post_buf_index].di_buf_dup_p[i],QUEUE_RECYCLE);
+	            printk(" %d ",di_buf_post[used_post_buf_index].di_buf_dup_p[i]->index);
+	          }
+		}
+	    queue_in(&di_buf_post[used_post_buf_index],QUEUE_POST_FREE);
+	    di_unlock_irqfiq_restore(irq_flag2, fiq_flag);
+	    printk(")\n");
+	}
+	used_post_buf_index = -1;
+    }
+ }
 static vframe_t *di_vf_get(void* arg)
 {
     vframe_t* vframe_ret = NULL;
     di_buf_t* di_buf = NULL;
     ulong irq_flag2=0, fiq_flag=0;
+
     if((init_flag == 0)||recovery_flag||di_pre_stru.unreg_req_flag||dump_state_flag)
         return NULL;
 
     if((run_flag == DI_RUN_FLAG_PAUSE)||
         (run_flag == DI_RUN_FLAG_STEP_DONE))
         return NULL;
+
 #ifdef SUPPORT_START_FRAME_HOLD
     if((disp_frame_count==0)&&(is_bypass()==0)){
         int ready_count = list_count(QUEUE_POST_READY);
@@ -6450,6 +6721,8 @@ get_vframe:
             vframe_ret->early_process_fun(vframe_ret->private_data, vframe_ret);
         }
     }
+    if(vframe_ret)
+	recycle_keep_buffer();
 
     return vframe_ret;
 }
@@ -6458,6 +6731,8 @@ static void di_vf_put(vframe_t *vf, void* arg)
 {
     di_buf_t* di_buf = (di_buf_t*)vf->private_data;
     ulong irq_flag2=0, fiq_flag=0;
+    di_buf_t *p = NULL, *ptmp = NULL;
+    int itmp = 0;
     if((init_flag == 0)||recovery_flag){
 #ifdef DI_DEBUG
         di_print("%s: %x\n", __func__, vf);
@@ -6465,16 +6740,16 @@ static void di_vf_put(vframe_t *vf, void* arg)
         return;
     }
     log_buffer_state("pu_");
-
+    //recycle_keep_buffer();
     if(di_buf->type == VFRAME_TYPE_POST){
         di_lock_irqfiq_save(irq_flag2, fiq_flag);
 
         if(is_in_queue(di_buf, QUEUE_DISPLAY)){
-        recycle_vframe_type_post(di_buf);
+            recycle_vframe_type_post(di_buf);
         }
         di_unlock_irqfiq_restore(irq_flag2, fiq_flag);
 #ifdef DI_DEBUG
-        recycle_vframe_type_post_print(di_buf, __func__);
+        recycle_vframe_type_post_print(di_buf, __func__, __LINE__);
 #endif
     }
     else{
@@ -6558,6 +6833,18 @@ const static struct file_operations di_fops = {
 #endif
 };
 
+static ssize_t show_frame_format(struct device *dev, struct device_attribute* attr, char* buf)
+{
+    int ret = 0;
+    if(init_flag){
+	ret += sprintf(buf + ret, "%s\n", di_pre_stru.cur_prog_flag?"progressive":"interlace");
+    }else{
+	ret += sprintf(buf + ret, "%s\n", "null");
+    }
+    return ret;
+}
+static DEVICE_ATTR(frame_format, 0664, show_frame_format, NULL);
+
 static struct resource memobj;
 static int di_probe(struct platform_device *pdev)
 {
@@ -6639,14 +6926,14 @@ static int di_probe(struct platform_device *pdev)
 
     device_create_file(di_device.dev, &dev_attr_config);
     device_create_file(di_device.dev, &dev_attr_debug);
-#if (MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6TV)
+#ifdef NEW_DI_V1
 	 device_create_file(di_device.dev, &dev_attr_dump_pic);
 #endif
     device_create_file(di_device.dev, &dev_attr_log);
     device_create_file(di_device.dev, &dev_attr_parameters);
     device_create_file(di_device.dev, &dev_attr_status);
     device_create_file(di_device.dev, &dev_attr_provider_vframe_status);
-
+    device_create_file(di_device.dev, &dev_attr_frame_format);
     mem = &memobj;
     r = find_reserve_block(pdev->dev.of_node->name,0);
     if(r < 0){
@@ -6688,9 +6975,9 @@ static int di_probe(struct platform_device *pdev)
 #endif
 #if 0 //MESON_CPU_TYPE <= MESON_CPU_TYPE_MESON6TV
 #if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6
-    Wr(SYS_CPU_0_IRQ_IN1_INTR_MASK, Rd(SYS_CPU_0_IRQ_IN1_INTR_MASK)|(1<<14));
+    WRITE_CBUS_REG(SYS_CPU_0_IRQ_IN1_INTR_MASK, READ_CBUS_REG(SYS_CPU_0_IRQ_IN1_INTR_MASK)|(1<<14));
 #else
-    Wr(A9_0_IRQ_IN1_INTR_MASK, Rd(A9_0_IRQ_IN1_INTR_MASK)|(1<<14));
+    WRITE_CBUS_REG(A9_0_IRQ_IN1_INTR_MASK, READ_CBUS_REG(A9_0_IRQ_IN1_INTR_MASK)|(1<<14));
 #endif
 #endif
 #if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6
@@ -6722,20 +7009,20 @@ static int di_probe(struct platform_device *pdev)
     di_device.task = kthread_run(di_task_handle, &di_device, "kthread_di");
 #endif
 #if (defined RUN_DI_PROCESS_IN_IRQ)&&(!(defined FIQ_VSYNC))
-#if 0
-    Wr_reg_bits(ISA_TIMER_MUX,0,14,1);// one time
-    Wr_reg_bits(ISA_TIMER_MUX,0,4,2);// 1us
-    Wr_reg_bits(ISA_TIMER_MUX,1,18,1);// enable timer c
-#endif
+
+    WRITE_CBUS_REG_BITS(ISA_TIMER_MUX,0,14,1);// one time
+    WRITE_CBUS_REG_BITS(ISA_TIMER_MUX,0,4,2);// 1us
+    WRITE_CBUS_REG_BITS(ISA_TIMER_MUX,1,18,1);// enable timer c
+
     r = request_irq(INT_TIMER_C, &timer_irq,
                     IRQF_SHARED, "timerC",
                     (void *)"timerC");
 #endif
 #ifdef RUN_DI_PROCESS_IN_TIMER_IRQ
-    Wr(ISA_TIMERC, 100);// timerc starting count value
-    Wr_reg_bits(ISA_TIMER_MUX,1,14,1);// periodic
-    Wr_reg_bits(ISA_TIMER_MUX,1,4,2);// 10us
-    Wr_reg_bits(ISA_TIMER_MUX,1,18,1);// enable timer c
+    WRITE_CBUS_REG(ISA_TIMERC, 100);// timerc starting count value
+    WRITE_CBUS_REG_BITS(ISA_TIMER_MUX,1,14,1);// periodic
+    WRITE_CBUS_REG_BITS(ISA_TIMER_MUX,0,4,2);// 10us
+    WRITE_CBUS_REG_BITS(ISA_TIMER_MUX,1,18,1);// enable timer c
 
     r = request_irq(INT_TIMER_C, &timer_irq,
                     IRQF_SHARED, "timerC",
@@ -6765,7 +7052,7 @@ static int di_remove(struct platform_device *pdev)
     device_remove_file(di_device.dev, &dev_attr_config);
     device_remove_file(di_device.dev, &dev_attr_debug);
     device_remove_file(di_device.dev, &dev_attr_log);
-#if (MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6TV)
+#ifdef NEW_DI_V1
 	device_remove_file(di_device.dev, &dev_attr_dump_pic);
 #endif
     device_remove_file(di_device.dev, &dev_attr_parameters);
@@ -6786,7 +7073,7 @@ static int save_init_flag = 0;
 static int di_suspend(struct platform_device *pdev,pm_message_t state)
 {
 #if (defined RUN_DI_PROCESS_IN_IRQ)&&(!(defined FIQ_VSYNC))
-    Wr_reg_bits(ISA_TIMER_MUX,0,18,1);// disable timer c
+    WRITE_CBUS_REG_BITS(ISA_TIMER_MUX,0,18,1);// disable timer c
 #endif
 #if 1
 //fix suspend/resume crash problem
@@ -6815,10 +7102,10 @@ static int di_resume(struct platform_device *pdev)
         di_set_power_control(1,1);
     }
 #if (defined RUN_DI_PROCESS_IN_IRQ)&&(!(defined FIQ_VSYNC))
-    Wr_reg_bits(ISA_TIMER_MUX,0,14,1);// one time
-    Wr_reg_bits(ISA_TIMER_MUX,0,4,2);// 1us
-    Wr_reg_bits(ISA_TIMER_MUX,1,18,1);// enable timer c
-    Wr(ISA_TIMERC, 1);
+    WRITE_CBUS_REG_BITS(ISA_TIMER_MUX,0,14,1);// one time
+    WRITE_CBUS_REG_BITS(ISA_TIMER_MUX,0,4,2);// 1us
+    WRITE_CBUS_REG_BITS(ISA_TIMER_MUX,1,18,1);// enable timer c
+    WRITE_CBUS_REG(ISA_TIMERC, 1);
 #endif
     pr_info("di_hdmirx: resume module\n");
     return 0;
@@ -6987,9 +7274,6 @@ module_param(pulldown_buffer_mode, long, 0664);
 MODULE_PARM_DESC(pulldown_win_mode, "\n pulldown_win_mode \n");
 module_param(pulldown_win_mode, long, 0664);
 
-MODULE_PARM_DESC(frame_packing_mode, "\n frame_packing_mode \n");
-module_param(frame_packing_mode, int, 0664);
-
 MODULE_PARM_DESC(di_log_flag, "\n di log flag \n");
 module_param(di_log_flag, int, 0664);
 
@@ -6998,11 +7282,6 @@ module_param(di_debug_flag, int, 0664);
 
 MODULE_PARM_DESC(buf_state_log_threshold, "\n buf_state_log_threshold \n");
 module_param(buf_state_log_threshold, int, 0664);
-
-#if defined(CONFIG_ARCH_MESON2)
-MODULE_PARM_DESC(pre_de_irq_check, "\n pre_de_irq_check\n");
-module_param(pre_de_irq_check, uint, 0664);
-#endif
 
 MODULE_PARM_DESC(bypass_state, "\n bypass_state\n");
 module_param(bypass_state, uint, 0664);
@@ -7100,6 +7379,9 @@ module_param(force_update_post_reg, uint, 0664);
 
 MODULE_PARM_DESC(update_post_reg_count, "\n update_post_reg_count\n");
 module_param(update_post_reg_count, uint, 0664);
+
+module_param(use_2_interlace_buff,bool,0664);
+MODULE_PARM_DESC(use_2_interlace_buff,"/n debug for progress interlace mixed source /n");
 
 MODULE_DESCRIPTION("AMLOGIC HDMI TX driver");
 MODULE_LICENSE("GPL");
