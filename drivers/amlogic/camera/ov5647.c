@@ -32,6 +32,7 @@
 #include <media/v4l2-device.h>
 #include <media/v4l2-ioctl.h>
 #include <linux/wakelock.h>
+#include <linux/vmalloc.h>
 
 #include <linux/i2c.h>
 #include <media/v4l2-chip-ident.h>
@@ -2478,7 +2479,8 @@ static CLASS_ATTR(camera_debug, 0664, i2c_debug_show, i2c_debug_store);
 static void power_down_ov5647(struct ov5647_device *dev)
 {
 	struct i2c_client *client = v4l2_get_subdevdata(&dev->sd);
-	i2c_put_byte(client,0x0104, 0x00);
+	i2c_put_byte(client,0x0103, 0x01);
+	msleep(10);
 	i2c_put_byte(client,0x0100, 0x00);
 }
 
@@ -3558,6 +3560,9 @@ static int queue_setup(struct vb2_queue *vq, const struct v4l2_format *fmt,
         unsigned long size;
         int width = dev->width;
         int height = dev->height;
+
+        if (1080 == height)
+                height = 1088;
 				
         if (fmt)
                 size = fmt->fmt.pix.sizeimage;
@@ -4128,7 +4133,7 @@ static int ov5647_open(struct file *file)
     aml_cam_init(&dev->cam_info);
     printk("config path:%s\n",(dev->cam_info).config);
     if((dev->cam_info).config != NULL){
-        if((dev->configure = kmalloc(sizeof(configure_t),0)) != NULL){
+        if((dev->configure = vmalloc(sizeof(configure_t))) != NULL){
             if(parse_config((dev->cam_info).config,dev->configure) == 0){
                 printk("parse successfully");
             }else{
@@ -4238,7 +4243,7 @@ static int ov5647_close(struct file *file)
                 dev->configure->aet.aet[i].aet_table = NULL;
             }
         }
-        kfree(dev->configure);
+        vfree(dev->configure);
         dev->configure = NULL;
     }
     cf = NULL;
