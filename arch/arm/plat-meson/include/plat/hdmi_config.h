@@ -45,6 +45,7 @@ struct hdmi_pwr_ctl{
     struct pwr_ctl_var pwr_3v3_off;
     struct pwr_ctl_var pwr_hpll_vdd_on;
     struct pwr_ctl_var pwr_hpll_vdd_off;
+    int pwr_level;
 };
 
 struct hdmi_config_platform_data{
