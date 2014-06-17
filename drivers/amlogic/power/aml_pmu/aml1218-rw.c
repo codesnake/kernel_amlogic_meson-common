@@ -28,7 +28,7 @@
 #define MAX_BUF         100
 #define CHECK_DRIVER()      \
     if (!g_aml1218_client) {        \
-        AML_DBG("driver is not ready right now, wait...\n");   \
+        AML1218_DBG("driver is not ready right now, wait...\n");   \
         dump_stack();       \
         return -ENODEV;     \
     }
@@ -57,7 +57,7 @@ int aml1218_write(int32_t add, uint8_t val)
     buf[2] = val & 0xff;
     ret = i2c_transfer(pdev->adapter, msg, 1);
     if (ret < 0) {
-        AML_DBG("%s: i2c transfer failed, ret:%d\n", __FUNCTION__, ret);
+        AML1218_DBG("%s: i2c transfer failed, ret:%d\n", __FUNCTION__, ret);
         return ret;
     }
     return 0;
@@ -87,7 +87,7 @@ int aml1218_write16(int32_t add, uint16_t val)
     buf[3] = (val >> 8) & 0xff;
     ret = i2c_transfer(pdev->adapter, msg, 1);
     if (ret < 0) {
-        AML_DBG("%s: i2c transfer failed, ret:%d\n", __FUNCTION__, ret);
+        AML1218_DBG("%s: i2c transfer failed, ret:%d\n", __FUNCTION__, ret);
         return ret;
     }
     return 0;
@@ -116,7 +116,7 @@ int aml1218_writes(int32_t add, uint8_t *buff, int len)
     memcpy(buf + 2, buff, len > MAX_BUF ? MAX_BUF : len);
     ret = i2c_transfer(pdev->adapter, msg, 1);
     if (ret < 0) {
-        AML_DBG("%s: i2c transfer failed, ret:%d\n", __FUNCTION__, ret);
+        AML1218_DBG("%s: i2c transfer failed, ret:%d\n", __FUNCTION__, ret);
         return ret;
     }
     return 0;
@@ -150,7 +150,7 @@ int aml1218_read(int add, uint8_t *val)
     buf[1] = (add >> 8) & 0x0f;
     ret = i2c_transfer(pdev->adapter, msg, 2);
     if (ret < 0) {
-        AML_DBG("%s: i2c transfer failed, ret:%d\n", __FUNCTION__, ret);
+        AML1218_DBG("%s: i2c transfer failed, ret:%d\n", __FUNCTION__, ret);
         return ret;
     }
     return 0;
@@ -184,7 +184,7 @@ int aml1218_read16(int add, uint16_t *val)
     buf[1] = (add >> 8) & 0x0f;
     ret = i2c_transfer(pdev->adapter, msg, 2);
     if (ret < 0) {
-        AML_DBG("%s: i2c transfer failed, ret:%d\n", __FUNCTION__, ret);
+        AML1218_DBG("%s: i2c transfer failed, ret:%d\n", __FUNCTION__, ret);
         return ret;
     }
     return 0;
@@ -218,7 +218,7 @@ int aml1218_reads(int add, uint8_t *buff, int len)
     buf[1] = (add >> 8) & 0x0f;
     ret = i2c_transfer(pdev->adapter, msg, 2);
     if (ret < 0) {
-        AML_DBG("%s: i2c transfer failed, ret:%d\n", __FUNCTION__, ret);
+        AML1218_DBG("%s: i2c transfer failed, ret:%d\n", __FUNCTION__, ret);
         return ret;
     }
     return 0;
@@ -245,7 +245,7 @@ static int find_idx(uint32_t start, uint32_t target, uint32_t step, int size)
     int i = 0; 
 
     if (start < target) {
-        AML_DBG("%s, invalid input of voltage:%u\n", __func__, target);    
+        AML1218_DBG("%s, invalid input of voltage:%u\n", __func__, target);    
         return -1;
     }
     do { 
@@ -256,7 +256,7 @@ static int find_idx(uint32_t start, uint32_t target, uint32_t step, int size)
         i++; 
     } while (i < size);
     if (i >= size) {
-        AML_DBG("%s, input voltage %u outof range\n", __func__, target);    
+        AML1218_DBG("%s, input voltage %u outof range\n", __func__, target);    
         return -1;
     }
 
@@ -344,17 +344,15 @@ int aml1218_set_dcdc_voltage(int dcdc, uint32_t voltage)
     }
     idx_to   = find_idx(start, voltage, step, range);
     idx_cur  = (val & 0x7e) >> 1;
-    while (idx_cur != idx_to) {
-        if (idx_cur < idx_to) {                                 // adjust to target voltage step by step
-            idx_cur++;    
-        } else {
-            idx_cur--;
-        }
-        val &= ~0x7e;
-        val |= (idx_cur << 1);
-        aml1218_write(addr, val);
-        udelay(50);                                             // atleast delay 100uS
+
+    step = idx_cur - idx_to;
+    if (step < 0) {
+        step = -step;
     }
+    val &= ~0x7e;
+    val |= (idx_to << 1);
+    aml1218_write(addr, val);
+    udelay(20 * step);
     dcdc_val[dcdc] = val;
     return 0;
 }

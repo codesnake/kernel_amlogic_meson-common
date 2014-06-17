@@ -1421,26 +1421,44 @@ static int aml1212_update_status(struct aml_charger *charger)
     return 0;
 }
 
-void dump_pmu_register(void)
+int dump_pmu_register(char *buf)
 {
     uint8_t val[16];
     int     i;
-    printk("[AML_PMU] DUMP ALL REGISTERS\n");
+    int     size = 0;
+
+    if (!buf) {
+        printk("[AML_PMU] DUMP ALL REGISTERS\n");
+        for (i = 0; i < 16; i++) {
+            aml_pmu_reads(i*16, val, 16);
+            printk("0x%02x - %02x: ", i * 16, i * 16 + 15);
+            printk("%02x %02x %02x %02x ",   val[0],  val[1],  val[2],  val[3]);
+            printk("%02x %02x %02x %02x   ", val[4],  val[5],  val[6],  val[7]);
+            printk("%02x %02x %02x %02x ",   val[8],  val[9],  val[10], val[11]);
+            printk("%02x %02x %02x %02x\n",  val[12], val[13], val[14], val[15]);
+        }
+        return 0;
+    }
+    
+    size += sprintf(buf + size, "%s", "[AML_PMU] DUMP ALL REGISTERS\n");
     for (i = 0; i < 16; i++) {
         aml_pmu_reads(i*16, val, 16);
-        printk("0x%02x - %02x: ", i * 16, i * 16 + 15);
-        printk("%02x %02x %02x %02x ",   val[0],  val[1],  val[2],  val[3]);
-        printk("%02x %02x %02x %02x   ", val[4],  val[5],  val[6],  val[7]);
-        printk("%02x %02x %02x %02x ",   val[8],  val[9],  val[10], val[11]);
-        printk("%02x %02x %02x %02x\n",  val[12], val[13], val[14], val[15]);
+        size += sprintf(buf + size, "0x%02x - %02x: ", i * 16, i * 16 + 15);
+        size += sprintf(buf + size, "%02x %02x %02x %02x ",   val[0],  val[1],  val[2],  val[3]);
+        size += sprintf(buf + size, "%02x %02x %02x %02x   ", val[4],  val[5],  val[6],  val[7]);
+        size += sprintf(buf + size, "%02x %02x %02x %02x ",   val[8],  val[9],  val[10], val[11]);
+        size += sprintf(buf + size, "%02x %02x %02x %02x\n",  val[12], val[13], val[14], val[15]);
     }
+    return size;
 }
 EXPORT_SYMBOL_GPL(dump_pmu_register);
 
 static ssize_t dump_pmu_regs_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
-    dump_pmu_register();
-    return sprintf(buf, "[AML_PMU] DUMP ALL REGISTERS OVER!\n"); 
+    int size;
+    size = dump_pmu_register(buf);
+    size += sprintf(buf, "%s", "[AML_PMU] DUMP ALL REGISTERS OVER!\n"); 
+    return size;
 }
 static ssize_t dump_pmu_regs_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
 {
@@ -1896,7 +1914,7 @@ static int aml_pmu_battery_probe(struct platform_device *pdev)
     aml_pmu_set_gpio(1, 0);                                 // open LCD backlight, test
     aml_pmu_set_gpio(2, 0);                                 // open VCCx2, test
 
-    dump_pmu_register();
+    dump_pmu_register(NULL);
 #ifdef CONFIG_RESET_TO_SYSTEM
     pmu_reboot_nb.notifier_call = aml_pmu_reboot_notifier;
     ret = register_reboot_notifier(&pmu_reboot_nb);

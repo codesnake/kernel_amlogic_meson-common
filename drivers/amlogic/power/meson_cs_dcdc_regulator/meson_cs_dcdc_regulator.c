@@ -781,7 +781,6 @@ static int meson_cs_dvfs_probe(struct platform_device *pdev)
 {
     int ret;    
 	struct device_node *np = pdev->dev.of_node;
-    int default_uv = 0;
     int i = 0;
     char *out_str = NULL;
 
@@ -826,10 +825,6 @@ static int meson_cs_dvfs_probe(struct platform_device *pdev)
         printk("%2d, %08x, %7d\n", i, g_table[i].pwm_value, g_table[i].voltage);    
     }
 
-    PARSE_UINT32_PROPERTY(np, "default_uV", default_uv, next);
-    if (default_uv) {
-        meson_cs_set_voltage(AML_DVFS_ID_VCCK, default_uv, default_uv); 
-    }
 next:
     if (use_pwm) {
         dvfs_vcck_pwm_init(&pdev->dev);
