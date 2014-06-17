@@ -8,6 +8,7 @@ config AM_ETHERNET
 	select  NET
 	help
 		Depends on NET
+source "drivers/amlogic/ethernet/phy/Kconfig"
 	
 config AM_ETHERNET_DEBUG_LEVEL
 	int "Amloigc Ethetnet support"
