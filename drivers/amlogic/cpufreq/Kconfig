@@ -3,10 +3,3 @@ config AMLOGIC_MESON_CPUFREQ
 	depends on PLAT_MESON
 	help
 	  This adds the CPUFreq driver for Meson series CPU
-
-config ARM_MESON_CPUFREQ
-	bool "[obsoleted] Meson6 CPU Frequency scaling support"
-	depends on ARCH_MESON6
-	help
-	   This adds the CPUFreq driver for Meson CPU.
-	   This driver is not clean, it's obsolete.

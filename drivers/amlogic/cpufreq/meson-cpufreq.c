@@ -45,7 +45,7 @@ static struct meson_cpufreq cpufreq;
 static DEFINE_MUTEX(meson_cpufreq_mutex);
 
 static void adjust_jiffies(unsigned int freqOld, unsigned int freqNew);
-
+#ifdef CONFIG_ARCH_MESON8
 static struct cpufreq_frequency_table meson_freq_table[]=
 {
 //	0	, CPUFREQ_ENTRY_INVALID    ,
@@ -70,7 +70,29 @@ static struct cpufreq_frequency_table meson_freq_table[]=
 	{17	, 1992000  },
 	{18	, CPUFREQ_TABLE_END},
 };
-
+#else
+static struct cpufreq_frequency_table meson_freq_table[]=
+{
+    //	0	, CPUFREQ_ENTRY_INVALID    ,
+    //	1	, CPUFREQ_ENTRY_INVALID    ,
+    {0	, 96000    },
+    {1	, 192000   },
+    {2	, 312000   },
+    {3	, 408000   },
+    {4	, 504000   },
+    {5	, 600000   },
+    {6	, 696000   },
+    {7	, 816000   },
+    {8	, 912000   },
+    {9	, 1008000  },
+    {10	, 1104000  },
+    {11	, 1200000  },
+    {12	, 1296000  },
+    {13	, 1416000  },
+    {14	, 1512000  },
+    {15	, CPUFREQ_TABLE_END},
+};
+#endif
 //static struct cpufreq_frequency_table *p_meson_freq_table;
 
 
@@ -298,7 +320,8 @@ static int meson_cpufreq_suspend(struct cpufreq_policy *policy)
      * we have appropriate voltage and/or bus speed for the wakeup process,
      */
 
-    mutex_lock(&meson_cpufreq_mutex);
+    //mutex_lock(&meson_cpufreq_mutex);
+    preempt_disable();
 
     sleep_freq = clk_get_rate(cpufreq.armclk) / 1000;
     printk("cpufreq suspend sleep_freq=%dMhz max=%dMHz\n", sleep_freq/1000, policy->max/1000);
@@ -310,14 +333,16 @@ static int meson_cpufreq_suspend(struct cpufreq_policy *policy)
                                        AML_DVFS_FREQ_PRECHANGE);
         if (ret) {
             pr_err("failed to set voltage %d\n", ret);
-            mutex_unlock(&meson_cpufreq_mutex);
+            //mutex_unlock(&meson_cpufreq_mutex);
+            preempt_enable();
             return 0;
         }
         adjust_jiffies(sleep_freq, policy->max);
     }
     clk_set_rate(cpufreq.armclk, policy->max * 1000);
 
-    mutex_unlock(&meson_cpufreq_mutex);
+    //mutex_unlock(&meson_cpufreq_mutex);
+    preempt_enable();
     return 0;
 }
 
@@ -328,7 +353,8 @@ static int meson_cpufreq_resume(struct cpufreq_policy *policy)
 
     printk("cpufreq resume sleep_freq=%dMhz\n", sleep_freq/1000);
 
-    mutex_lock(&meson_cpufreq_mutex);
+    //mutex_lock(&meson_cpufreq_mutex);
+	preempt_disable();
 
     clk_set_rate(cpufreq.armclk, sleep_freq * 1000);
     cur = clk_get_rate(cpufreq.armclk) / 1000;
@@ -340,11 +366,13 @@ static int meson_cpufreq_resume(struct cpufreq_policy *policy)
                                        AML_DVFS_FREQ_POSTCHANGE);
         if (ret) {
             pr_err("failed to set voltage %d\n", ret);
-            mutex_unlock(&meson_cpufreq_mutex);
+            //mutex_unlock(&meson_cpufreq_mutex);
+            preempt_enable();
             return 0;
         }
     }
-    mutex_unlock(&meson_cpufreq_mutex);
+    //mutex_unlock(&meson_cpufreq_mutex);
+    preempt_enable();
     return 0;
 }
 
@@ -392,11 +420,6 @@ static int __init meson_cpufreq_probe(struct platform_device *pdev)
 
 static int __exit meson_cpufreq_remove(struct platform_device *pdev)
 {
-#ifdef CONFIG_USE_OF
-	kfree(pdev->dev.platform_data);
-	//kfree(vcck_opp_table);
-#endif
-
     return cpufreq_unregister_driver(&meson_cpufreq_driver);
 }
 
@@ -427,8 +450,6 @@ static int __init meson_cpufreq_parent_init(void)
 //    early_suspend.param = pdev;
     register_early_suspend(&early_suspend);
 #endif
-//	cpufreq.dev = get_cpu_device(0);
-//	cpufreq.dev->platform_data = NULL;
 
 
     return platform_driver_probe(&meson_cpufreq_parent_driver,
@@ -462,3 +483,29 @@ static void adjust_jiffies(unsigned int freqOld, unsigned int freqNew)
 #endif
 }
 
+#ifdef CONFIG_ARCH_MESON6
+int meson_cpufreq_boost(unsigned int freq)
+{
+    int ret = 0;
+	struct cpufreq_policy * policy = NULL;
+
+    if (!early_suspend_flag) {
+        // only allow freq boost when not in early suspend
+        //check last_cpu_rate. inaccurate but no lock
+        //printk("%u %u\n", last_cpu_rate, freq);
+        //if (last_cpu_rate < freq) {
+        if ((clk_get_rate(cpufreq.armclk) / 1000) < freq) {
+            mutex_lock(&meson_cpufreq_mutex);
+            if ((clk_get_rate(cpufreq.armclk) / 1000) < freq) {
+				policy = cpufreq_cpu_get(0);
+                ret = meson_cpufreq_target_locked(policy,
+                        freq,
+                        CPUFREQ_RELATION_H);
+            }
+            mutex_unlock(&meson_cpufreq_mutex);
+        }
+        //}
+    }
+    return ret;
+}
+#endif
