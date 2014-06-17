@@ -1047,7 +1047,7 @@ static int dmx_alloc_sub_buffer(struct aml_dmx *dmx)
 
 	addr = virt_to_phys((void*)dmx->sub_pages);
 	DMX_WRITE_REG(dmx->id, SB_START, addr>>12);
-	DMX_WRITE_REG(dmx->id, SB_LAST_ADDR, (dmx->sub_buf_len>>3));
+	DMX_WRITE_REG(dmx->id, SB_LAST_ADDR, (dmx->sub_buf_len>>3)-1);
 	return 0;
 }
 #endif /*NO_SUB*/
@@ -1070,7 +1070,7 @@ static int dmx_alloc_pes_buffer(struct aml_dmx *dmx)
 
 	addr = virt_to_phys((void*)dmx->pes_pages);
 	DMX_WRITE_REG(dmx->id, OB_START, addr>>12);
-	DMX_WRITE_REG(dmx->id, OB_LAST_ADDR, (dmx->pes_buf_len>>3));
+	DMX_WRITE_REG(dmx->id, OB_LAST_ADDR, (dmx->pes_buf_len>>3)-1);
 	return 0;
 }
 
@@ -1195,10 +1195,6 @@ static int dmx_init(struct aml_dmx *dmx)
 	dvb->dmx_init++;
 
 	memset(dmx->sec_buf_watchdog_count, 0, sizeof(dmx->sec_buf_watchdog_count));
-
-#if defined (CONFIG_AMLOGIC_DYNAMIC_FEANDDMX_CONFIG)
-	memset(g_ts_config, 0, sizeof(struct aml_dmx_ts_config) * TS_SRC_MAX);
-#endif
 
 	dmx->init = 1;
 
@@ -1953,13 +1949,13 @@ void dmx_reset_hw_ex(struct aml_dvb *dvb, int reset_irq)
 		if(dmx->sub_pages) {
 			addr = virt_to_phys((void*)dmx->sub_pages);
 			DMX_WRITE_REG(dmx->id, SB_START, addr>>12);
-			DMX_WRITE_REG(dmx->id, SB_LAST_ADDR, (dmx->sub_buf_len>>3));
+			DMX_WRITE_REG(dmx->id, SB_LAST_ADDR, (dmx->sub_buf_len>>3)-1);
 		}
 
 		if(dmx->pes_pages) {
 			addr = virt_to_phys((void*)dmx->pes_pages);
 			DMX_WRITE_REG(dmx->id, OB_START, addr>>12);
-			DMX_WRITE_REG(dmx->id, OB_LAST_ADDR, (dmx->pes_buf_len>>3));
+			DMX_WRITE_REG(dmx->id, OB_LAST_ADDR, (dmx->pes_buf_len>>3)-1);
 		}
 
 		for(n=0; n<CHANNEL_COUNT; n++)
@@ -2978,6 +2974,7 @@ void aml_dmx_after_retune(aml_ts_source_t src, struct dvb_frontend *fe)
 
 	spin_unlock_irqrestore(&dvb->slock, flags);
 }
+EXPORT_SYMBOL(aml_dmx_after_retune);
 
 void aml_dmx_start_error_check(aml_ts_source_t src, struct dvb_frontend *fe)
 {
@@ -2996,6 +2993,7 @@ void aml_dmx_start_error_check(aml_ts_source_t src, struct dvb_frontend *fe)
 
 	spin_unlock_irqrestore(&dvb->slock, flags);
 }
+EXPORT_SYMBOL(aml_dmx_start_error_check);
 
 int  aml_dmx_stop_error_check(aml_ts_source_t src, struct dvb_frontend *fe)
 {
@@ -3016,4 +3014,5 @@ int  aml_dmx_stop_error_check(aml_ts_source_t src, struct dvb_frontend *fe)
 
 	return ret;
 }
+EXPORT_SYMBOL(aml_dmx_stop_error_check);
 

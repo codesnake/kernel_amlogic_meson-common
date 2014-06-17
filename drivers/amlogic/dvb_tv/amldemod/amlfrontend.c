@@ -45,8 +45,8 @@
 	}while(0)
 
 MODULE_PARM_DESC(debug_aml, "\n\t\t Enable frontend debug information");
-static int debug_aml = 1;
-module_param(debug_aml, int, S_IRUGO);
+static int debug_aml = 0;
+module_param(debug_aml, int, 0644);
 
 #define pr_error(fmt, args...) printk("M6_DEMOD: "fmt, ## args)
 
@@ -320,7 +320,7 @@ static int amdemod_stat_islock(struct aml_fe_dev *dev, int mode)
 			}
 	}else if (mode==4){
 		/*DTMB*/
-			printk("DTMB lock status is %lu\n",((apb_read_reg(DTMB_BASE+(0x0e3<<2))>>12)&0x1));
+			pr_dbg("DTMB lock status is %lu\n",((apb_read_reg(DTMB_BASE+(0x0e3<<2))>>12)&0x1));
 			return (apb_read_reg(DTMB_BASE+(0x0e3<<2))>>12)&0x1;
 	}
 	return 0;
@@ -1021,7 +1021,7 @@ static int m6_demod_dtmb_set_frontend(struct dvb_frontend *fe)
 	demod_i2c.tuner=dev->drv->id;
 	demod_i2c.addr=dev->i2c_addr;
 	times = 2;
-	printk("m6_demod_dtmb_set_frontend,freq is %d\n",c->frequency);
+	pr_dbg("m6_demod_dtmb_set_frontend,freq is %d\n",c->frequency);
 	memset(&param, 0, sizeof(param));
 	param.ch_freq = c->frequency/1000;
 
@@ -1074,7 +1074,7 @@ static int m6_demod_dtmb_get_frontend(struct dvb_frontend *fe)
 	struct dtv_frontend_properties *c = &fe->dtv_property_cache;
 	struct aml_fe *afe = fe->demodulator_priv;
 	*c = afe->params;
-	pr_dbg("[get frontend]c->frequency is %d\n",c->frequency);
+//	pr_dbg("[get frontend]c->frequency is %d\n",c->frequency);
 	return 0;
 }
 

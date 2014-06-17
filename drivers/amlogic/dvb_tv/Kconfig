@@ -37,14 +37,6 @@ config AM_IOBUS
 endmenu
 
 if !OF
-config AMLOGIC_DYNAMIC_FEANDDMX_CONFIG
-	bool "Support Dynamic Frontend And Demux Config"
-	default n
-	depends on AM_DVB
-	help
-		Support dynamic frontend and demux config.
-
-if !AMLOGIC_DYNAMIC_FEANDDMX_CONFIG
 
 config AMLOGIC_TS0
 	bool "Enable TS0"
@@ -194,70 +186,17 @@ config AMLOGIC_TS2_INVERT_S2P1_FEC_CLK
 		TS2 FEC_CLK invert
 
 endif
-endif
 
-config AM_MXL101
-	tristate "MXL101 demod driver"
-	default n
-	depends on AM_DVB
-	help
-		Select to enable MXL101(dvbt) demod driver.
-
-config AM_AVL6211
-	tristate "AVL6211 demod driver"
-	default n
-	depends on AM_DVB
-	help
-		Select to enable AVL6211(dvbs2) demod driver.
-
-config AM_SI2168
-	tristate "SI2168 demod driver"
-	default n
-	depends on AM_DVB
-	help
-		Select to enable SI2168(dvbt,dvbt2) demod driver.
-
-config AM_ITE9133
-	tristate "ITE9133 demod driver"
-	default n
-	depends on AM_DVB
-	help
-		Select to enable ITE9133(dvbt) demod driver.
-
-config AM_ITE9173
-	tristate "ITE9173 demod driver"
-	default n
-	depends on AM_DVB
-	help
-		Select to enable ITE9173(isdbt) demod driver.
-
+if ARCH_MESON6TV || ARCH_MESON6TVD
 config AM_M6_DEMOD
 	tristate "M6 demod driver"
 	default n
 	depends on AM_DVB
 	help
 		Select to enable M6 demod driver.
+endif
 
-config AM_SI2176
-    tristate "SI2176 tuner driver"
-    default n
-    depends on AM_DVB
-	help
-		Select to enable SI2176 driver.
-config AM_SI2196
-    tristate "SI2196 tuner driver"
-    default n
-    depends on AM_DVB
-	help
-		Select to enable SI2196 driver.
-config AM_CTC703
-	tristate "CRESTA tuner driver"
-	default n
-	depends on AM_DVB
-	help
-		select the cresta tuner.
-
-source "drivers/amlogic/dvb_tv/atbm887x/Kconfig"
+isource "../hardware/dvb/altobeam/drivers/atbm887x/Kconfig"
 
 config AM_SI2177
 	tristate "SI2177 tuner"
@@ -266,11 +205,12 @@ config AM_SI2177
 	help
 		select the 2177 tuner.
 
-config AM_DIBCOM8096
-	tristate "dibcom8096 demod driver"
+config AM_AVL6211
+	tristate "AVL6211 DVB-S2 demod driver"
 	default n
 	depends on AM_DVB
 	help
-		Select to enable dibcom8096 demod driver.
+		select the AVL6211 DVB-S2 demod.
+
 endmenu
 

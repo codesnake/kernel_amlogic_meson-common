@@ -80,7 +80,8 @@ typedef enum{
 	AM_DTV_DEMOD_SI2168 = 5,
 	AM_DTV_DEMOD_ITE9133 = 6,
 	AM_DTV_DEMOD_ITE9173 = 7,
-	AM_DTV_DEMOD_DIB8096 = 8
+	AM_DTV_DEMOD_DIB8096 = 8,
+	AM_DTV_DEMOD_ATBM8869 = 9
 }aml_dtv_demod_type_t;
 
 typedef enum{
@@ -92,6 +93,7 @@ typedef enum{
 struct aml_fe_dev;
 struct aml_fe;
 struct aml_fe_drv{
+	struct module        *owner;
 	struct aml_fe_drv    *next;
 	aml_tuner_type_t      id;
 	char    *name;
@@ -155,6 +157,7 @@ struct aml_fe_man{
 	struct aml_fe_dev   dtv_demod[FE_DEV_COUNT];
 	struct dvb_frontend dev[FE_DEV_COUNT];
 	struct pinctrl     *pinctrl;
+	struct platform_device *pdev;
 };
 
 extern int aml_register_fe_drv(aml_fe_dev_type_t type, struct aml_fe_drv *drv);
