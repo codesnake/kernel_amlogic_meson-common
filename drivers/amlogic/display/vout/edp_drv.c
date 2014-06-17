@@ -1819,12 +1819,18 @@ int dplpm_link_policy_maker(EDP_Link_Config_t *mlconfig, EDP_Video_Mode_t *vm)
 
 int dplpm_link_off(void)
 {
-	int status = 0;
-	unsigned char aux_data;
-	
-	DBG_PRINT("..... Power down sink link .....\n");
-	aux_data = 2;	//power down mode
-	//status = trdp_AUXWrite(EDP_DPCD_SET_POWER, 1, &aux_data);
+    int status = 0;
+    unsigned char aux_data;
+
+    DBG_PRINT("..... Power down sink link .....\n");
+    aux_data = 2;	//power down mode
+    //status = trdp_AUXWrite(EDP_DPCD_SET_POWER, 1, &aux_data);
+
+    return status;
+}
+
+void dplpm_off(void)
+{
 	WRITE_LCD_REG(ENCL_VIDEO_EN, 0);
 	mdelay(10);
 	dplpm_main_stream_enable(0);
@@ -1832,12 +1838,11 @@ int dplpm_link_off(void)
 	WRITE_DPTX_REG(EDP_TX_TRANSMITTER_OUTPUT_ENABLE, 0);	//disable the transmitter
 	WRITE_DPTX_REG(EDP_TX_PHY_RESET, 0xf);	//reset the PHY
 	WRITE_DPTX_REG(EDP_TX_PHY_POWER_DOWN, 0xf);	//need to set
-	WRITE_DPTX_REG(EDP_TX_TRANSMITTER_OUTPUT_ENABLE, 0);	//disable the transmitter
+
 	//mdelay(100);
 	WRITE_LCD_CBUS_REG_BITS(RESET4_MASK, 0, 11, 1);
 	WRITE_LCD_CBUS_REG_BITS(RESET4_REGISTER, 1, 11, 1);
 	WRITE_LCD_CBUS_REG_BITS(RESET4_MASK, 1, 11, 1);
-	return status;
 }
 
 //***********************************************//

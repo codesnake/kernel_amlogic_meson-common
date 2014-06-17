@@ -82,9 +82,7 @@
         lcd_bits_user=<6>;	/** user defined lcd bits(6 or 8, decided by hardware design; only valid when lcd_bits_option=1) */
 
         /* below configs are decided by hardware design, you can modify them if needed. */
-        //ttl config
         ttl_rb_bit_swap=<0 0>;	/** ttl rb_swap, bit_swap : (0=normal, 1=swap) */
-        //lvds config
         lvds_channel_pn_swap=<0>;	/** lvds channel pn swap(0=normal, 1=swap) */
 
         /* recommend settings, you can modify them if needed. */
@@ -168,25 +166,43 @@
 //$$ L2 PROP_U32 2 = "vsync_width_backporch"
 //$$ L2 PROP_U32 2 = "pol_hsync_vsync"
 //$$ L2 PROP_U32 = "dsi_lane_num"
-//$$ L2 PROP_U32 2= "dsi_bit_rate_min_max"
-//$$ L2 PROP_U32 2= "dsi_sleep_out_display_on_delay"
-    lcd_B080XAN01:lcd_B080XAN01{	//k101
-        model_name="B080XAN01";	/** lcd model name */
-        interface="mipi";		/** lcd_interface(mipi, lvds, edp, ttl) */
-        active_area=<119 159>;		/** lcd active_area or display_area horizontal size, vertical size : (unit in mm, you can find them on the home page of lcd spec) */
-        lcd_bits_option=<6 1>;		/** lcd_bits(6,8), bits_option(0=only support one mode as lcd_bits define, 1=both support 6/8bit) */
+//$$ L2 PROP_U32 2 = "dsi_operation_mode"
+//$$ L2 PROP_U32 2 = "dsi_bit_rate_min_max"
+//$$ L2 PROP_U32 = "pclk_lanebyteclk_factor"
+//$$ L2 PROP_U32 2 = "dsi_transfer_ctrl"
+//$$ L2 PROP_U32 12 = "dsi_init_on"
+//$$ L2 PROP_U32 12 = "dsi_init_off"
+//$$ L2 PROP_U32 = "lcd_extern_init"
+    lcd_B080XAN01:lcd_B080XAN01{ //k101
+        model_name="B080XAN01"; /** lcd model name */
+        interface="mipi";       /** lcd_interface(mipi, lvds, edp, ttl) */
+        active_area=<119 159>;  /** lcd active_area or display_area horizontal size, vertical size : (unit in mm, you can find them on the home page of lcd spec) */
+        lcd_bits_option=<6 1>;  /** lcd_bits(6,8), bits_option(0=only support one mode as lcd_bits define, 1=both support 6/8bit) */
 
-        resolution=<768 1024>;	/** horizontal resolution, vertical resolution */
-        period=<948 1140>;		/** horizontal period(htotal), vertical period(vtotal) */
+        resolution=<768 1024>;  /** horizontal resolution, vertical resolution */
+        period=<948 1140>;      /** horizontal period(htotal), vertical period(vtotal) */
 
-        clock_hz_pol=<64843200 0>;	/** clock_hz(unit in Hz, both support clk and frame_rate, >200 regard as clk, <200 regard as frame_rate), clk_pol(only valid for TTL) */
-        hsync_width_backporch=<64 120>;	/** hsync_width, hsync_backporch(include hsync_width) */
-        vsync_width_backporch=<50 80>;	/** vsync_width, vsync_backporch(include vsync_width) */
-        pol_hsync_vsync=<0 0>;	/** hsync_polarity, vsync_polarity : (0=negative, 1=positive) */
+        clock_hz_pol=<64843200 0>; /** clock_hz(unit in Hz, both support clk and frame_rate, >200 regard as clk, <200 regard as frame_rate), clk_pol(only valid for TTL) */
+        hsync_width_backporch=<64 120>; /** hsync_width, hsync_backporch(include hsync_width) */
+        vsync_width_backporch=<50 80>;  /** vsync_width, vsync_backporch(include vsync_width) */
+        pol_hsync_vsync=<0 0>;          /** hsync_polarity, vsync_polarity : (0=negative, 1=positive) */
 
-        dsi_lane_num=<4>;/** mipi dsi data lane number */
-        dsi_bit_rate_min_max=<500 600>;/** range of mipi dsi data lane bit rate(unit: MHz) */
-        dsi_sleep_out_display_on_delay=<20 20>; /** mipi dsi basic delay: (unit: ms) */
+        dsi_lane_num=<4>; /** mipi dsi data lane number */
+        dsi_operation_mode=<1 0>; /** operation mode when init and display: (0=video mode, 1=command mode). default is <1 0> */
+        dsi_bit_rate_min_max=<500 600>; /** range of mipi dsi data lane bit rate(unit: MHz) */
+        pclk_lanebyteclk_factor =<0>;   /** special adjust, default is 0 */
+        dsi_transfer_ctrl=<0 0>; /** clk_lane auto stop in LP mode: (0=disable, 1=enable), transfer switch between LP and HS: (0=auto, 1=standard, 2=slow). default is <0 0> */
+        dsi_init_on=<0x05 0x11 0 //sleep out
+                    0xff 20      //delay 20ms
+                    0x05 0x29 0  //display on
+                    0xff 20      //delay 20ms
+                    0xff 0xff>;  /** mipi command(data_type, command, para_num, parameters). 0xff,0xff is ending flag. 0xff,n(n<0xff) means delay n(unit: ms) */
+        dsi_init_off=<0x05 0x28 0 //display off
+                    0xff 10       //delay 10ms
+                    0x05 0x10 0   //sleep in
+                    0xff 10       //delay 10ms
+                    0xff 0xff>;   /** mipi command(data_type, command, para_num, parameters). 0xff,0xff is ending flag. 0xff,n(n<0xff) means delay n(unit: ms) */
+        lcd_extern_init=<0>;    /** lcd extern init command control(0=disable, 1=enable) */
     };
 
 //$$ MATCH "lcd_model_config_match" = <&lcd_KD079D1>
@@ -201,25 +217,43 @@
 //$$ L2 PROP_U32 2 = "vsync_width_backporch"
 //$$ L2 PROP_U32 2 = "pol_hsync_vsync"
 //$$ L2 PROP_U32 = "dsi_lane_num"
-//$$ L2 PROP_U32 2= "dsi_bit_rate_min_max"
-//$$ L2 PROP_U32 2= "dsi_sleep_out_display_on_delay"
-    lcd_KD079D1:lcd_KD079D1{	//k102
-        model_name="KD079D1";	/** lcd model name */
-        interface="mipi";		/** lcd_interface(mipi, lvds, edp, ttl) */
-        active_area=<119 159>;		/** lcd active_area or display_area horizontal size, vertical size : (unit in mm, you can find them on the home page of lcd spec) */
-        lcd_bits_option=<6 1>;		/** lcd_bits(6,8), bits_option(0=only support one mode as lcd_bits define, 1=both support 6/8bit) */
+//$$ L2 PROP_U32 2 = "dsi_operation_mode"
+//$$ L2 PROP_U32 2 = "dsi_bit_rate_min_max"
+//$$ L2 PROP_U32 = "pclk_lanebyteclk_factor"
+//$$ L2 PROP_U32 2 = "dsi_transfer_ctrl"
+//$$ L2 PROP_U32 12 = "dsi_init_on"
+//$$ L2 PROP_U32 12 = "dsi_init_off"
+//$$ L2 PROP_U32 = "lcd_extern_init"
+    lcd_KD079D1:lcd_KD079D1{ //k102
+        model_name="KD079D1";  /** lcd model name */
+        interface="mipi";      /** lcd_interface(mipi, lvds, edp, ttl) */
+        active_area=<119 159>; /** lcd active_area or display_area horizontal size, vertical size : (unit in mm, you can find them on the home page of lcd spec) */
+        lcd_bits_option=<6 1>; /** lcd_bits(6,8), bits_option(0=only support one mode as lcd_bits define, 1=both support 6/8bit) */
 
-        resolution=<768 1024>;	/** horizontal resolution, vertical resolution */
-        period=<948 1140>;		/** horizontal period(htotal), vertical period(vtotal) */
+        resolution=<768 1024>; /** horizontal resolution, vertical resolution */
+        period=<948 1140>;     /** horizontal period(htotal), vertical period(vtotal) */
 
-        clock_hz_pol=<64843200 0>;	/** clock_hz(unit in Hz, both support clk and frame_rate, >200 regard as clk, <200 regard as frame_rate), clk_pol(only valid for TTL) */
-        hsync_width_backporch=<64 120>;	/** hsync_width, hsync_backporch(include hsync_width) */
-        vsync_width_backporch=<50 80>;	/** vsync_width, vsync_backporch(include vsync_width) */
-        pol_hsync_vsync=<0 0>;	/** hsync_polarity, vsync_polarity : (0=negative, 1=positive) */
+        clock_hz_pol=<64843200 0>; /** clock_hz(unit in Hz, both support clk and frame_rate, >200 regard as clk, <200 regard as frame_rate), clk_pol(only valid for TTL) */
+        hsync_width_backporch=<64 120>; /** hsync_width, hsync_backporch(include hsync_width) */
+        vsync_width_backporch=<50 80>;  /** vsync_width, vsync_backporch(include vsync_width) */
+        pol_hsync_vsync=<0 0>;          /** hsync_polarity, vsync_polarity : (0=negative, 1=positive) */
 
         dsi_lane_num=<4>;/** mipi dsi data lane number */
-        dsi_bit_rate_min_max=<500 600>;/** range of mipi dsi data lane bit rate(unit: MHz) */
-        dsi_sleep_out_display_on_delay=<100 100>; /** mipi dsi basic delay: (unit: ms) */
+        dsi_operation_mode=<1 0>; /** operation mode when init and display: (0=video mode, 1=command mode). default is <1 0> */
+        dsi_bit_rate_min_max=<500 600>; /** range of mipi dsi data lane bit rate(unit: MHz) */
+        pclk_lanebyteclk_factor =<0>;   /** special adjust, default is 0 */
+        dsi_transfer_ctrl=<0 0>; /** clk_lane auto stop in LP mode: (0=disable, 1=enable), transfer switch between LP and HS: (0=auto, 1=standard, 2=slow). default is <0 0> */
+        dsi_init_on=<0x05 0x11 0 //sleep out
+                    0xff 100     //delay 100ms
+                    0x05 0x29 0  //display on
+                    0xff 100     //delay 100ms
+                    0xff 0xff>;  /** mipi command(data_type, command, para_num, parameters). 0xff,0xff is ending flag. 0xff,n(n<0xff) means delay n(unit: ms) */
+        dsi_init_off=<0x05 0x28 0 //display off
+                    0xff 10       //delay 10ms
+                    0x05 0x10 0   //sleep in
+                    0xff 10       //delay 10ms
+                    0xff 0xff>;   /** mipi command(data_type, command, para_num, parameters). 0xff,0xff is ending flag. 0xff,n(n<0xff) means delay n(unit: ms) */
+        lcd_extern_init=<0>;    /** lcd extern init command control(0=disable, 1=enable) */
     };
 
 //$$ MATCH "lcd_model_config_match" = <&lcd_CLAA101FP05XG>
@@ -234,27 +268,43 @@
 //$$ L2 PROP_U32 2 = "vsync_width_backporch"
 //$$ L2 PROP_U32 2 = "pol_hsync_vsync"
 //$$ L2 PROP_U32 = "dsi_lane_num"
+//$$ L2 PROP_U32 2 = "dsi_operation_mode"
 //$$ L2 PROP_U32 2 = "dsi_bit_rate_min_max"
 //$$ L2 PROP_U32 = "pclk_lanebyteclk_factor"
-//$$ L2 PROP_U32 2 = "dsi_sleep_out_display_on_delay"
+//$$ L2 PROP_U32 2 = "dsi_transfer_ctrl"
+//$$ L2 PROP_U32 12 = "dsi_init_on"
+//$$ L2 PROP_U32 12 = "dsi_init_off"
+//$$ L2 PROP_U32 = "lcd_extern_init"
     lcd_CLAA101FP05XG:lcd_CLAA101FP05XG{
         model_name="CLAA101FP05XG";	/** lcd model name */
         interface="mipi";		/** lcd_interface(mipi, lvds, edp, ttl) */
         active_area=<216 135>;		/** lcd active_area or display_area horizontal size, vertical size : (unit in mm, you can find them on the home page of lcd spec) */
-        lcd_bits_option=<8 1>;		/** lcd_bits(6,8), bits_option(0=only support one mode as lcd_bits define, 1=both support 6/8bit) */
+        lcd_bits_option=<8 0>;		/** lcd_bits(6,8), bits_option(0=only support one mode as lcd_bits define, 1=both support 6/8bit) */
 
         resolution=<1920 1200>;	/** horizontal resolution, vertical resolution */
         period=<2080 1235>;		/** horizontal period(htotal), vertical period(vtotal) */
 
         clock_hz_pol=<154128000 0>;	/** clock_hz(unit in Hz, both support clk and frame_rate, >200 regard as clk, <200 regard as frame_rate), clk_pol(only valid for TTL) */
-        hsync_width_backporch=<32 80>;	/** hsync_width, hsync_backporch(include hsync_width) */
+        hsync_width_backporch=<32 112>;	/** hsync_width, hsync_backporch(include hsync_width) */
         vsync_width_backporch=<6 26>;	/** vsync_width, vsync_backporch(include vsync_width) */
         pol_hsync_vsync=<0 0>;	/** hsync_polarity, vsync_polarity : (0=negative, 1=positive) */
 
         dsi_lane_num=<4>;/** mipi dsi data lane number */
-        dsi_bit_rate_min_max=<900 1000>;/** range of mipi dsi data lane bit rate(unit: MHz) */
-        pclk_lanebyteclk_factor =<15>;/** special adjust, default is 0 */
-        dsi_sleep_out_display_on_delay=<100 100>; /** mipi dsi basic delay: (unit: ms) */
+        dsi_operation_mode=<1 0>; /** operation mode when init and display: (0=video mode, 1=command mode). default is <1 0> */
+        dsi_bit_rate_min_max=<900 1000>; /** range of mipi dsi data lane bit rate(unit: MHz) */
+        pclk_lanebyteclk_factor =<15>;   /** special adjust, default is 0 */
+        dsi_transfer_ctrl=<1 0>; /** clk_lane auto stop in LP mode: (0=disable, 1=enable), transfer switch between LP and HS: (0=auto, 1=standard, 2=slow). default is <0 0> */
+        dsi_init_on=<0x05 0x11 0 //sleep out
+                    0xff 100     //delay 100ms
+                    0x05 0x29 0  //display on
+                    0xff 100     //delay 100ms
+                    0xff 0xff>;  /** mipi command(data_type, command, para_num, parameters). 0xff,0xff is ending flag. 0xff,n(n<0xff) means delay n(unit: ms) */
+        dsi_init_off=<0x05 0x28 0 //display off
+                    0xff 10       //delay 10ms
+                    0x05 0x10 0   //sleep in
+                    0xff 10       //delay 10ms
+                    0xff 0xff>;   /** mipi command(data_type, command, para_num, parameters). 0xff,0xff is ending flag. 0xff,n(n<0xff) means delay n(unit: ms) */
+        lcd_extern_init=<0>;    /** lcd extern init command control(0=disable, 1=enable) */
     };
 
 //$$ MATCH "lcd_model_config_match" = <&lcd_LD070WX4>
@@ -270,10 +320,13 @@
 //$$ L2 PROP_U32 2 = "pol_hsync_vsync"
 //$$ L2 PROP_U32 = "vsync_horizontal_phase"
 //$$ L2 PROP_U32 = "dsi_lane_num"
+//$$ L2 PROP_U32 2 = "dsi_operation_mode"
 //$$ L2 PROP_U32 2 = "dsi_bit_rate_min_max"
-//$$ L2 PROP_U32 = "dsi_transfer_mode"
-//$$ L2 PROP_U32 18 = "dsi_power_on_cmd"
-//$$ L2 PROP_U32 2 = "dsi_sleep_out_display_on_delay"
+//$$ L2 PROP_U32 = "pclk_lanebyteclk_factor"
+//$$ L2 PROP_U32 2 = "dsi_transfer_ctrl"
+//$$ L2 PROP_U32 42 = "dsi_init_on"
+//$$ L2 PROP_U32 12 = "dsi_init_off"
+//$$ L2 PROP_U32 = "lcd_extern_init"
     lcd_LD070WX4:lcd_LD070WX4{
         model_name="LD070WX4";	/** lcd model name */
         interface="mipi";		/** lcd_interface(mipi, lvds, edp, ttl) */
@@ -290,19 +343,181 @@
         vsync_horizontal_phase=<1 4>; /** adj_sign(0=positive, 1=negative), adj_value. default is <0 0> */
 
         dsi_lane_num=<4>;/** mipi dsi data lane number */
-        dsi_bit_rate_min_max=<400 500>;/** range of mipi dsi data lane bit rate(unit: MHz) */
-        dsi_transfer_mode=<0>;/** mipi dsi transfer mode: (0=command mode, 1=video mode), default is 1 */
-        dsi_power_on_cmd =<0x01  0x0
-                        0xFF  0x20
-                        0xAE  0x0B
-                        0xEE  0xEA
-                        0xEF  0x5F
-                        0xF2  0x68
-                        0xEE  0x0
-                        0xEF  0x0
-                        0xFF  0xFF
-                        >;/** special power on command, 2 data is a pair(reg, value). if the first valu is 0xff, second value is delay time(unit: ms). ending flag is 0xff,0xff.*/
-        dsi_sleep_out_display_on_delay=<200 100>; /** mipi dsi basic delay: (unit: ms) */
+        dsi_operation_mode=<0 0>; /** operation mode when init and display: (0=video mode, 1=command mode). default is <1 0> */
+        dsi_bit_rate_min_max=<400 500>; /** range of mipi dsi data lane bit rate(unit: MHz) */
+        pclk_lanebyteclk_factor =<0>;   /** special adjust, default is 0 */
+        dsi_transfer_ctrl=<0 0>;  /** clk_lane auto stop in LP mode: (0=disable, 1=enable), transfer switch between LP and HS: (0=auto, 1=standard, 2=slow). default is <0 0> */
+        dsi_init_on=<0x15 0x01 1 0x0 
+                    0xff 20     //delay 20ms
+                    0x15 0xAE 1 0x0B 
+                    0x15 0xEE 1 0xEA 
+                    0x15 0xEF 1 0x5F 
+                    0x15 0xF2 1 0x68 
+                    0x15 0xEE 1 0x0 
+                    0x15 0xEF 1 0x0 
+
+                    0x05 0x11 0  //sleep out
+                    0xff 200     //delay 200ms
+                    0x05 0x29 0  //display on
+                    0xff 100     //delay 100ms
+                    0xff 0xff>;  /** mipi command(data_type, command, para_num, parameters). 0xff,0xff is ending flag. 0xff,n(n<0xff) means delay n(unit: ms) */
+        dsi_init_off=<0x05 0x28 0 //display off
+                    0xff 10       //delay 10ms
+                    0x05 0x10 0   //sleep in
+                    0xff 10       //delay 10ms
+                    0xff 0xff>;   /** mipi command(data_type, command, para_num, parameters). 0xff,0xff is ending flag. 0xff,n(n<0xff) means delay n(unit: ms) */
+        lcd_extern_init=<0>;  /** lcd extern init command control(0=disable, 1=enable) */
+    };
+
+//$$ MATCH "lcd_model_config_match" = <&lcd_N070ICN>
+//$$ L2 PROP_STR = "model_name"
+//$$ L2 PROP_STR = "interface"
+//$$ L2 PROP_U32 2 = "active_area"
+//$$ L2 PROP_U32 2 = "lcd_bits_option"
+//$$ L2 PROP_U32 2 = "resolution"
+//$$ L2 PROP_U32 2 = "period"
+//$$ L2 PROP_U32 2 = "clock_hz_pol"
+//$$ L2 PROP_U32 2 = "hsync_width_backporch"
+//$$ L2 PROP_U32 2 = "vsync_width_backporch"
+//$$ L2 PROP_U32 2 = "pol_hsync_vsync"
+//$$ L2 PROP_U32 = "vsync_horizontal_phase"
+//$$ L2 PROP_U32 = "dsi_lane_num"
+//$$ L2 PROP_U32 2 = "dsi_operation_mode"
+//$$ L2 PROP_U32 2 = "dsi_bit_rate_min_max"
+//$$ L2 PROP_U32 = "pclk_lanebyteclk_factor"
+//$$ L2 PROP_U32 2 = "dsi_transfer_ctrl"
+//$$ L2 PROP_U32 2 = "dsi_init_on"
+//$$ L2 PROP_U32 2 = "dsi_init_off"
+//$$ L2 PROP_U32 = "lcd_extern_init"
+    lcd_N070ICN:lcd_N070ICN{
+        model_name="N070ICN";	/** lcd model name */
+        interface="mipi";		/** lcd_interface(mipi, lvds, edp, ttl) */
+        active_area=<94 151>;		/** lcd active_area or display_area horizontal size, vertical size : (unit in mm, you can find them on the home page of lcd spec) */
+        lcd_bits_option=<8 0>;		/** lcd_bits(6,8), bits_option(0=only support one mode as lcd_bits define, 1=both support 6/8bit) */
+
+        resolution=<800 1280>;	/** horizontal resolution, vertical resolution */
+        period=<864 1315>;		/** horizontal period(htotal), vertical period(vtotal) */
+
+        clock_hz_pol=<56800000 0>;	/** clock_hz(unit in Hz, both support clk and frame_rate, >200 regard as clk, <200 regard as frame_rate), clk_pol(only valid for TTL) */
+        hsync_width_backporch=<4 48>;	/** hsync_width, hsync_backporch(include hsync_width) */
+        vsync_width_backporch=<3 23>;	/** vsync_width, vsync_backporch(include vsync_width) */
+        pol_hsync_vsync=<0 0>;	/** hsync_polarity, vsync_polarity : (0=negative, 1=positive) */
+        vsync_horizontal_phase=<1 4>; /** adj_sign(0=positive, 1=negative), adj_value. default is <0 0> */
+
+        dsi_lane_num=<4>;/** mipi dsi data lane number */
+        dsi_operation_mode=<1 0>; /** operation mode when init and display: (0=video mode, 1=command mode). default is <1 0> */
+        dsi_bit_rate_min_max=<400 500>; /** range of mipi dsi data lane bit rate(unit: MHz) */
+        pclk_lanebyteclk_factor =<0>;   /** special adjust, default is 0 */
+        dsi_transfer_ctrl=<0 0>;  /** clk_lane auto stop in LP mode: (0=disable, 1=enable), transfer switch between LP and HS: (0=auto, 1=standard, 2=slow). default is <0 0> */
+        dsi_init_on=<0xff 0xff>;  /** mipi command(data_type, command, para_num, parameters). 0xff,0xff is ending flag. 0xff,n(n<0xff) means delay n(unit: ms) */
+        dsi_init_off=<0xff 0xff>; /** mipi command(data_type, command, para_num, parameters). 0xff,0xff is ending flag. 0xff,n(n<0xff) means delay n(unit: ms) */
+        lcd_extern_init=<1>;    /** lcd extern init command control(0=disable, 1=enable) */
+    };
+
+//$$ MATCH "lcd_model_config_match" = <&lcd_HSD101PUW1>
+//$$ L2 PROP_STR = "model_name"
+//$$ L2 PROP_STR = "interface"
+//$$ L2 PROP_U32 2 = "active_area"
+//$$ L2 PROP_U32 2 = "lcd_bits_option"
+//$$ L2 PROP_U32 2 = "resolution"
+//$$ L2 PROP_U32 2 = "period"
+//$$ L2 PROP_U32 2 = "clock_hz_pol"
+//$$ L2 PROP_U32 2 = "hsync_width_backporch"
+//$$ L2 PROP_U32 2 = "vsync_width_backporch"
+//$$ L2 PROP_U32 2 = "pol_hsync_vsync"
+//$$ L2 PROP_U32 = "dsi_lane_num"
+//$$ L2 PROP_U32 2 = "dsi_operation_mode"
+//$$ L2 PROP_U32 2 = "dsi_bit_rate_min_max"
+//$$ L2 PROP_U32 = "pclk_lanebyteclk_factor"
+//$$ L2 PROP_U32 2 = "dsi_transfer_ctrl"
+//$$ L2 PROP_U32 5 = "dsi_init_on"
+//$$ L2 PROP_U32 2 = "dsi_init_off"
+//$$ L2 PROP_U32 = "lcd_extern_init"
+    lcd_HSD101PUW1:lcd_HSD101PUW1{
+        model_name="HSD101PUW1"; /** lcd model name */
+        interface="mipi";        /** lcd_interface(mipi, lvds, edp, ttl) */
+        active_area=<216 135>;   /** lcd active_area or display_area horizontal size, vertical size : (unit in mm, you can find them on the home page of lcd spec) */
+        lcd_bits_option=<8 0>;   /** lcd_bits(6,8), bits_option(0=only support one mode as lcd_bits define, 1=both support 6/8bit) */
+
+        resolution=<1920 1200>;  /** horizontal resolution, vertical resolution */
+        period=<1984 1235>;      /** horizontal period(htotal), vertical period(vtotal) */
+
+        clock_hz_pol=<147010000 0>; /** clock_hz(unit in Hz, both support clk and frame_rate, >200 regard as clk, <200 regard as frame_rate), clk_pol(only valid for TTL) */
+        hsync_width_backporch=<16 48>; /** hsync_width, hsync_backporch(include hsync_width) */
+        vsync_width_backporch=<2 20>;  /** vsync_width, vsync_backporch(include vsync_width) */
+        pol_hsync_vsync=<0 0>;         /** hsync_polarity, vsync_polarity : (0=negative, 1=positive) */
+
+        dsi_lane_num=<4>;/** mipi dsi data lane number */
+        dsi_operation_mode=<0 0>; /** operation mode when init and display: (0=video mode, 1=command mode). default is <1 0> */
+        dsi_bit_rate_min_max=<800 900>; /** range of mipi dsi data lane bit rate(unit: MHz) */
+        pclk_lanebyteclk_factor =<0>;   /** special adjust, default is 0 */
+        dsi_transfer_ctrl=<0 2>;  /** clk_lane auto stop in LP mode: (0=disable, 1=enable), transfer switch between LP and HS: (0=auto, 1=standard, 2=slow). default is <0 0> */
+        dsi_init_on=<0x32 0x0 0  //turn on peripheral
+                    0xff 0xff>;   /** mipi command(data_type, command, para_num, parameters). 0xff,0xff is ending flag. 0xff,n(n<0xff) means delay n(unit: ms) */
+        dsi_init_off=<0xff 0xff>; /** mipi command(data_type, command, para_num, parameters). 0xff,0xff is ending flag. 0xff,n(n<0xff) means delay n(unit: ms) */
+        lcd_extern_init=<0>;    /** lcd extern init command control(0=disable, 1=enable) */
+    };
+
+//$$ MATCH "lcd_model_config_match" = <&lcd_LT070ME05>
+//$$ L2 PROP_STR = "model_name"
+//$$ L2 PROP_STR = "interface"
+//$$ L2 PROP_U32 2 = "active_area"
+//$$ L2 PROP_U32 2 = "lcd_bits_option"
+//$$ L2 PROP_U32 2 = "resolution"
+//$$ L2 PROP_U32 2 = "period"
+//$$ L2 PROP_U32 2 = "clock_hz_pol"
+//$$ L2 PROP_U32 2 = "hsync_width_backporch"
+//$$ L2 PROP_U32 2 = "vsync_width_backporch"
+//$$ L2 PROP_U32 2 = "pol_hsync_vsync"
+//$$ L2 PROP_U32 = "dsi_lane_num"
+//$$ L2 PROP_U32 2 = "dsi_operation_mode"
+//$$ L2 PROP_U32 2 = "dsi_bit_rate_min_max"
+//$$ L2 PROP_U32 = "pclk_lanebyteclk_factor"
+//$$ L2 PROP_U32 2 = "dsi_transfer_ctrl"
+//$$ L2 PROP_U32 50 = "dsi_init_on"
+//$$ L2 PROP_U32 12 = "dsi_init_off"
+//$$ L2 PROP_U32 = "lcd_extern_init"
+    lcd_LT070ME05:lcd_LT070ME05{
+        model_name="LT070ME05"; /** lcd model name */
+        interface="mipi";       /** lcd_interface(mipi, lvds, edp, ttl) */
+        active_area=<94 151>;   /** lcd active_area or display_area horizontal size, vertical size : (unit in mm, you can find them on the home page of lcd spec) */
+        lcd_bits_option=<8 0>;  /** lcd_bits(6,8), bits_option(0=only support one mode as lcd_bits define, 1=both support 6/8bit) */
+
+        resolution=<1200 1920>; /** horizontal resolution, vertical resolution */
+        period=<1392 1956>;     /** horizontal period(htotal), vertical period(vtotal) */
+
+        clock_hz_pol=<136138000 0>; /** clock_hz(unit in Hz, both support clk and frame_rate, >200 regard as clk, <200 regard as frame_rate), clk_pol(only valid for TTL) */
+        hsync_width_backporch=<12 72>; /** hsync_width, hsync_backporch(include hsync_width) */
+        vsync_width_backporch=<2 8>;   /** vsync_width, vsync_backporch(include vsync_width) */
+        pol_hsync_vsync=<0 0>;         /** hsync_polarity, vsync_polarity : (0=negative, 1=positive) */
+
+        dsi_lane_num=<4>;/** mipi dsi data lane number */
+        dsi_operation_mode=<1 0>; /** operation mode when init and display: (0=video mode, 1=command mode). default is <1 0> */
+        dsi_bit_rate_min_max=<800 900>; /** range of mipi dsi data lane bit rate(unit: MHz) */
+        pclk_lanebyteclk_factor =<0>;   /** special adjust, default is 0 */
+        dsi_transfer_ctrl=<0 0>;  /** clk_lane auto stop in LP mode: (0=disable, 1=enable), transfer switch between LP and HS: (0=auto, 1=standard, 2=slow). default is <0 0> */
+        dsi_init_on=<0x05 0x01 0  //soft reset
+                    0xff 5        //delay 5ms
+                    0x23 0xb0 1 0x00  //MCAP
+                    0x29 0xb4 1 0x0c  //interface ID setting
+                    0x29 0xb6 2 0x3a 0xd3 //DSI control
+
+                    0x15 0x51 1 0xe6 //write display brightness
+                    0x15 0x53 1 0x2c //write control display
+
+                    0x15 0x3a 1 0x77 //set pixel format
+                    0x05 0x11 0 //sleep out
+                    0xff 120    //delay 120ms
+                    0x29 0xb3 5 0x14 0x08 0x00 0x22 0x00 //Interface setting
+                    0x05 0x29 0 //display on
+                    0xff 30     //delay 10ms
+                    0xff 0xff>;   /** mipi command(data_type, command, para_num, parameters). 0xff,0xff is ending flag. 0xff,n(n<0xff) means delay n(unit: ms) */
+        dsi_init_off=<0x05 0x28 0 //display off
+                    0xff 10       //delay 10ms
+                    0x05 0x10 0   //sleep in
+                    0xff 10       //delay 10ms
+                    0xff 0xff>;   /** mipi command(data_type, command, para_num, parameters). 0xff,0xff is ending flag. 0xff,n(n<0xff) means delay n(unit: ms) */
+        lcd_extern_init=<0>;    /** lcd extern init command control(0=disable, 1=enable) */
     };
 
 //******************************************************************************
@@ -503,7 +718,7 @@
 //$$ L2 PROP_U32 2 = "clock_hz_pol"
 //$$ L2 PROP_U32 2 = "hsync_width_backporch"
 //$$ L2 PROP_U32 2 = "vsync_width_backporch"
-//$$ L2 PROP_U32 2 = "pol_hsync_vsync"	
+//$$ L2 PROP_U32 2 = "pol_hsync_vsync"
     lcd_TM081JFH01:lcd_TM081JFH01{
         model_name="TM081JFH01";	/** lcd model name */
         interface="lvds";		/** lcd_interface(mipi, lvds, edp, ttl) */
@@ -597,6 +812,34 @@
         pol_hsync_vsync=<0 0>;	/** hsync_polarity, vsync_polarity : (0=negative, 1=positive) */
     };
 
+//$$ MATCH "lcd_model_config_match" = <&lcd_LD070WS2>
+//$$ L2 PROP_STR = "model_name"
+//$$ L2 PROP_STR = "interface"
+//$$ L2 PROP_U32 2 = "active_area"
+//$$ L2 PROP_U32 2 = "lcd_bits_option"
+//$$ L2 PROP_U32 2 = "resolution"
+//$$ L2 PROP_U32 2 = "period"
+//$$ L2 PROP_U32 2 = "clock_hz_pol"
+//$$ L2 PROP_U32 2 = "hsync_width_backporch"
+//$$ L2 PROP_U32 2 = "vsync_width_backporch"
+//$$ L2 PROP_U32 2 = "pol_hsync_vsync"
+//$$ L2 PROP_U32 = "lcd_extern_init"
+    lcd_LD070WS2:lcd_LD070WS2{
+        model_name="LD070WS2";	/** lcd model name */
+        interface="lvds";		/** lcd_interface(mipi, lvds, edp, ttl) */
+        active_area=<154 90>;	/** lcd active_area or display_area horizontal size, vertical size : (unit in mm, you can find them on the home page of lcd spec) */
+        lcd_bits_option=<8 0>;	/** lcd_bits(6,8), bits_option(0=only support one mode as lcd_bits define, 1=both support 6/8bit) */
+
+        resolution=<1024 600>;	/** horizontal resolution, vertical resolution */
+        period=<1344 635>;		/** horizontal period(htotal), vertical period(vtotal) */
+
+        clock_hz_pol=<51200000 0>;	/** clock_hz(unit in Hz, both support clk and frame_rate, >200 regard as clk, <200 regard as frame_rate), clk_pol(only valid for TTL) */
+        hsync_width_backporch=<10 170>;	/** hsync_width, hsync_backporch(include hsync_width) */
+        vsync_width_backporch=<2 25>;	/** vsync_width, vsync_backporch(include vsync_width) */
+        pol_hsync_vsync=<0 0>;	/** hsync_polarity, vsync_polarity : (0=negative, 1=positive) */
+
+        lcd_extern_init=<1>;/** lcd extern init command control(0=disable, 1=enable) */
+    };
 //******************************************************************************
 //ttl
 //******************************************************************************

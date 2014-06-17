@@ -575,6 +575,23 @@ static __exit void tv_exit_module(void)
 	amlog_mask_level(LOG_MASK_INIT,LOG_LEVEL_HIGH,"exit tv module\r\n");
 }
 
+#ifdef CONFIG_ARCH_MESON8
+extern void cvbs_config_vdac(unsigned int flag, unsigned int cfg);
+
+static int __init vdac_config_bootargs_setup(char* line)
+{
+    unsigned int cfg = 0x00;
+
+    printk("cvbs trimming line = %s\n", line);
+    cfg = simple_strtoul(line, NULL, 16);
+
+    cvbs_config_vdac((cfg&0xff00)>>8, cfg&0xff);
+
+    return 1;
+}
+
+__setup("vdaccfg=", vdac_config_bootargs_setup);
+#endif
 
 arch_initcall(tv_init_module);
 module_exit(tv_exit_module);

@@ -281,7 +281,7 @@ static int ge2d_monitor_thread(void *data)
 	//setup current_wq here.
 	while(ge2d_manager.process_queue_state!=GE2D_PROCESS_QUEUE_STOP)
 	{
-		ret=down_timeout(&manager->event.cmd_in_sem,6000);
+		ret = down_interruptible(&manager->event.cmd_in_sem);
 		//got new cmd arrived in signal,
 		//CLK_GATE_ON(GE2D);
 		while((manager->current_wq=get_next_work_queue(manager))!=NULL)

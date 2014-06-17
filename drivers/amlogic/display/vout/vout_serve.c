@@ -36,6 +36,8 @@
 #include <linux/slab.h>
 #include <linux/interrupt.h>
 #include <linux/ctype.h>
+#include <linux/of.h>
+
 #include <linux/amlogic/vout/vinfo.h>
 #include <mach/am_regs.h>
 #include <asm/uaccess.h>
@@ -64,6 +66,14 @@ SET_VOUT_CLASS_ATTR(rd_reg,read_reg)
 
 
 static  vout_info_t	vout_info;
+int power_level=0;
+
+int get_power_level()
+{
+    return power_level;
+}
+EXPORT_SYMBOL(get_power_level);
+
 
 /*****************************************************************
 **
@@ -191,6 +201,8 @@ static int  create_vout_attr(void)
 {
 	//create base class for display
 	int  i;
+    extern const vinfo_t *get_current_vinfo(void);
+    vinfo_t * init_mode;
 
 	vout_info.base_class=class_create(THIS_MODULE,VOUT_CLASS_NAME);
 	if(IS_ERR(vout_info.base_class))
@@ -206,6 +218,12 @@ static int  create_vout_attr(void)
 			amlog_mask_level(LOG_MASK_INIT,LOG_LEVEL_HIGH,"create disp attribute %s fail\r\n",vout_attr[i]->attr.name);
 		}
 	}
+
+    // Init /sys/class/display/mode value
+    init_mode = get_current_vinfo();
+    if(init_mode)
+        strcpy(mode, init_mode->name);
+
 	return   0;
 }
 
@@ -288,6 +306,10 @@ static int
     early_suspend.resume = meson_vout_late_resume;
 	register_early_suspend(&early_suspend);
 #endif
+
+	if(pdev->dev.of_node != NULL) {
+	    ret = of_property_read_u32(pdev->dev.of_node,"power_level",&power_level);
+	}
 
 	ret =create_vout_attr();
 	if(ret==0)

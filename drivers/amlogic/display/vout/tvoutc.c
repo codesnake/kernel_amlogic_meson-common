@@ -36,6 +36,7 @@
 #include <mach/tvregs.h>
 #include <mach/mod_gate.h>
 #include <linux/amlogic/vout/enc_clk_config.h>
+#include <linux/amlogic/vout/vout_notify.h>
 
 static u32 curr_vdac_setting=DEFAULT_VDAC_SEQUENCE;
 
@@ -283,6 +284,69 @@ static int uboot_display_already(tvmode_t mode)
     */
 }
 
+#if ((defined CONFIG_ARCH_MESON8) || (defined CONFIG_ARCH_MESON8B))
+static unsigned int vdac_cfg_valid = 0, vdac_cfg_value = 0;
+static unsigned int cvbs_get_trimming_version(unsigned int flag)
+{
+	unsigned int version = 0xff;
+	
+	if( (flag&0xf0) == 0xa0 )
+		version = 5;
+	else if( (flag&0xf0) == 0x40 )
+		version = 2;
+	else if( (flag&0xc0) == 0x80 )
+		version = 1;
+	else if( (flag&0xc0) == 0x00 )
+		version = 0;
+
+	return version;
+}
+
+void cvbs_config_vdac(unsigned int flag, unsigned int cfg)
+{
+	unsigned char version = 0;
+
+	vdac_cfg_value = cfg&0x7;
+
+	version = cvbs_get_trimming_version(flag);
+
+	// flag 1/0 for validity of vdac config
+	if( (version==1) || (version==2) || (version==5) )
+		vdac_cfg_valid = 1;
+	else
+		vdac_cfg_valid = 0;
+
+	printk("cvbs trimming.%d.v%d: 0x%x, 0x%x\n", vdac_cfg_valid, version, flag, cfg);
+
+	return ;
+}
+static void cvbs_cntl_output(unsigned int open)
+{
+	unsigned int cntl0=0, cntl1=0;
+
+	if( open == 0 )// close
+	{
+		cntl0 = 0;
+		cntl1 = 8;
+
+		WRITE_MPEG_REG(HHI_VDAC_CNTL0, cntl0);
+		WRITE_MPEG_REG(HHI_VDAC_CNTL1, cntl1);
+	}
+	else if( open == 1 )// open
+	{
+		cntl0 = 0x1;
+		cntl1 = (vdac_cfg_valid==0)?0:vdac_cfg_value;
+
+		printk("vdac open.%d = 0x%x, 0x%x\n", vdac_cfg_valid, cntl0, cntl1);
+
+		WRITE_MPEG_REG(HHI_VDAC_CNTL1, cntl1);
+		WRITE_MPEG_REG(HHI_VDAC_CNTL0, cntl0);
+	}
+
+	return ;
+}
+#endif
+
 int tvoutc_setmode(tvmode_t mode)
 {
     const  reg_t *s;
@@ -312,6 +376,10 @@ int tvoutc_setmode(tvmode_t mode)
             return 0;
         }
     }
+
+#if ((defined CONFIG_ARCH_MESON8) || (defined CONFIG_ARCH_MESON8B))
+    cvbs_cntl_output(0);
+#endif
     while (MREG_END_MARKER != s->reg)
         setreg(s++);
     printk("%s[%d]\n", __func__, __LINE__);
@@ -377,22 +445,27 @@ printk(" clk_util_clk_msr 29 = %d\n", clk_util_clk_msr(29));
 	{
 		msleep(1000);
 
-#ifdef CONFIG_MACH_MESON6_G02_DONGLE
-    	aml_write_reg32(P_VENC_VDAC_SETTING, 0x7);
-#else
-    	aml_write_reg32(P_VENC_VDAC_SETTING, 0x5);
-#endif
+		if(get_power_level() == 0) {
+		    aml_write_reg32(P_VENC_VDAC_SETTING, 0x5);
+		} else {
+		    aml_write_reg32(P_VENC_VDAC_SETTING, 0x7);
+		}
+	} else {
+		if(get_power_level() == 0) {
+		    aml_write_reg32(P_VENC_VDAC_SETTING, 0x0);
+		} else {
+		    aml_write_reg32(P_VENC_VDAC_SETTING, 0x7);
+		}
 	}
 #endif
 
-#ifdef CONFIG_ARCH_MESON8
-	if( (mode==TVMODE_480CVBS) || (mode==TVMODE_576CVBS) )
-	{
-		msleep(1000);
-
-		aml_write_reg32(P_HHI_VDAC_CNTL0,0x650001);
-		aml_write_reg32(P_HHI_VDAC_CNTL1,0x1);
-	}
+#if ((defined CONFIG_ARCH_MESON8) || (defined CONFIG_ARCH_MESON8B))
+    if( (mode==TVMODE_480CVBS) || (mode==TVMODE_576CVBS) )
+    {
+        msleep(1000);
+        aml_write_reg32(P_HHI_GCLK_OTHER, aml_read_reg32(P_HHI_GCLK_OTHER) | (0x1<<10) | (0x1<<8)); //enable CVBS GATE, DAC_CLK:bit[10] = 1;VCLK2_ENCI:bit[8] = 1;
+        cvbs_cntl_output(1);
+    }
 #endif
 //while(1);
 

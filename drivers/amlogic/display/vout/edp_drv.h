@@ -247,6 +247,7 @@ typedef struct {
 
 extern int dplpm_link_policy_maker(EDP_Link_Config_t *mlconfig, EDP_Video_Mode_t *vm);
 extern int dplpm_link_off(void);
+extern void dplpm_off(void);
 extern void edp_probe(void);
 extern void edp_remove(void);
 

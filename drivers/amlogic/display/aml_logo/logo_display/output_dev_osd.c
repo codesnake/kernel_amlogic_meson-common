@@ -4,7 +4,7 @@
 #include "logo_dev_osd.h"
 #include "dev_ge2d.h"
 #include <linux/wait.h>
-#include "amlogo_log.h" 
+#include	"amlogo_log.h" 
 #include <linux/amlogic/amlog.h>
 #include <linux/amlogic/vout/vinfo.h>
 #include <linux/amlogic/vout/vout_notify.h>
@@ -132,9 +132,79 @@ static int osd_hw_setup(logo_object_t *plogo)
 	return SUCCESS;
 	
 }
+
+#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8
+void set_osd_freescaler(int index, logo_object_t *plogo, vmode_t new_mode) {
+    vmode_t old_mode = plogo->para.vout_mode & VMODE_MODE_BIT_MASK;
+    printk("aml_logo: outputmode changed(%d->%d), reset osd%d scaler.\n", old_mode, new_mode, index);
+    osd_free_scale_mode_hw(index, 1);
+    osd_free_scale_enable_hw(index, 0);
+    osd_set_color_mode(index, &default_color_format_array[plogo->dev->output_dev.osd.color_depth]);
+    switch(old_mode) {
+        case VMODE_480I:
+        case VMODE_480CVBS:
+        case VMODE_480P:
+        case VMODE_576I:
+        case VMODE_576CVBS:
+        case VMODE_576P:
+        case VMODE_720P:
+        case VMODE_720P_50HZ:
+            osd_set_free_scale_axis_hw(index, 0, 0, 1279, 719);
+            osddev_update_disp_axis_hw(0, 1279, 0, 719, 0, 0, 0, index);
+            break;
+        case VMODE_1080I:
+        case VMODE_1080I_50HZ:
+        case VMODE_1080P:
+        case VMODE_1080P_50HZ:
+        case VMODE_1080P_24HZ:
+        case VMODE_4K2K_24HZ:
+        case VMODE_4K2K_25HZ:
+        case VMODE_4K2K_30HZ:
+        case VMODE_4K2K_SMPTE:
+            osd_set_free_scale_axis_hw(index, 0, 0, 1919, 1079);
+            osddev_update_disp_axis_hw(0, 1919, 0, 1079, 0, 0, 0, index);
+            break;
+   }
+   switch(new_mode) {
+        case VMODE_480I:
+        case VMODE_480CVBS:
+        case VMODE_480P:
+            osd_set_window_axis_hw(index, 0, 0, 719, 479);
+            break;
+        case VMODE_576I:
+        case VMODE_576CVBS:
+        case VMODE_576P:
+            osd_set_window_axis_hw(index, 0, 0, 719, 575);
+            break;
+        case VMODE_720P:
+        case VMODE_720P_50HZ:
+            osd_set_window_axis_hw(index, 0, 0, 1279, 719);
+             break;
+        case VMODE_1080I:
+        case VMODE_1080I_50HZ:
+        case VMODE_1080P:
+        case VMODE_1080P_50HZ:
+        case VMODE_1080P_24HZ:
+            osd_set_window_axis_hw(index, 0, 0, 1919, 1079);
+            break;
+        case VMODE_4K2K_24HZ:
+        case VMODE_4K2K_25HZ:
+        case VMODE_4K2K_30HZ:
+            osd_set_window_axis_hw(index, 0, 0, 3839, 2159);
+            break;
+        case VMODE_4K2K_SMPTE:
+            osd_set_window_axis_hw(index, 0, 0, 4095, 2159);
+            break;
+   }
+   osd_free_scale_enable_hw(index, 0x10001);
+   osd_enable_hw(1, index);
+}
+#endif
+
 static int osd0_init(logo_object_t *plogo)
 {
 	int hpd_state = 0;
+	vmode_t cur_mode = plogo->para.vout_mode;
 
 	if(plogo->para.output_dev_type==output_osd0.idx)
 	{
@@ -157,13 +227,20 @@ static int osd0_init(logo_object_t *plogo)
 			extern int read_hpd_gpio(void);
 			hpd_state = read_hpd_gpio();
     		
-			if (hpd_state == 0)
-			    set_current_vmode(cvbsmode_hdmionly);
-			else
-			    set_current_vmode(hdmimode_hdmionly);
+			if (hpd_state == 0){
+			    cur_mode = cvbsmode_hdmionly;
+			}
+			else{
+			    cur_mode = hdmimode_hdmionly;
+			}
+			set_current_vmode(cur_mode);
 		}
 #else
 		set_current_vmode(plogo->para.vout_mode);
+#endif
+
+#if MESON_CPU_TYPE < MESON_CPU_TYPE_MESON8
+		osd_init_scan_mode();
 #endif
 		output_osd0.vinfo=get_current_vinfo();
 		plogo->dev=&output_osd0;
@@ -174,6 +251,11 @@ static int osd0_init(logo_object_t *plogo)
 		plogo->dev->output_dev.osd.mem_start=plogo->platform_res[LOGO_DEV_OSD0].mem_start;
 		plogo->dev->output_dev.osd.mem_end=plogo->platform_res[LOGO_DEV_OSD0].mem_end;
 		plogo->dev->output_dev.osd.color_depth=get_curr_color_depth(P_VIU_OSD1_BLK0_CFG_W0);//setup by uboot
+#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8
+		if((cur_mode != (plogo->para.vout_mode & VMODE_MODE_BIT_MASK)) && (cur_mode <= VMODE_4K2K_SMPTE)) {
+		    set_osd_freescaler(LOGO_DEV_OSD0, plogo, cur_mode);
+		}
+#endif
 		return OUTPUT_DEV_FOUND;
 	}
 	return OUTPUT_DEV_UNFOUND;
@@ -181,6 +263,7 @@ static int osd0_init(logo_object_t *plogo)
 static int osd1_init(logo_object_t *plogo)
 {
 	int hpd_state = 0;
+	vmode_t cur_mode = plogo->para.vout_mode;
 
 	if(plogo->para.output_dev_type==output_osd1.idx)
 	{
@@ -204,14 +287,19 @@ static int osd1_init(logo_object_t *plogo)
 			hpd_state = read_hpd_gpio();
     		
 			if (hpd_state == 0){
-			    set_current_vmode(cvbsmode_hdmionly);
+			    cur_mode = cvbsmode_hdmionly;
 			}
 			else{
-			    set_current_vmode(hdmimode_hdmionly);
+			    cur_mode = hdmimode_hdmionly;
 			}
+			set_current_vmode(cur_mode);
 		}
 #else
 		set_current_vmode(plogo->para.vout_mode);
+#endif
+
+#if MESON_CPU_TYPE < MESON_CPU_TYPE_MESON8
+		osd_init_scan_mode();
 #endif
 		output_osd1.vinfo=get_current_vinfo();
 		plogo->dev=&output_osd1;
@@ -222,6 +310,11 @@ static int osd1_init(logo_object_t *plogo)
 		plogo->dev->output_dev.osd.mem_start=plogo->platform_res[LOGO_DEV_OSD1].mem_start;
 		plogo->dev->output_dev.osd.mem_end=plogo->platform_res[LOGO_DEV_OSD1].mem_end;
 		plogo->dev->output_dev.osd.color_depth=get_curr_color_depth(P_VIU_OSD2_BLK0_CFG_W0);//setup by uboot
+#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8
+		if((cur_mode != (plogo->para.vout_mode & VMODE_MODE_BIT_MASK)) && (cur_mode <= VMODE_4K2K_SMPTE)) {
+		    set_osd_freescaler(LOGO_DEV_OSD1, plogo, cur_mode);
+		}
+#endif
 		return OUTPUT_DEV_FOUND;
 	}
 	return OUTPUT_DEV_UNFOUND;

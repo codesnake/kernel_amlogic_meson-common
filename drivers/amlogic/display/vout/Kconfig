@@ -15,13 +15,6 @@ config AM_LCD_OUTPUT
 	help  
 		LCD output module
 
-config AML_LCD_EXTERN
-	tristate "AML lcd external bridge driver"
-	default y
-	depends on  AM_LCD_OUTPUT
-	help
-		AML lcd external bridge driver		
-		
 config AML_GAMMA_DEBUG
 	tristate "AML Gamma debug"
 	default y

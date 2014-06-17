@@ -11,7 +11,6 @@
 #include <mach/am_regs.h>
 #include <mach/gpio.h>
 #include <linux/amlogic/vout/aml_lcd_extern.h>
-#include <linux/amlogic/aml_gpio_consumer.h>
 
 //#define LCD_EXT_DEBUG_INFO
 #ifdef LCD_EXT_DEBUG_INFO
@@ -20,48 +19,66 @@
 #define DBG_PRINT(...)
 #endif
 
-struct aml_lcd_extern_driver_t lcd_ext_driver;
+static struct aml_lcd_extern_driver_t lcd_ext_driver = {
+	.type = LCD_EXTERN_MAX,
+	.name = NULL,
+	.reg_read = NULL,
+	.reg_write = NULL,
+	.power_on = NULL,
+	.power_off = NULL,
+	.init_on_cmd_8 = NULL,
+	.init_off_cmd_8 = NULL,
+};
 
 struct aml_lcd_extern_driver_t* aml_lcd_extern_get_driver(void)
 {
-	return &lcd_ext_driver;
+    return &lcd_ext_driver;
 }
 
-static int get_lcd_extern_dt_data(struct device_node* of_node, struct lcd_extern_data_t *pdata)
+int lcd_extern_driver_check(void)
+{
+	struct aml_lcd_extern_driver_t* lcd_ext;
+
+	lcd_ext = aml_lcd_extern_get_driver();
+	if (lcd_ext) {
+		if (lcd_ext->type < LCD_EXTERN_MAX) {
+			printk("[warning]: lcd_extern has already exist (%s)\n", lcd_ext->name);
+			return -1;
+		}
+	}
+	else {
+		printk("get lcd_extern_driver failed\n");
+	}
+	
+	return 0;
+}
+
+int get_lcd_extern_dt_data(struct device_node* of_node, struct lcd_extern_config_t *pdata)
 {
 	int err;
+	int val;
 	const char *str;
 	
-	err = of_property_read_string(of_node, "dev_name", (const char **)&pdata->name);
+	err = of_property_read_string(of_node, "dev_name", &pdata->name);
 	if (err) {
 		pdata->name = "aml_lcd_extern";
-		printk("warning: get dev_name failed, set dev_name aml_lcd_extern\n");
+		printk("warning: get dev_name failed\n");
 	}
+	
 	err = of_property_read_u32(of_node, "type", &pdata->type);
 	if (err) {
 		pdata->type = LCD_EXTERN_MAX;
 		printk("warning: get type failed, exit\n");
 		return -1;
 	}
-	err = of_property_read_string(of_node, "status", &str);
-	if (err) {
-		printk("%s warning: get status failed, default disable\n", pdata->name);
-		pdata->status = 0;
-	}
-	else {
-		if ((strncmp(str, "ok", 2) == 0) || (strncmp(str, "enable", 6) == 0))
-			pdata->status = 1;
-		else
-			pdata->status = 0;
-	}
 	switch (pdata->type) {
 		case LCD_EXTERN_I2C:
-			err = of_property_read_u32(of_node,"address",&pdata->addr);
+			err = of_property_read_u32(of_node,"i2c_address",&pdata->i2c_addr);
 			if (err) {
-				printk("%s warning: get i2c address failed\n", pdata->name);
-				pdata->addr = 0;
+				printk("%s warning: get i2c_address failed\n", pdata->name);
+				pdata->i2c_addr = 0;
 			}
-			DBG_PRINT("%s: address=0x%02x\n", pdata->name, pdata->addr);
+			DBG_PRINT("%s: i2c_address=0x%02x\n", pdata->name, pdata->i2c_addr);
 		  
 			err = of_property_read_string(of_node, "i2c_bus", &str);
 			if (err) {
@@ -85,6 +102,65 @@ static int get_lcd_extern_dt_data(struct device_node* of_node, struct lcd_extern
 			DBG_PRINT("%s: i2c_bus=%s[%d]\n", pdata->name, str, pdata->i2c_bus);
 			break;
 		case LCD_EXTERN_SPI:
+			err = of_property_read_string(of_node,"gpio_spi_cs", &str);
+			if (err) {
+				printk("%s warning: get spi gpio_spi_cs failed\n", pdata->name);
+				pdata->spi_cs = -1;
+			}
+			else {
+			    val = amlogic_gpio_name_map_num(str);
+				if (val > 0) {
+					err = lcd_extern_gpio_request(val);
+					if (err) {
+					  printk("faild to alloc spi_cs gpio (%s)!\n", str);
+					}
+					pdata->spi_cs = val;
+					DBG_PRINT("spi_cs gpio = %s(%d)\n", str, pdata->spi_cs);
+				}
+				else {
+					pdata->spi_cs = -1;
+				}
+			}
+			err = of_property_read_string(of_node,"gpio_spi_clk", &str);
+			if (err) {
+				printk("%s warning: get spi gpio_spi_clk failed\n", pdata->name);
+				pdata->spi_clk = -1;
+			}
+			else {
+			    val = amlogic_gpio_name_map_num(str);
+				if (val > 0) {
+					err = lcd_extern_gpio_request(val);
+					if (err) {
+					  printk("faild to alloc spi_clk gpio (%s)!\n", str);
+					}
+					pdata->spi_clk = val;
+					DBG_PRINT("spi_clk gpio = %s(%d)\n", str, pdata->spi_clk);
+				}
+				else {
+					pdata->spi_clk = -1;
+				}
+			}
+			err = of_property_read_string(of_node,"gpio_spi_data", &str);
+			if (err) {
+				printk("%s warning: get spi gpio_spi_data failed\n", pdata->name);
+				pdata->spi_data = -1;
+			}
+			else {
+			    val = amlogic_gpio_name_map_num(str);
+				if (val > 0) {
+					err = lcd_extern_gpio_request(val);
+					if (err) {
+					  printk("faild to alloc spi_data gpio (%s)!\n", str);
+					}
+					pdata->spi_data = val;
+					DBG_PRINT("spi_data gpio = %s(%d)\n", str, pdata->spi_data);
+				}
+				else {
+					pdata->spi_data = -1;
+				}
+			}
+			break;
+		case LCD_EXTERN_MIPI:
 			break;
 		default:
 			break;
@@ -92,128 +168,3 @@ static int get_lcd_extern_dt_data(struct device_node* of_node, struct lcd_extern
 	
 	return 0;
 }
-
-static int lcd_extern_probe(struct platform_device *pdev)
-{
-	struct device_node* child;
-	struct i2c_board_info i2c_info;
-	struct i2c_adapter *adapter;
-	struct i2c_client *i2c_client;
-	int i = 0;
-	struct lcd_extern_data_t *pdata = NULL;
-	
-	if (!pdata)
-		pdata = kzalloc(sizeof(*pdata), GFP_KERNEL);
-	if (!pdata)	{
-		printk("failed to alloc data\n");
-		goto lcd_extern_probe_failed;
-	}
-	
-	pdev->dev.platform_data = pdata;
-	
-	for_each_child_of_node(pdev->dev.of_node, child) {
-		if (get_lcd_extern_dt_data(child, pdata) != 0) {
-			printk("failed to get dt data\n");
-			goto lcd_extern_probe_failed;
-		}
-		if (pdata->status == 1) {
-			switch (pdata->type) {
-				case LCD_EXTERN_I2C:
-					memset(&i2c_info, 0, sizeof(i2c_info));
-					
-					adapter = i2c_get_adapter(pdata->i2c_bus);
-					if (!adapter) {
-						printk("warning£ºfailed to get i2c adapter\n");
-						goto lcd_extern_probe_failed;
-					}
-					
-					strncpy(i2c_info.type, pdata->name, I2C_NAME_SIZE);
-					i2c_info.addr = pdata->addr;
-					i2c_info.platform_data = pdata;
-					i2c_info.flags=0;
-					if(i2c_info.addr>0x7f)
-						i2c_info.flags=0x10;
-					i2c_client = i2c_new_device(adapter, &i2c_info);
-					if (!i2c_client) {
-						printk("%s :failed to new i2c device\n", pdata->name);
-						goto lcd_extern_probe_failed;
-					}
-					else{
-						DBG_PRINT("%s: new i2c device succeed\n",((struct lcd_extern_data_t *)(i2c_client->dev.platform_data))->name);
-					}
-					
-					lcd_ext_driver.type = LCD_EXTERN_I2C;
-					break;
-				case LCD_EXTERN_SPI:
-					lcd_ext_driver.type = LCD_EXTERN_SPI;
-					break;
-				default:
-					break;
-			}
-			goto lcd_extern_probe_successful;	//only 1 driver allowed
-		}
-		i++;
-	}
-
-lcd_extern_probe_successful:
-	printk("%s ok\n", __FUNCTION__);
-	return 0;
-	
-lcd_extern_probe_failed:
-	if (pdata)
-		kfree(pdata);
-	return -1;
-}
-
-static int lcd_extern_remove(struct platform_device *pdev)
-{
-	if (pdev->dev.platform_data)
-	 	kfree (pdev->dev.platform_data);
-    return 0;
-}
-
-#ifdef CONFIG_USE_OF
-static const struct of_device_id aml_lcd_extern_dt_match[]={
-	{	
-		.compatible = "amlogic,lcd_extern",
-	},
-	{},
-};
-#else
-#define aml_lcd_extern_dt_match NULL
-#endif
-
-static struct platform_driver aml_lcd_extern_driver = {
-	.probe		= lcd_extern_probe,
-	.remove		= lcd_extern_remove,
-	.driver		= {
-		.name	= "aml_lcd_extern",
-		.owner	= THIS_MODULE,
-#ifdef CONFIG_USE_OF
-		.of_match_table = aml_lcd_extern_dt_match,
-#endif
-	},
-};
-
-static int __init lcd_extern_init(void)
-{
-	int ret;
-	printk("%s\n", __FUNCTION__);
-	ret = platform_driver_register(&aml_lcd_extern_driver);
-	if (ret) {
-		printk("failed to register lcd extern driver module\n");
-		return -ENODEV;
-	}
-	return ret;
-}
-
-static void __exit lcd_extern_exit(void)
-{
-	platform_driver_unregister(&aml_lcd_extern_driver);
-}
-
-module_init(lcd_extern_init);
-module_exit(lcd_extern_exit);
-
-MODULE_LICENSE("GPL v2");
-MODULE_DESCRIPTION("Amlogic LCD External bridge driver");

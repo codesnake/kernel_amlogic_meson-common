@@ -1602,6 +1602,7 @@ osd_probe(struct platform_device *pdev)
 			osddev_init();
     	}
 	vinfo = get_current_vinfo();
+    printk("%s, vinfo:%p\n", __func__, vinfo);
     	for (index=0;index<OSD_COUNT;index++)
     	{
 #if 0
@@ -1662,6 +1663,7 @@ osd_probe(struct platform_device *pdev)
 		//clear framebuffer memory
 		amlog_level(LOG_LEVEL_HIGH,"Frame buffer memory assigned at phy:0x%08x, vir:0x%p, size=%dK\n",
 	    	fbdev->fb_mem_paddr, fbdev->fb_mem_vaddr, fbdev->fb_len >> 10);
+        printk("%s, mydef_var:%p, vinfo:%p\n", __func__, mydef_var, vinfo);
                 mydef_var[index].width=vinfo->screen_real_width;
                 mydef_var[index].height=vinfo->screen_real_height;
 		if(init_logo_obj && index==logo_osd_index ) //adjust default var info

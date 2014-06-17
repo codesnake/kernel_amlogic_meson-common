@@ -1,4 +1,5 @@
 #ifdef CONFIG_AMLOGIC_BACKLIGHT
+#ifdef CONFIG_AML_LCD_BACKLIGHT_SUPPORT
 //$$ DEVICE="backlight"
 //$$ L2 PROP_STR = "status"
 //$$ L2 PROP_CHOICE "Bl_pin_0_match" = "pinctrl-0"
@@ -18,7 +19,7 @@
 //$$ L2 PROP_STR 2 = "bl_pwm_combo_low_port_method"
 //$$ L2 PROP_U32 3 = "bl_pwm_combo_high_freq_duty_max_min"
 //$$ L2 PROP_U32 3 = "bl_pwm_combo_low_freq_duty_max_min"
-     backlight{
+	backlight{
 		compatible = "amlogic,backlight";
 		dev_name = "backlight";
 		status = "okay";
@@ -32,7 +33,7 @@
 		
 		/* backlight power ctrl */
 		bl_power_on_delay=<200>; /** delay time before backlight power on(unit: ms) */
-		bl_ctrl_method=<1>;	/** backlight control method(0=gpio, 1=pwm_negative, 2=pwm_positive. 3=pwm_combo. decided by hardware design) */
+		bl_ctrl_method=<1>;	/** backlight control method(0=gpio, 1=pwm_negative, 2=pwm_positive. 3=pwm_combo. 4=extern. decided by hardware design) */
 		
 		bl_gpio_port="GPIODV_28";	/** backlight control gpio port */
 		bl_gpio_dim_max_min=<0x0 0xf>;	/** brightness diming level_max, level_min : (0x0~0xf, negative logic, only for gpio control method) */
@@ -47,4 +48,6 @@
 		bl_pwm_combo_high_freq_duty_max_min=<300000 90 50>;	/** backlight pwm_combo level_high port frequency(unit: Hz), duty_max, duty_min : (unit: %, positive logic) */
 		bl_pwm_combo_low_freq_duty_max_min=<10000 100 50>;	/** backlight pwm_combo level_low port frequency(unit: Hz), duty_max, duty_min : (unit: %, positive logic) */
 	};
+
+#endif
 #endif
