@@ -109,7 +109,7 @@ static const struct file_operations card_proc_fops = {
 };
 
 /**
- * add_card_partition : add card partition , refer to 
+ * add_card_partition : add card partition , refer to
  * board-****.c  inand_partition_info[]
  * @disk: add partitions in which disk
  * @part: partition table
@@ -120,7 +120,7 @@ int add_part_table(struct mtd_partition * part, unsigned int nr_part)
 	unsigned int i;
 	uint64_t cur_offset=0;
 	uint64_t offset, size;
-	
+
 	if(!part)
 		return 0;
 
@@ -130,7 +130,7 @@ int add_part_table(struct mtd_partition * part, unsigned int nr_part)
 		if (part[i].offset== MTDPART_OFS_APPEND)
 			offset = cur_offset;
 		cur_offset = offset + size;
-		
+
 		card_table[i] = &part[i];
 		card_table[i]->offset = offset<<9;
 		card_table[i]->size = size<<9;
@@ -233,7 +233,7 @@ out_put:
 }
 
 /**
- * add_emmc_partition : add emmc partition , refer to 
+ * add_emmc_partition : add emmc partition , refer to
  * board-****.c  inand_partition_info[]
  * @disk: add partitions in which disk
  * @part: partition table
@@ -244,7 +244,7 @@ int add_emmc_partition(struct gendisk * disk)
 	unsigned int i;
 	struct hd_struct * ret=NULL;
 	uint64_t offset, size;
-	
+
 	printk("add_emmc_partition\n");
 	if(!proc_card){
 		printk("proc_nand NULL\n");
@@ -261,10 +261,10 @@ int add_emmc_partition(struct gendisk * disk)
 		}
 		else
 			size = card_table[i]->size>>9;
-		
+
 		ret = add_emmc_each_part(disk, 1+i, offset, size, 0, card_table[i]->name);
 		printk("[%sp%d] %20s  offset 0x%012llx, len 0x%012llx %s\n",
-				disk->disk_name, 1+i, card_table[i]->name, offset<<9, 
+				disk->disk_name, 1+i, card_table[i]->name, offset<<9,
 				size<<9, IS_ERR(ret) ? "add fail":"");
 	}
 	return 0;
@@ -594,7 +594,7 @@ void aml_sdhc_init_debugfs(struct mmc_host *mmc)
                 &aml_sdhc_regs_fops);
 	if (IS_ERR(node))
 		return;
-    
+
 	node = debugfs_create_file("params", S_IRWXUGO, root, mmc,
                 &amlsd_param_fops);
 	if (IS_ERR(node))
@@ -633,7 +633,7 @@ void aml_sdio_init_debugfs(struct mmc_host *mmc)
                 &aml_sdio_regs_fops);
 	if (IS_ERR(node))
 		return;
-    
+
 	node = debugfs_create_file("params", S_IRWXUGO, root, mmc,
                 &amlsd_param_fops);
 	if (IS_ERR(node))
@@ -703,7 +703,7 @@ int of_amlsd_init(struct amlsd_platform* pdata)
 	if(pdata->gpio_ro) {
 		ret = amlogic_gpio_request_one(pdata->gpio_ro, GPIOF_IN, MODULE_NAME);
         if (!ret) { // ok
-            ret = amlogic_set_pull_up_down(pdata->gpio_ro, 1, MODULE_NAME); // 0:pull down, 1:pull up 
+            ret = amlogic_set_pull_up_down(pdata->gpio_ro, 1, MODULE_NAME); // 0:pull down, 1:pull up
             CHECK_RET(ret);
         } else {
             sdio_err("request gpio_ro pin fail!\n");
@@ -752,21 +752,21 @@ static struct pinctrl * __must_check aml_devm_pinctrl_get_select (
         host->pinctrl = p;
         // sdio_err("switch %s\n", name);
     }
-	
+
 	s = pinctrl_lookup_state(p, name);
 	if (IS_ERR(s)) {
         sdio_err("lookup %s fail\n", name);
 		devm_pinctrl_put(p);
 		return ERR_CAST(s);
 	}
-	
+
 	ret = pinctrl_select_state(p, s);
 	if (ret < 0) {
         sdio_err("select %s fail\n", name);
 		devm_pinctrl_put(p);
 		return ERR_PTR(ret);
 	}
-	
+
 	return p;
 }
 
@@ -795,10 +795,10 @@ void of_amlsd_xfer_pre(struct amlsd_platform* pdata)
     } else { // MMC_CS_HIGH
         aml_snprint(&p, &size, "%s_clk_cmd_pins", pdata->pinname);
     }
-    
+
     // if pinmux setting is changed (pinctrl_name is different)
     if (strncmp(pdata->host->pinctrl_name, pinctrl, sizeof(pdata->host->pinctrl_name))) {
-        if (strlcpy(pdata->host->pinctrl_name, pinctrl, sizeof(pdata->host->pinctrl_name)) 
+        if (strlcpy(pdata->host->pinctrl_name, pinctrl, sizeof(pdata->host->pinctrl_name))
                 >= sizeof(pdata->host->pinctrl_name)) {
             sdio_err("Pinctrl name is too long!\n");
 			return;
@@ -843,7 +843,7 @@ int of_amlsd_ro (struct amlsd_platform* pdata)
     if (pdata->gpio_ro)
         ret = amlogic_get_value(pdata->gpio_ro, MODULE_NAME);
     // sdio_err("read-only?--%s\n", ret?"YES":"NO");
-    return ret; 
+    return ret;
 }
 
 // void of_init_pins (struct amlsd_platform* pdata)
@@ -878,7 +878,7 @@ void aml_cs_high (struct amlsd_platform * pdata) // chip select high
 	 * GO_IDLE; that would put chips into SPI mode.  Remind them of
 	 * that in case of hardware that won't pull up DAT3/nCS otherwise.
      *
-     * Now the way to accomplish this is: 
+     * Now the way to accomplish this is:
      * 1) set DAT3-pin as a GPIO pin(by pinmux), and pulls up;
      * 2) send CMD0;
      * 3) set DAT3-pin as a card-dat3-pin(by pinmux);
@@ -950,15 +950,32 @@ static int aml_is_sdjtag(struct amlsd_platform * pdata)
 
 static int aml_is_sduart(struct amlsd_platform * pdata)
 {
-    int dat3;
+#ifdef CONFIG_MESON_CPU_EMULATOR
+	return 0;
+#else
+    int dat3, i;
+    int cnt=0;
 
     if(pdata->is_sduart)
         return 1;
 
-    dat3 = aml_get_reg32_bits(P_PREG_PAD_GPIO0_I,26,1);
-    if(dat3 == 0){
-        return 1;
+    for (i = 0; i < 10; i++) {
+        dat3 = aml_get_reg32_bits(P_PREG_PAD_GPIO0_I,26,1);
+        if(dat3 == 1){
+            // if (cnt)
+                // sdhc_err("cnt=%d\n", cnt);
+            return 0; // NOT uart
+        }
+        cnt++;
+        msleep(10);
     }
+    // sdhc_err("cnt=%d\n", cnt);
+    return 1; // uart in
+
+    // dat3 = aml_get_reg32_bits(P_PREG_PAD_GPIO0_I,26,1);
+    // if(dat3 == 0){
+        // return 1;
+    // }
 
     // if (pdata->gpio_dat3 != 0){
         // ret = amlogic_gpio_request_one(pdata->gpio_dat3, GPIOF_IN, MODULE_NAME);
@@ -974,7 +991,8 @@ static int aml_is_sduart(struct amlsd_platform * pdata)
             // return 1;
         // }
     // }
-    return 0;
+    // return 0;
+#endif
 }
 
 // int n=0;
@@ -1038,7 +1056,7 @@ static int aml_uart_switch(struct amlsd_platform* pdata, bool on)
             mdelay(100);
         }
     }
-    printk("CARD %x, AO %x\n", pdata->uart_card_pinctrl, 
+    printk("CARD %x, AO %x\n", pdata->uart_card_pinctrl,
     pdata->uart_ao_pinctrl);
 #endif
 }
@@ -1100,6 +1118,7 @@ void aml_sd_uart_detect (struct amlsd_platform* pdata)
         /* } */
 
         pdata->is_in = false;
+        pdata->is_tuned = false;
         aml_uart_switch(pdata, 0);
         aml_jtag_gpioao();
         aml_sd_voltage_switch(pdata, MMC_SIGNAL_VOLTAGE_330); // switch to 3.3V
@@ -1135,7 +1154,7 @@ irqreturn_t aml_irq_cd_thread(int irq, void *data)
 
     mdelay(500);
     aml_sd_uart_detect(pdata);
-    
+
     mmc_detect_change(pdata->mmc, msecs_to_jiffies(500));
 
 	return IRQ_HANDLED;
@@ -1184,7 +1203,7 @@ int aml_check_unsupport_cmd(struct mmc_host* mmc, struct mmc_request* mrq)
     // mrq->cmd->error = -EINVAL;
     // mmc_request_done(mmc, mrq);
     // return -EINVAL;
-    // } 
+    // }
 
     if (mrq->cmd->opcode == 3) { // CMD3 means the first time initialized flow is running
         pdata->is_fir_init = false;
@@ -1231,11 +1250,11 @@ int aml_check_unsupport_cmd(struct mmc_host* mmc, struct mmc_request* mrq)
 int aml_sd_voltage_switch (struct amlsd_platform* pdata, char signal_voltage)
 {
 #ifdef CONFIG_ARCH_MESON8
-#ifdef CONFIG_AMLOGIC_BOARD_HAS_PMU 
+#ifdef CONFIG_AMLOGIC_BOARD_HAS_PMU
     int vol = LDO4DAC_REG_3_3_V;
     int delay_ms = 0;
     char *str;
-    struct aml_pmu_driver *pmu_driver; 
+    struct aml_pmu_driver *pmu_driver;
 
     if ((pdata->port != PORT_SDHC_B) // only SDHC_B support voltage switch
             || (pdata->signal_voltage == signal_voltage)) {
@@ -1243,12 +1262,12 @@ int aml_sd_voltage_switch (struct amlsd_platform* pdata, char signal_voltage)
         return 0; // voltage is the same, return directly
     }
 
-    pmu_driver = aml_pmu_get_driver(); 
-    if (pmu_driver == NULL) { 
-        sdhc_err("no pmu driver\n"); 
+    pmu_driver = aml_pmu_get_driver();
+    if (pmu_driver == NULL) {
+        sdhc_err("no pmu driver\n");
         return -EINVAL;
-    } 
-    else if (pmu_driver->pmu_reg_write) { 
+    }
+    else if (pmu_driver->pmu_reg_write) {
         switch (signal_voltage) {
             case MMC_SIGNAL_VOLTAGE_180:
                 vol = LDO4DAC_REG_1_8_V;
@@ -1256,7 +1275,7 @@ int aml_sd_voltage_switch (struct amlsd_platform* pdata, char signal_voltage)
                 str = "1.80 V";
 
                 if (!mmc_host_uhs(pdata->mmc)) {
-                    sdhc_err("switch to 1.8V for a non-uhs device.\n"); 
+                    sdhc_err("switch to 1.8V for a non-uhs device.\n");
                 }
 
                 break;
@@ -1272,14 +1291,14 @@ int aml_sd_voltage_switch (struct amlsd_platform* pdata, char signal_voltage)
                 str = "invalid";
                 break;
         }
- 
+
         pmu_driver->pmu_reg_write(LDO4DAC_REG_ADDR, vol); // set voltage
         pdata->signal_voltage = signal_voltage;
         mdelay(delay_ms); // wait for voltage to be stable
         sdhc_dbg(AMLSD_DBG_COMMON, "voltage: %s\n", str);
-        // sdhc_err("delay %dms.\n", delay_ms); 
+        // sdhc_err("delay %dms.\n", delay_ms);
     }
-#endif 
+#endif
 #endif
 
     return 0;
@@ -1297,7 +1316,7 @@ static int __init sdhc_debug_setup(char *str)
 __setup("sdhc_debug=", sdhc_debug_setup);
 
 
-unsigned int sdio_debug=0x000000; // 0xffffff; // 
+unsigned int sdio_debug=0x000000; // 0xffffff; //
 
 static int __init sdio_debug_setup(char *str)
 {
@@ -1308,12 +1327,12 @@ __setup("sdio_debug=", sdio_debug_setup);
 
 void aml_dbg_print_pinmux (void)
 {
-    printk("Pinmux: REG2=0x%08x, REG3=0x%08x, REG4=0x%08x, REG5=0x%08x, REG6=0x%08x, REG8=0x%08x\n", 
-            READ_CBUS_REG(PERIPHS_PIN_MUX_2), 
-            READ_CBUS_REG(PERIPHS_PIN_MUX_3), 
-            READ_CBUS_REG(PERIPHS_PIN_MUX_4), 
-            READ_CBUS_REG(PERIPHS_PIN_MUX_5), 
-            READ_CBUS_REG(PERIPHS_PIN_MUX_6), 
+    printk("Pinmux: REG2=0x%08x, REG3=0x%08x, REG4=0x%08x, REG5=0x%08x, REG6=0x%08x, REG8=0x%08x\n",
+            READ_CBUS_REG(PERIPHS_PIN_MUX_2),
+            READ_CBUS_REG(PERIPHS_PIN_MUX_3),
+            READ_CBUS_REG(PERIPHS_PIN_MUX_4),
+            READ_CBUS_REG(PERIPHS_PIN_MUX_5),
+            READ_CBUS_REG(PERIPHS_PIN_MUX_6),
             READ_CBUS_REG(PERIPHS_PIN_MUX_8));
 }
 
@@ -1370,11 +1389,11 @@ void aml_dbg_verify_pull_up (struct amlsd_platform * pdata)
     }
 
     if ((reg&reg_mask) != reg_mask) {
-        sdio_err(" %s pull-up error: CMD%d, reg=%#08x, reg_mask=%#x\n", 
+        sdio_err(" %s pull-up error: CMD%d, reg=%#08x, reg_mask=%#x\n",
                 mmc_hostname(pdata->mmc), pdata->host->opcode, reg, reg_mask);
     }
     if ((reg_en&reg_mask) != reg_mask) {
-        sdio_err(" %s pull-up error: CMD%d, reg_en=%#08x, reg_mask=%#x\n", 
+        sdio_err(" %s pull-up error: CMD%d, reg_en=%#08x, reg_mask=%#x\n",
                 mmc_hostname(pdata->mmc), pdata->host->opcode, reg_en, reg_mask);
     }
 }
@@ -1416,7 +1435,7 @@ int aml_dbg_verify_pinmux (struct amlsd_platform * pdata)
 
     reg = READ_CBUS_REG(reg);
     if ((reg&reg_mask) != reg_mask) {
-        sdio_err(" %s pinmux error: CMD%d, reg=%#08x, reg_mask=%#x\n", 
+        sdio_err(" %s pinmux error: CMD%d, reg=%#08x, reg_mask=%#x\n",
                 mmc_hostname(pdata->mmc), pdata->host->opcode, reg, reg_mask);
     }
 

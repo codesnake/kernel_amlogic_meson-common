@@ -7,7 +7,7 @@
 #define AML_MMC_MAJOR_VERSION   1
 #define AML_MMC_MINOR_VERSION   05
 #define AML_MMC_VERSION         ((AML_MMC_MAJOR_VERSION << 8) | AML_MMC_MINOR_VERSION)
-#define AML_MMC_VER_MESSAGE     "2014-01-16: sdhc eMMC run at 8bit@50MHz ok"
+#define AML_MMC_VER_MESSAGE     "2014-05-14: sdhc regular tuning support"
 
 extern unsigned sdhc_debug;
 extern unsigned sdio_debug;
@@ -33,6 +33,7 @@ extern unsigned sdio_debug;
 #define AMLSD_DBG_IOS		(1<<9)
 #define AMLSD_DBG_IRQ		(1<<10)
 #define AMLSD_DBG_CLKC		(1<<11)
+#define AMLSD_DBG_TUNING	(1<<12)
 
 #define     DETECT_CARD_IN          1
 #define     DETECT_CARD_OUT         2
