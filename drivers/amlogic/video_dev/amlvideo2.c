@@ -132,7 +132,6 @@ static struct v4l2_fract amlvideo2_frmintervals_active = {
 	.denominator = 30,
 };
 
-static struct vdin_v4l2_ops_s vops;
 /* supported controls */
 static struct v4l2_queryctrl amlvideo2_node_qctrl[] = {
 	{
@@ -343,6 +342,8 @@ struct amlvideo2_node {
 	struct amlvideo2_fh *fh;
 	unsigned int input;			//0:mirrocast; 1:hdmiin
 	ge2d_context_t *context;
+        struct vdin_v4l2_ops_s  vops;
+        int                     vdin_device_num;
 };
 
 struct amlvideo2_fh {
@@ -393,6 +394,9 @@ int get_amlvideo2_canvas_index(struct amlvideo2_output* output, int start_canvas
 	unsigned buf = (unsigned)output->vbuf;
 	int width = output->width;
 	int height = output->height;
+        int canvas_height = height;
+        if (1080 == canvas_height)
+                canvas_height = 1088;
 
 	switch(v4l2_format){
 	case V4L2_PIX_FMT_RGB565X:
@@ -400,7 +404,7 @@ int get_amlvideo2_canvas_index(struct amlvideo2_output* output, int start_canvas
 		canvas = start_canvas;
 		canvas_config(canvas,
 			(unsigned long)buf,
-			width*2, height,
+			width*2, canvas_height,
 			CANVAS_ADDR_NOWRAP, CANVAS_BLKMODE_LINEAR);
 		break;
 	case V4L2_PIX_FMT_YUV444:
@@ -409,18 +413,18 @@ int get_amlvideo2_canvas_index(struct amlvideo2_output* output, int start_canvas
 		canvas = start_canvas;
 		canvas_config(canvas,
 			(unsigned long)buf,
-			width*3, height,
+			width*3, canvas_height,
 			CANVAS_ADDR_NOWRAP, CANVAS_BLKMODE_LINEAR);
 		break; 
 	case V4L2_PIX_FMT_NV12:
 	case V4L2_PIX_FMT_NV21: 
 		canvas_config(start_canvas,
 			(unsigned long)buf,
-			width, height,
+			width, canvas_height,
 			CANVAS_ADDR_NOWRAP, CANVAS_BLKMODE_LINEAR);
 		canvas_config(start_canvas+1,
 			(unsigned long)(buf+width*height),
-			width, height/2,
+			width, canvas_height/2,
 			CANVAS_ADDR_NOWRAP, CANVAS_BLKMODE_LINEAR);
 		canvas = start_canvas | ((start_canvas+1)<<8);
 		break;
@@ -428,15 +432,15 @@ int get_amlvideo2_canvas_index(struct amlvideo2_output* output, int start_canvas
 	case V4L2_PIX_FMT_YUV420:
 		canvas_config(start_canvas,
 			(unsigned long)buf,
-			width, height,
+			width, canvas_height,
 			CANVAS_ADDR_NOWRAP, CANVAS_BLKMODE_LINEAR);
 		canvas_config(start_canvas+1,
 			(unsigned long)(buf+width*height),
-			width/2, height/2,
+			width/2, canvas_height/2,
 			CANVAS_ADDR_NOWRAP, CANVAS_BLKMODE_LINEAR);
 		canvas_config(start_canvas+2,
 			(unsigned long)(buf+width*height*5/4),
-			width/2, height/2,
+			width/2, canvas_height/2,
 			CANVAS_ADDR_NOWRAP, CANVAS_BLKMODE_LINEAR);
 		if(V4L2_PIX_FMT_YUV420 == v4l2_format){
 			canvas = start_canvas|((start_canvas+1)<<8)|((start_canvas+2)<<16);
@@ -2425,7 +2429,12 @@ buffer_setup(struct videobuf_queue *vq, unsigned int *count, unsigned int *size)
 	struct videobuf_res_privdata* res = (struct videobuf_res_privdata*)vq->priv_data;
 	struct amlvideo2_fh  *fh = (struct amlvideo2_fh  *)res->priv;
 	struct amlvideo2_node  *node  = fh->node;
-	*size = (fh->width * fh->height * fh->fmt->depth)>>3;	
+	int height = fh->height;
+
+        if (1080 == height)
+                height = 1088;
+
+	*size = (fh->width * height * fh->fmt->depth)>>3;
 	if (0 == *count)
 		*count = 32;
 
@@ -2742,148 +2751,138 @@ static int vidiocgmbuf(struct file *file, void *priv, struct video_mbuf *mbuf)
 	return videobuf_cgmbuf(&fh->vb_vidq, mbuf, 8);
 }
 #endif
+static tvin_scan_mode_t vmode2scan_mode(vmode_t	mode)
+{
+        tvin_scan_mode_t scan_mode = TVIN_SCAN_MODE_NULL;//1: progressive 2:interlaced
+        switch (mode) {
+                case VMODE_480I:
+                case VMODE_480CVBS:
+                case VMODE_576I:
+                case VMODE_576CVBS:
+                case VMODE_1080I:
+                case VMODE_1080I_50HZ:
+                        scan_mode = TVIN_SCAN_MODE_INTERLACED;
+                        break;
 
+                case VMODE_480P:
+                case VMODE_576P:
+                case VMODE_720P:
+                case VMODE_1080P:
+                case VMODE_720P_50HZ:
+                case VMODE_1080P_50HZ:
+                case VMODE_1080P_24HZ:
+                case VMODE_4K2K_30HZ:
+                case VMODE_4K2K_25HZ:
+                case VMODE_4K2K_24HZ:
+                case VMODE_4K2K_SMPTE:
+                case VMODE_VGA:
+                case VMODE_SVGA:
+                case VMODE_XGA:
+                case VMODE_SXGA:
+                case VMODE_LCD:
+                case VMODE_LVDS_1080P:
+                case VMODE_LVDS_1080P_50HZ:
+                case VMODE_LVDS_768P:
+                        scan_mode = TVIN_SCAN_MODE_PROGRESSIVE;
+                        break;
+                default:
+                        printk("unknown mode=%d\n", mode);
+                        break;
+        }
+        //printk("mode=%d, scan_mode=%d\n", mode, scan_mode);
+        return scan_mode;
+}
 static int vidioc_streamon(struct file *file, void *priv, enum v4l2_buf_type i)
 {
-	int ret;
-	struct amlvideo2_fh  *fh  = priv;
-	struct amlvideo2_node *node = fh->node;
-	vdin_parm_t para;
-	const vinfo_t *vinfo;
+        int ret;
+        struct amlvideo2_fh  *fh  = priv;
+        struct amlvideo2_node *node = fh->node;
+        struct vdin_v4l2_ops_s *vops = &node->vops;
+        vdin_parm_t para;
+        const vinfo_t *vinfo;
 
-	vinfo = get_current_vinfo();
-	if ((fh->type != V4L2_BUF_TYPE_VIDEO_CAPTURE) || (i != fh->type))
-		return -EINVAL;
-	ret = videobuf_streamon(&fh->vb_vidq);
-	printk("%s, videobuf_streamon() ret: %d\n", __func__, ret);
-	printk("%s, node->input: %d, node->r_type: %d, node->p_type: %d\n", __func__, node->input, node->r_type, node->p_type);
-	if(ret == 0){
-		if(1){
+        vinfo = get_current_vinfo();
+        if ((fh->type != V4L2_BUF_TYPE_VIDEO_CAPTURE) || (i != fh->type))
+                return -EINVAL;
+        ret = videobuf_streamon(&fh->vb_vidq);
+        printk("%s, videobuf_streamon() ret: %d\n", __func__, ret);
+        printk("%s, node->input: %d, node->r_type: %d, node->p_type: %d\n", __func__, node->input, node->r_type, node->p_type);
+        if(ret < 0)
+                return ret;
 
-			//start_tvin_service((fh->node->vid== 0)?0:1,&para);
-			//start_tvin_service(1,&para);
-			if(node->input == 0) {			//	0:mirrocast
-				if(AML_RECEIVER_NONE == node->r_type){
-                	if( AML_PROVIDE_MIRROCAST_VDIN0 == node->p_type){
+        if(node->input != 0)//	0:mirrocast
+                goto start;
 
-			                 memset( &para, 0, sizeof( para ));
-											 para.port  = TVIN_PORT_VIU;
-											 para.fmt = TVIN_SIG_FMT_MAX;
-											 para.frame_rate = 60;//175
-	                     if(AML_RECEIVER_NONE == node->r_type){
-	                               para.h_active = vinfo->width;//fh->width;
-	                               para.v_active = vinfo->height;//fh->height;
-	                     }
-											 para.hsync_phase = 0;//0x1
-											 para.vsync_phase  = 1;//0x1
-											 para.hs_bp = 0;
-											 para.vs_bp = 0;
-											 para.dfmt = TVIN_NV21;//TVIN_YUV422;
-											 para.scan_mode = TVIN_SCAN_MODE_PROGRESSIVE;	
-											 int dst_w = fh->width, dst_h = fh->height;
-											 if(vinfo->width<vinfo->height){
-												 dst_w = fh->height;
-												 dst_h = fh->width;
-												 output_axis_adjust(vinfo->height,vinfo->width, (int *)&dst_h,(int *)&dst_w,0);
-											 }else{
-												 output_axis_adjust(vinfo->width,vinfo->height, (int *)&dst_w,(int *)&dst_h,0);	
-											 }
-											 para.dest_hactive = dst_w;
-											 para.dest_vactive = dst_h;
-											 printk("amlvideo2--vidioc_streamon: para.h_active: %d, para.v_active: %d"
-	                     								          "para.dest_hactive: %d, para.dest_vactive: %d, fh->width: %d, fh->height: %d \n",
-	                              								 para.h_active,para.v_active, para.dest_hactive, para.dest_vactive,fh->width,fh->height);
-	
-                      	vops.start_tvin_service(0,&para);
-                    }else if( AML_PROVIDE_MIRROCAST_VDIN1 == node->p_type){
-			                 memset( &para, 0, sizeof( para ));
-											 para.port  = TVIN_PORT_VIU;
-											 para.fmt = TVIN_SIG_FMT_MAX;
-											 para.frame_rate = 60;//175
-	                     if(AML_RECEIVER_NONE == node->r_type){
-	                               para.h_active = vinfo->width;//fh->width;
-	                               para.v_active = vinfo->height;//fh->height;
-	                     }
-											 para.hsync_phase = 0;//0x1
-											 para.vsync_phase  = 1;//0x1
-											 para.hs_bp = 0;
-											 para.vs_bp = 0;
-											 para.dfmt = TVIN_NV21;//TVIN_YUV422;
-											 para.scan_mode = TVIN_SCAN_MODE_PROGRESSIVE;	
-											 int dst_w = fh->width, dst_h = fh->height;
-											 if(vinfo->width<vinfo->height){
-												 dst_w = fh->height;
-												 dst_h = fh->width;
-												 output_axis_adjust(vinfo->height,vinfo->width, (int *)&dst_h,(int *)&dst_w,0);
-											 }else{
-												 output_axis_adjust(vinfo->width,vinfo->height, (int *)&dst_w,(int *)&dst_h,0);	
-											 }
-											 para.dest_hactive = dst_w;
-											 para.dest_vactive = dst_h;
-											 printk("amlvideo2--vidioc_streamon: para.h_active: %d, para.v_active: %d"
-	                     								          "para.dest_hactive: %d, para.dest_vactive: %d, fh->width: %d, fh->height: %d \n",
-	                              								 para.h_active,para.v_active, para.dest_hactive, para.dest_vactive,fh->width,fh->height);
-                        vops.start_tvin_service(1,&para);
-                    }
-                }
-			}
-		}
-#if 0
-		if((fh->node->p_type == AML_PROVIDE_MIRROCAST_VDIN0)||(fh->node->p_type == AML_PROVIDE_MIRROCAST_VDIN1)){
-			memset( &para, 0, sizeof( para ));
-        		//para.port  = (fh->node->p_type == AML_PROVIDE_MIRROCAST_VDIN0)?TVIN_PORT_CAMERA:TVIN_PORT_VIU;
-        		para.port  = TVIN_PORT_VIU;
-        		para.fmt = TVIN_SIG_FMT_MAX;
-			para.frame_rate = 60;//175
-			para.h_active = 1920;//fh->width;
-			para.v_active = 1080;//fh->height;
-			para.hsync_phase = 0;//0x1
-			para.vsync_phase  = 1;//0x1
-			para.hs_bp = 0;
-			para.vs_bp = 0;
-			para.cfmt = TVIN_YUV422;
-			para.scan_mode = TVIN_SCAN_MODE_PROGRESSIVE;	
-			para.reserved = 0; //skip_num
-			start_tvin_service((fh->node->vid== 0)?0:1,&para);
-			//start_tvin_service(1,&para);
-		}else if(fh->node->p_type == AML_PROVIDE_DECODE){
-			//do nothing;
-			int event = 0;
-			vf_notify_provider(fh->node->recv.name, event, NULL); 
-		}
-#endif
-		fh->is_streamed_on = 1;
-		frameInv_adjust = 0;
-		frameInv = 0;
-		tmp_vf = NULL;
-		frame_inittime = 1;
-		do_gettimeofday( &thread_ts1);
-	}
-	return ret;
+        if(AML_RECEIVER_NONE != node->r_type)
+                goto start;
+
+        if( AML_PROVIDE_MIRROCAST_VDIN0 == node->p_type){
+                node->vdin_device_num = 0;
+        }else if( AML_PROVIDE_MIRROCAST_VDIN1 == node->p_type){
+                node->vdin_device_num = 1;
+        }
+
+        memset( &para, 0, sizeof( para ));
+        para.port  = TVIN_PORT_VIU;
+        para.fmt = TVIN_SIG_FMT_MAX;
+        para.frame_rate = 60;
+        para.h_active = vinfo->width;
+        para.v_active = vinfo->height;
+        para.hsync_phase = 0;
+        para.vsync_phase  = 1;
+        para.hs_bp = 0;
+        para.vs_bp = 0;
+        para.dfmt = TVIN_NV21;//TVIN_YUV422;
+        para.scan_mode = vmode2scan_mode(vinfo->mode);//TVIN_SCAN_MODE_PROGRESSIVE;
+        if(TVIN_SCAN_MODE_INTERLACED == para.scan_mode){
+                para.v_active = para.v_active/2;
+        }
+        int dst_w = fh->width, dst_h = fh->height;
+        if(vinfo->width<vinfo->height){
+                dst_w = fh->height;
+                dst_h = fh->width;
+                output_axis_adjust(vinfo->height,vinfo->width, (int *)&dst_h,(int *)&dst_w,0);
+        }else{
+                output_axis_adjust(vinfo->width,vinfo->height, (int *)&dst_w,(int *)&dst_h,0);	
+        }
+        para.dest_hactive = dst_w;
+        para.dest_vactive = dst_h;
+        printk("amlvideo2--vidioc_streamon: para.h_active: %d, para.v_active: %d"
+                        "para.dest_hactive: %d, para.dest_vactive: %d, fh->width: %d, fh->height: %d \n",
+                        para.h_active,para.v_active, para.dest_hactive, para.dest_vactive,fh->width,fh->height);
+
+        vops->start_tvin_service(node->vdin_device_num,&para);
+
+start:
+        fh->is_streamed_on = 1;
+        frameInv_adjust = 0;
+        frameInv = 0;
+        tmp_vf = NULL;
+        frame_inittime = 1;
+        do_gettimeofday( &thread_ts1);
+
+        return 0;
 }
 
 static int vidioc_streamoff(struct file *file, void *priv, enum v4l2_buf_type i)
 {
-	int ret;
-	struct amlvideo2_fh  *fh  = priv;
-	struct amlvideo2_node *node = fh->node;
+        int ret;
+        struct amlvideo2_fh  *fh  = priv;
+        struct amlvideo2_node *node = fh->node;
+        struct vdin_v4l2_ops_s *vops = &node->vops;
 
-	if ((fh->type != V4L2_BUF_TYPE_VIDEO_CAPTURE) || (i != fh->type))
-		return -EINVAL;
-	ret = videobuf_streamoff(&fh->vb_vidq);
-	if(ret == 0){
-		if(0 == node->input){
-            if(AML_RECEIVER_NONE == node->r_type){
-                if( AML_PROVIDE_MIRROCAST_VDIN0 == node->p_type){
-                    vops.stop_tvin_service(0);
-                }else if( AML_PROVIDE_MIRROCAST_VDIN1 == node->p_type){
-                    vops.stop_tvin_service(1);
-                }
-            }
+        if ((fh->type != V4L2_BUF_TYPE_VIDEO_CAPTURE) || (i != fh->type))
+                return -EINVAL;
+        ret = videobuf_streamoff(&fh->vb_vidq);
+        if(ret < 0){
+                printk("videobuf stream off failed\n");
         }
-		fh->is_streamed_on = 0;
-	}
-	return ret;
+
+        if((0 == node->input) && (AML_RECEIVER_NONE == node->r_type)){
+                vops->stop_tvin_service(node->vdin_device_num);
+        }
+        fh->is_streamed_on = 0;
+        return ret;
 }
 
 static int vidioc_enum_framesizes(struct file *file, void *fh,struct v4l2_frmsizeenum *fsize)
@@ -3124,7 +3123,7 @@ static int amlvideo2_open(struct file *file)
     if( AML_RECEIVER_NONE == node->r_type){
     	amlvideo2_start_thread(fh);
     }
-	v4l2_vdin_ops_init(&vops);
+	v4l2_vdin_ops_init(&node->vops);
 	fh->frm_save_time_us = 1000000/DEF_FRAMERATE;
 
 	return 0;
