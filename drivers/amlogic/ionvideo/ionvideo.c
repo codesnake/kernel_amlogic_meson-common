@@ -34,6 +34,11 @@ static unsigned int freerun_mode = 1;
 module_param(freerun_mode, uint, 0664);
 MODULE_PARM_DESC(freerun_mode, "av synchronization");
 
+static unsigned int skip_frames = 0;
+module_param(skip_frames, uint, 0664);
+MODULE_PARM_DESC(skip_frames, "skip frames");
+
+
 static const struct ionvideo_fmt formats[] = {
     {
         .name = "RGB32 (LE)",
@@ -140,8 +145,15 @@ static int ionvideo_fillbuff(struct ionvideo_dev *dev, struct ionvideo_buffer *b
         return -EAGAIN;
     }
     if (freerun_mode == 0) {
-        buf->pts = vf->pts;
-        buf->duration = vf->duration;
+        if ((vf->type & 0x1) == VIDTYPE_INTERLACE) {
+            if (dev->ppmgr2_dev.interlaced_num == 0) {
+                buf->pts = vf->pts;
+                buf->duration = vf->duration;
+            }
+        } else {
+            buf->pts = vf->pts;
+            buf->duration = vf->duration;
+        }
         ret = ppmgr2_process(vf, &dev->ppmgr2_dev, vb->v4l2_buf.index);
         if (ret) {
             vf_put(vf, RECEIVER_NAME);
@@ -149,7 +161,11 @@ static int ionvideo_fillbuff(struct ionvideo_dev *dev, struct ionvideo_buffer *b
         }
         vf_put(vf, RECEIVER_NAME);
     } else {
-        videoc_omx_compute_pts(dev, vf);
+        if ((vf->type & 0x1) == VIDTYPE_INTERLACE) {
+            if (dev->ppmgr2_dev.interlaced_num == 0)
+                dev->pts = vf->pts_us64;
+        } else
+            dev->pts = vf->pts_us64;
         ret = ppmgr2_process(vf, &dev->ppmgr2_dev, vb->v4l2_buf.index);
         if (ret) {
             vf_put(vf, RECEIVER_NAME);
@@ -427,13 +443,14 @@ static const struct vb2_ops ionvideo_video_qops = {
  ------------------------------------------------------------------*/
 static int vidioc_open(struct file *file) {
     struct ionvideo_dev *dev = video_drvdata(file);
-    if (ppmgr2_init(&(dev->ppmgr2_dev)) < 0) {
+    if (dev->fd_num > 0 || ppmgr2_init(&(dev->ppmgr2_dev)) < 0) {
         return -EBUSY;
     }
+    dev->fd_num++;
     dev->pts = 0;
     dev->c_width = 0;
     dev->c_height = 0;
-    dev->skip = 0;
+    skip_frames = 0;
     dprintk(dev, 2, "vidioc_open\n");
     printk("ionvideo open\n");
     return v4l2_fh_open(file);
@@ -444,6 +461,9 @@ static int vidioc_release(struct file *file) {
     ppmgr2_release(&(dev->ppmgr2_dev));
     dprintk(dev, 2, "vidioc_release\n");
     printk("ionvideo release\n");
+    if (dev->fd_num > 0) {
+        dev->fd_num--;
+    }
     return vb2_fop_release(file);
 }
 
@@ -598,29 +618,45 @@ static int vidioc_synchronization_dqbuf(struct file *file, void *priv, struct v4
     unsigned long flags;
 
     q = dev->vdev.queue;
-    spin_lock_irqsave(&q->done_lock, flags);
-    if (list_empty(&q->done_list)) {
-        spin_unlock_irqrestore(&q->done_lock, flags);
-        return -EAGAIN;
-    }
-    vb = list_first_entry(&q->done_list, struct vb2_buffer, done_entry);
-    spin_unlock_irqrestore(&q->done_lock, flags);
+    if (dev->receiver_register) {  	 
+    	// clear the frame buffer queue  
+    	while(!list_empty(&q->done_list)) {
+		ret = vb2_ioctl_dqbuf(file, priv, p);
+		if (ret) { return ret;}
+		ret = vb2_ioctl_qbuf(file, priv, p);
+		if (ret) { return ret;}
+ 	}
+    	printk("init to clear the done list buffer.done\n");
+    	dev->receiver_register = 0;
+    	dev->is_video_started = 0;
+	return -EAGAIN;
+    } else{
+    	spin_lock_irqsave(&q->done_lock, flags);
+    	if (list_empty(&q->done_list)) {
+       	spin_unlock_irqrestore(&q->done_lock, flags);
+        	return -EAGAIN;
+    	}
+    	vb = list_first_entry(&q->done_list, struct vb2_buffer, done_entry);
+    	spin_unlock_irqrestore(&q->done_lock, flags);
 
-    buf = container_of(vb, struct ionvideo_buffer, vb);
-    if (dev->receiver_register) {
-        tsync_avevent_locked(VIDEO_START, buf->pts ? buf->pts : timestamp_pcrscr_get());
-        dev->receiver_register = 0;
-        d = 0;
-    } else if (buf->pts) {
-        if (abs(timestamp_pcrscr_get() - buf->pts) > tsync_vpts_discontinuity_margin()) {
-            tsync_avevent_locked(VIDEO_TSTAMP_DISCONTINUITY, buf->pts);
-        } else {
-            timestamp_vpts_set(buf->pts);
-        }
-        d = timestamp_vpts_get() - timestamp_pcrscr_get();
-    } else {
-        d = timestamp_vpts_get() + DUR2PTS(buf->duration) - timestamp_pcrscr_get();
+    	buf = container_of(vb, struct ionvideo_buffer, vb);
+    	if(dev->is_video_started == 0){
+		printk("Execute the VIDEO_START cmd. pts=%x\n", buf->pts);
+        	tsync_avevent_locked(VIDEO_START, buf->pts ? buf->pts : timestamp_vpts_get());        
+        	d = 0;
+        	dev->is_video_started=1;
+    	}else if (buf->pts) {
+        	if (abs(timestamp_pcrscr_get() - buf->pts) > tsync_vpts_discontinuity_margin()) {
+            		tsync_avevent_locked(VIDEO_TSTAMP_DISCONTINUITY, buf->pts);
+        	} else {
+            		timestamp_vpts_set(buf->pts);
+        	}
+        	d = timestamp_vpts_get() - timestamp_pcrscr_get();
+    	} else {
+        	d = timestamp_vpts_get() + DUR2PTS(buf->duration) - timestamp_pcrscr_get();
+    	}    	
     }
+
     if (d > 450) {
         return -EAGAIN;
     } else if (d < -11520) {
@@ -642,9 +678,10 @@ static int vidioc_synchronization_dqbuf(struct file *file, void *priv, struct v4
             } else {
                 ret = vb2_ioctl_qbuf(file, priv, p);
                 if (ret) { return ret; }
+		skip_frames++;
             }
         }
-        dprintk(dev, 1, "s:%u\n", dev->skip++);
+        dprintk(dev, 1, "s:%u\n", skip_frames);
     } else {
         ret = vb2_ioctl_dqbuf(file, priv, p);
         if (ret) {
@@ -776,9 +813,11 @@ static int video_receiver_event_fun(int type, void* data, void* private_data) {
 
     if (type == VFRAME_EVENT_PROVIDER_UNREG) {
         dev->receiver_register = 0;
+        tsync_avevent(VIDEO_STOP, 0);
         printk("unreg:ionvideo\n");
     }else if (type == VFRAME_EVENT_PROVIDER_REG) {
         dev->receiver_register = 1;
+        dev->ppmgr2_dev.interlaced_num = 0;
         printk("reg:ionvideo\n");
     }
     return 0;
@@ -807,6 +846,7 @@ static int __init ionvideo_create_instance(int inst)
     dev->width = 640;
     dev->height = 480;
     dev->pixelsize = dev->fmt->depth;
+    dev->fd_num = 0;
 
     /* initialize locks */
     spin_lock_init(&dev->slock);

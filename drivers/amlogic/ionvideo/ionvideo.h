@@ -30,8 +30,6 @@
 #include <linux/amlogic/amports/vframe.h>
 #include <linux/amlogic/amports/canvas.h>
 
-#include <linux/amlogic/vout/vout_notify.h>
-
 #include <linux/amlogic/amports/timestamp.h>
 #include <linux/amlogic/amports/tsync.h>
 #include "videobuf2-ion.h"
@@ -104,12 +102,14 @@ struct ppmgr2_device {
     int angle;
     int mirror;
     int paint_mode;
+    int interlaced_num;
 };
 
 struct ionvideo_dev {
     struct list_head ionvideo_devlist;
     struct v4l2_device v4l2_dev;
     struct video_device vdev;
+    int fd_num;
 
     spinlock_t slock;
     struct mutex mutex;
@@ -136,6 +136,7 @@ struct ionvideo_dev {
     struct vframe_receiver_s video_vf_receiver;
     u64 pts;
     u8 receiver_register;
+    u8 is_video_started;
     u32 skip;
 };
 
