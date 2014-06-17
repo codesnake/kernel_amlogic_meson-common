@@ -23,6 +23,7 @@
 
 #define KIONIX_ACCEL_I2C_ADDR		0x0F
 #define KIONIX_ACCEL_NAME			"kionix_accel"
+#define KIONIX_ACCEL_IRQ			"kionix-irq"
 
 struct kionix_accel_platform_data {
 	/* Although the accelerometer can perform at high ODR,
@@ -81,4 +82,4 @@ struct kionix_accel_platform_data {
 	int (*power_on)(void);
 	int (*power_off)(void);
 };
-#endif  /* __KXTIK_H__ */
+#endif  /* __KIONIX_ACCEL_H__ */

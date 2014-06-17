@@ -33,7 +33,9 @@ struct gpucore_cooling_device {
 	unsigned int gpucore_val;
 	 int max_gpu_core_num;
 	unsigned int (*set_max_pp_num)(unsigned int);
+	int stop_flag;
 };
+#define GPU_STOP 0x80000000
 
 #ifdef CONFIG_GPUCORE_THERMAL
 

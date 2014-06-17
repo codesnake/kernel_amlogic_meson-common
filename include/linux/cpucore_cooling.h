@@ -32,8 +32,9 @@ struct cpucore_cooling_device {
 	unsigned int cpucore_state;
 	unsigned int cpucore_val;
 	int max_cpu_core_num;
+	int stop_flag;
 };
-
+#define CPU_STOP 0x80000000
 #ifdef CONFIG_CPUCORE_THERMAL
 
 /**

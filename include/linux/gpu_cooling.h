@@ -67,6 +67,14 @@ struct gpufreq_cooling_device * gpufreq_cooling_alloc(void);
  * @cdev: thermal cooling device pointer.
  */
 void gpufreq_cooling_unregister(struct thermal_cooling_device *cdev);
+#ifdef CONFIG_AML_VIRTUAL_THERMAL
+int register_gpu_freq_info(unsigned (*fun)(void));
+#else 
+static inline int register_gpu_freq_info(unsigned (*fun)(void))
+{
+    return 0;
+}
+#endif
 
 unsigned long gpufreq_cooling_get_level(unsigned int gpu, unsigned int freq);
 #else /* !CONFIG_GPU_THERMAL */
@@ -87,6 +95,10 @@ static inline
 unsigned long gpufreq_cooling_get_level(unsigned int gpu, unsigned int freq)
 {
 	return THERMAL_CSTATE_INVALID;
+}
+static inline int register_gpu_freq_info(unsigned (*fun)(void))
+{
+    return 0;
 }
 #endif	/* CONFIG_GPU_THERMAL */
 

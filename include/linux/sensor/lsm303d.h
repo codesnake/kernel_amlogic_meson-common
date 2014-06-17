@@ -1,13 +1,13 @@
-/******************** (C) COPYRIGHT 2012 STMicroelectronics ********************
+/******************** (C) COPYRIGHT 2013 STMicroelectronics *******************
 *
 * File Name          : lsm303d.h
-* Authors            : MSH - C&I BU - Application Team
+* Authors            : AMS - MSH Div - Application Team
 *		     : Matteo Dameno (matteo.dameno@st.com)
 *		     : Denis Ciocca (denis.ciocca@st.com)
-* Version            : V.2.0.1
-* Date               : 2012/May/07
+* Version            : V.1.0.5
+* Date               : 2013/Oct/23
 *
-********************************************************************************
+*******************************************************************************
 *
 * This program is free software; you can redistribute it and/or modify
 * it under the terms of the GNU General Public License version 2 as
@@ -21,21 +21,40 @@
 * CONTENT OF SUCH SOFTWARE AND/OR THE USE MADE BY CUSTOMERS OF THE CODING
 * INFORMATION CONTAINED HEREIN IN CONNECTION WITH THEIR PRODUCTS.
 *
-********************************************************************************
-********************************************************************************
-Version History.
-
-Revision 2-0-0 2012/05/04
- first revision
-Revision 2-0-1 2012/05/07
- New sysfs architecture
- Support antialiasing filter
-*******************************************************************************/
+******************************************************************************/
 
 #ifndef	__LSM303D_H__
 #define	__LSM303D_H__
 
 #define	LSM303D_DEV_NAME	"lsm303d"
+#define	LSM303D_ACC_DEV_NAME	"lsm303d_acc"	/* Input file name */
+#define	LSM303D_MAG_DEV_NAME	"lsm303d_mag"	/* Input file name */
+
+#define LSM303D_SAD0L			(0x02)
+#define LSM303D_SAD0H			(0x01)
+#define LSM303D_I2C_SADROOT		(0x07)
+#define LSM303D_I2C_SAD_L		((LSM303D_I2C_SADROOT<<2) | \
+								LSM303D_SAD0L)
+#define LSM303D_I2C_SAD_H		((LSM303D_I2C_SADROOT<<2) | \
+								LSM303D_SAD0H)
+
+/************************************************/
+/* 	Output data			 	*/
+/*************************************************
+accelerometer: ug
+magnetometer: ugauss
+*************************************************/
+
+/************************************************/
+/* 	sysfs data			 	*/
+/*************************************************
+accelerometer:
+	- pollrate->ms
+	- fullscale->g
+magnetometer:
+	- pollrate->ms
+	- fullscale->gauss
+*************************************************/
 
 /************************************************/
 /* 	Accelerometer section defines	 	*/
@@ -68,11 +87,11 @@ Revision 2-0-1 2012/05/07
 
 #ifdef	__KERNEL__
 
-#define	LSM303D_ACC_DEV_NAME	"lsm303d_acc"	/* Input file name */
-#define	LSM303D_MAG_DEV_NAME	"lsm303d_mag"	/* Input file name */
+#define DEFAULT_INT1_GPIO		(-EINVAL)
+#define DEFAULT_INT2_GPIO		(-EINVAL)
 
-#define	LSM303D_ACC_MIN_POLL_PERIOD_US	1
-#define LSM303D_MAG_MIN_POLL_PERIOD_US	5
+#define	LSM303D_ACC_MIN_POLL_PERIOD_MS	1
+#define LSM303D_MAG_MIN_POLL_PERIOD_MS	5
 
 struct lsm303d_acc_platform_data {
 	
@@ -81,13 +100,7 @@ struct lsm303d_acc_platform_data {
 
 	u8 fs_range;
 
-	u8 axis_map_x;
-	u8 axis_map_y;
-	u8 axis_map_z;
-
-	u8 negate_x;
-	u8 negate_y;
-	u8 negate_z;
+	short rot_matrix[3][3];
 
 	u8 aa_filter_bandwidth;
 
@@ -95,6 +108,9 @@ struct lsm303d_acc_platform_data {
 	void (*exit)(void);
 	int (*power_on)(void);
 	int (*power_off)(void);
+
+	int gpio_int1;
+	int gpio_int2;
 };
 
 struct lsm303d_mag_platform_data {
@@ -104,13 +120,7 @@ struct lsm303d_mag_platform_data {
 
 	u8 fs_range;
 
-	u8 axis_map_x;
-	u8 axis_map_y;
-	u8 axis_map_z;
-
-	u8 negate_x;
-	u8 negate_y;
-	u8 negate_z;
+	short rot_matrix[3][3];
 
 	int (*init)(void);
 	void (*exit)(void);
@@ -121,8 +131,8 @@ struct lsm303d_mag_platform_data {
 struct lsm303d_main_platform_data {
 	
 	struct lsm303d_acc_platform_data *pdata_acc;
-	struct lsm303d_acc_platform_data *pdata_mag;
+	struct lsm303d_mag_platform_data *pdata_mag;
 };
 
 #endif	/* __KERNEL__ */
-#endif	/* __LSM303DC_H__ */
+#endif	/* __LSM303D_H__ */
