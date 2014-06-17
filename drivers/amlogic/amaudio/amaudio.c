@@ -61,6 +61,7 @@ extern void audio_in_i2s_enable(int flag);
 
 extern int if_audio_in_i2s_enable(void);
 extern int if_audio_out_enable(void);
+extern int if_958_audio_out_enable(void);
 extern unsigned int read_i2s_rd_ptr(void);
 extern unsigned int audio_in_i2s_wr_ptr(void);
 extern unsigned int read_i2s_mute_swap_reg(void);
@@ -72,7 +73,6 @@ extern int audio_in_buf_ready;
 
 extern unsigned int aml_i2s_playback_start_addr;
 extern unsigned int aml_i2s_capture_start_addr;
-extern unsigned int aml_i2s_capture_start_phy;
 extern unsigned int aml_i2s_capture_buf_size;
 
 static dev_t amaudio_devno;
@@ -1913,7 +1913,14 @@ static ssize_t dac_mute_const_store(struct class* class, struct class_attribute*
 static ssize_t output_enable_show(struct class* class, struct class_attribute* attr,
 	char* buf)
 {
-     return sprintf(buf, "%d\n", if_audio_out_enable()); 
+//why limit this condition of iec958 buffer size bigger than 128,
+//because we begin to use a 128 bytes zero playback mode of 958 output when alsa driver is not called by user space to
+//  avoid some noise.This mode should must seperate this case with normal playback case to avoid one risk:
+// when EOF,the last three seconds this is no audio pcm decoder to output.the zero playback mode is triggered,
+//this cause the player has no chance to  trigger the exit condition
+     unsigned iec958_size = READ_MPEG_REG(AIU_MEM_IEC958_END_PTR)-READ_MPEG_REG(AIU_MEM_IEC958_START_PTR);
+     iec958_size += 64;	 
+     return sprintf(buf, "%d\n", if_audio_out_enable()||(if_958_audio_out_enable()&&iec958_size > 128)); 
 }
 extern unsigned audioin_mode;
 enum {
@@ -1948,6 +1955,29 @@ static ssize_t record_type_show(struct class* class, struct class_attribute* att
          return sprintf(buf, "audioin_mode can't match mode\n");
      }
 }
+
+
+static ssize_t store_debug(struct class* class, struct class_attribute* attr,  const char* buf, size_t count )
+{
+    if(strncmp(buf, "chstatus_set", 12)==0)
+     {     
+               WRITE_MPEG_REG(AIU_958_VALID_CTRL,0);//disable 958 invalid bit			
+               WRITE_MPEG_REG(AIU_958_CHSTAT_L0, 0x1900);		
+               WRITE_MPEG_REG(AIU_958_CHSTAT_R0, 0x1900);
+     }else if(strncmp(buf, "chstatus_off", 12)==0){
+            	WRITE_MPEG_REG(AIU_958_VALID_CTRL,3);//enable 958 invalid bit				
+            	WRITE_MPEG_REG(AIU_958_CHSTAT_L0, 0x1902);		
+              WRITE_MPEG_REG(AIU_958_CHSTAT_R0, 0x1902);	 
+      }
+      return count;
+}
+
+static ssize_t show_debug(struct class* class, struct class_attribute* attr,  char* buf)
+{
+      return 0;
+}
+
+
 static struct class_attribute amaudio_attrs[]={
   __ATTR(enable_direct_audio,  S_IRUGO | S_IWUSR, show_direct_flag, store_direct_flag),
   __ATTR(enable_music_mix, S_IRUGO | S_IWUSR, show_music_mix, store_music_mix),
@@ -1963,6 +1993,7 @@ static struct class_attribute amaudio_attrs[]={
   __ATTR(dac_mute_const, S_IRUGO | S_IWUSR, dac_mute_const_show, dac_mute_const_store),
   __ATTR_RO(output_enable),
   __ATTR(record_type, S_IRUGO | S_IWUSR, record_type_show, record_type_store),  
+   __ATTR(debug, S_IRUGO | S_IWUSR, show_debug, store_debug),
   __ATTR_NULL
 };
 
