@@ -606,6 +606,8 @@ struct new_tech_nand_t{
     struct aml_nand_dynamic_read dynamic_read_info;
 };
 #endif
+
+
 struct aml_nand_chip {
 
 	u8 mfr_type;
@@ -675,10 +677,7 @@ struct aml_nand_chip {
 	
 	struct aml_nandkey_info_t *aml_nandkey_info;
 	struct cdev				nand_key_cdev;
-#ifdef CONFIG_OF
-	struct pinctrl *nand_pinctrl;
-	struct pinctrl_state *nand_pinstate;
-#endif
+
 	struct early_suspend nand_early_suspend;
     struct class      cls;
 
@@ -719,6 +718,10 @@ struct aml_nand_device {
 	struct aml_nand_platform *aml_nand_platform;
 	u8 dev_num;
 	struct notifier_block nb;
+	struct pinctrl *nand_pinctrl;
+	struct pinctrl_state *nand_rbstate;
+	struct pinctrl_state *nand_norbstate;
+	struct pinctrl_state *nand_idlestate;
 };
 
 #if 0

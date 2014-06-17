@@ -47,6 +47,12 @@ static struct early_suspend early_suspend;
 static int early_suspend_flag = 0;
 #endif
 
+#ifdef CONFIG_MESON_TRUSTZONE
+#include <mach/meson-secure.h>
+#define WR_RTC(addr, data)         meson_secure_reg_write((P_##addr), data)
+#define RD_RTC(addr)               meson_secure_reg_read(P_##addr)
+#endif
+
 #define ON  1
 #define OFF 0
 
@@ -913,6 +919,16 @@ static void meson_pm_suspend(void)
         WRITE_AOBUS_REG(AO_RTI_STATUS_REG2, 0x12345678);
     }
     // clear RTC interrupt
+#ifdef CONFIG_MESON_TRUSTZONE
+	WR_RTC(AO_RTC_ADDR1, RD_RTC(AO_RTC_ADDR1)|(0xf000));
+	printk(KERN_INFO "RTCADD3=0x%x\n",RD_RTC(AO_RTC_ADDR3));
+	if(RD_RTC(AO_RTC_ADDR3)|(1<<29))
+	{
+		WR_RTC(AO_RTC_ADDR3, RD_RTC(AO_RTC_ADDR3)&(~(1<<29)));
+		udelay(1000);
+	}
+	printk(KERN_INFO "RTCADD3=0x%x\n",RD_RTC(AO_RTC_ADDR3));
+#else
     *(volatile unsigned *)(P_AO_RTC_ADDR1)=(*(volatile unsigned *)(P_AO_RTC_ADDR1))|(0xf000);
 	printk(KERN_INFO "RTCADD3=0x%x\n",*(volatile unsigned *)(P_AO_RTC_ADDR3));
 	if((*(volatile unsigned *)(P_AO_RTC_ADDR3))|(1<<29))
@@ -921,6 +937,7 @@ static void meson_pm_suspend(void)
 		udelay(1000);
 	}
 	printk(KERN_INFO "RTCADD3=0x%x\n",*(volatile unsigned *)P_AO_RTC_ADDR3);
+#endif
 
     if (pdata->set_vccx2) {
         pdata->set_vccx2(ON);

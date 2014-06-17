@@ -42,3 +42,9 @@ obj-$(CONFIG_CPU_IDLE) += cpuidle.o
 
 obj-$(CONFIG_AML_HDMI_TX) +=  hdmi_tx_hw/
 
+# ARM Trustzone
+obj-$(CONFIG_MESON_TRUSTZONE) += meson-smc.o meson-secure.o
+ifeq ($(CONFIG_MESON_TRUSTZONE),y)
+plus_sec                      := $(call as-instr,.arch_extension sec,+sec)
+AFLAGS_meson-smc.o            := -Wa,-march=armv7-a$(plus_sec)
+endif

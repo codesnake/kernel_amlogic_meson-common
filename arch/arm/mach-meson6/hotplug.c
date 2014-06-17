@@ -14,6 +14,9 @@
 #include <asm/cacheflush.h>
 #include <asm/mach-types.h>
 #include "common.h"
+#ifdef CONFIG_MESON_TRUSTZONE
+#include <mach/meson-secure.h>
+#endif
 int meson_cpu_kill(unsigned int cpu)
 {
 	return 1;
@@ -32,6 +35,14 @@ void meson_cpu_die(unsigned int cpu)
 	dsb();
 	dmb();
 
+#ifdef CONFIG_MESON_TRUSTZONE
+	meson_smc1(TRUSTZONE_MON_CORE_OFF, 1);
+#ifdef CONFIG_MESON6_SMP_HOTPLUG
+extern  void v7_invalidate_dcache_all(void);
+		v7_invalidate_dcache_all();
+#endif
+
+#else
 	for (;;) {
 		/*
 		 * Execute WFI
@@ -58,6 +69,7 @@ void meson_cpu_die(unsigned int cpu)
 		}
 		pr_debug("CPU%u: spurious wakeup call\n", cpu);
 	}
+#endif
 }
 
 int meson_cpu_disable(unsigned int cpu)

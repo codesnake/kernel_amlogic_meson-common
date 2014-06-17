@@ -25,6 +25,9 @@
 #include <asm/mach-types.h>
 #include  "common.h"
 
+#ifdef CONFIG_MESON_TRUSTZONE
+#include <mach/meson-secure.h>
+#endif
 
 static DEFINE_SPINLOCK(boot_lock);
 
@@ -77,11 +80,14 @@ static void __init wakeup_secondary(unsigned int cpu)
 	* on secondary core once out of WFE
 	* A barrier is added to ensure that write buffer is drained
 	*/
+#ifdef CONFIG_MESON_TRUSTZONE
+	meson_auxcoreboot_addr((const uint32_t)virt_to_phys(meson_secondary_startup));
+	meson_set_cpu_ctrl_reg((1 << cpu) | 1);
+#else
 	aml_write_reg32((uint32_t)(IO_AHB_BASE + 0x1ff84),
 	    (const uint32_t)virt_to_phys(meson_secondary_startup));
-
-	//aml_write_reg32(IO_AHB_BASE + 0x1ff80, (1 << cpu) | 1);
 	meson_set_cpu_ctrl_reg((1 << cpu) | 1);
+#endif
 
 	smp_wmb();
 	/*
@@ -89,7 +95,7 @@ static void __init wakeup_secondary(unsigned int cpu)
 	 * Drain the outstanding writes to memory
 	 */
 	 mb();
-#ifndef CONFIG_MESON6_SMP_HOTPLUG
+#if (!defined(CONFIG_MESON6_SMP_HOTPLUG)) || defined(CONFIG_MESON_TRUSTZONE)
 	dsb_sev();
 #else
 	gic_raise_softirq(cpumask_of(cpu), 0);
@@ -99,7 +105,9 @@ static void __init wakeup_secondary(unsigned int cpu)
 int __cpuinit meson_boot_secondary(unsigned int cpu, struct task_struct *idle)
 {
 	unsigned long timeout;
+#ifndef CONFIG_MESON_TRUSTZONE
 	wakeup_secondary(1);
+#endif
 	/*
 	* Set synchronisation state between this boot processor
 	* and the secondary one
@@ -112,7 +120,9 @@ int __cpuinit meson_boot_secondary(unsigned int cpu, struct task_struct *idle)
 	 * that it has been released by resetting pen_release.
 	 */
 	write_pen_release(cpu_logical_map(cpu));
-
+#ifdef CONFIG_MESON_TRUSTZONE
+	wakeup_secondary(1);
+#endif
 	//smp_send_reschedule(cpu);
 
 	timeout = jiffies + (1 * HZ);

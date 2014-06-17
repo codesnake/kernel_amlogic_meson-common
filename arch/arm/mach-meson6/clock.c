@@ -43,6 +43,9 @@
 #include <mach/clk_set.h>
 //#include <mach/power_gate.h>
 
+#ifdef CONFIG_MESON_TRUSTZONE
+#include <mach/meson-secure.h>
+#endif
 
 static DEFINE_SPINLOCK(mali_clk_lock);
 static DEFINE_SPINLOCK(clockfw_lock);
@@ -1261,12 +1264,55 @@ struct clk_change_info{
 #define MESON_CPU_SLEEP		1
 #define MESON_CPU_WAKEUP	2
 
+inline uint32_t meson_get_cpu_ctrl_reg(void)
+{
+	uint32_t ret = 0;
+
+	spin_lock(&clockfw_lock);
+#ifdef CONFIG_MESON_TRUSTZONE
+	ret = meson_read_corectrl();
+#else
+	ret = aml_read_reg32(MESON_CPU_CONTROL_REG);
+#endif
+	spin_unlock(&clockfw_lock);
+
+	return ret;
+}
+
+
 void meson_set_cpu_ctrl_reg(int value)
 {
 	spin_lock(&clockfw_lock);
+#ifdef CONFIG_MESON_TRUSTZONE
+	meson_modify_corectrl(value);
+#else
 	aml_write_reg32(MESON_CPU_CONTROL_REG, value);
+#endif
 	spin_unlock(&clockfw_lock);
 }
+
+inline uint32_t meson_get_cpu_status_reg(int cpu)
+{
+    uint32_t ret;
+
+#ifdef CONFIG_MESON_TRUSTZONE
+	ret = meson_read_corestatus(cpu);
+#else
+	ret = aml_read_reg32(MESON_CPU_STATUS_REG(cpu));
+#endif
+
+    return ret;
+}
+
+inline void meson_set_cpu_status_reg(int cpu, int value)
+{
+#ifdef CONFIG_MESON_TRUSTZONE
+	meson_modify_corestatus(cpu, value);
+#else
+	aml_write_reg32(MESON_CPU_STATUS_REG(cpu), value);
+#endif
+}
+
 #if 0
 static unsigned long cpu_sleep_max_count = 0;
 static unsigned long cpu_wait_max_count = 0;
@@ -1283,8 +1329,7 @@ static inline unsigned long meson_smp_wait_others(unsigned status)
 	do {
 		__asm__ __volatile__ ("wfe" : : : "memory");
 		for_each_online_cpu(cpu) {
-
-			if (cpu != my && MESON_CPU_STATUS(cpu) == status) {
+			if (cpu != my && meson_get_cpu_status_reg(cpu) == status) {
 				count++;
 				mask &= ~(1 << cpu);
 			}
@@ -1299,7 +1344,7 @@ static inline void meson_smp_init_transaction(void)
 {
     int cpu;
 
-    aml_write_reg32(MESON_CPU_CONTROL_REG, 0);
+    meson_set_cpu_ctrl_reg(0);
 
     for_each_online_cpu(cpu) {
         aml_write_reg32(MESON_CPU_STATUS_REG(cpu), 0);
@@ -1313,18 +1358,18 @@ static void smp_a9_clk_change(struct clk_change_info * info)
     unsigned long count = 0;
     if (cpu != info->cpu) {
         unsigned long flags;
-        MESON_CPU_SET_STATUS(MESON_CPU_SLEEP);
+        meson_set_cpu_status_reg(cpu, MESON_CPU_SLEEP);
         pr_debug("CPU%u: Hey CPU %d, I am going to sleep\n", cpu, info->cpu);
         smp_wmb();
-	dsb_sev();
-	local_irq_save(flags);
-        while ((aml_read_reg32(MESON_CPU_CONTROL_REG) & (1 << cpu)) == 0) {
+        dsb_sev();
+        local_irq_save(flags);
+        while ((meson_get_cpu_ctrl_reg() & (1 << cpu)) == 0) {
 		count++;
 
             __asm__ __volatile__ ("wfe" : : : "memory");
         }
         local_irq_restore(flags);
-        MESON_CPU_SET_STATUS(MESON_CPU_WAKEUP);
+        meson_set_cpu_status_reg(cpu, MESON_CPU_WAKEUP);
 
         if (count > cpu_sleep_max_count) cpu_sleep_max_count = count;
 
@@ -1343,7 +1388,7 @@ static void smp_a9_clk_change(struct clk_change_info * info)
         pr_debug("CPU%u: All other CPU in sleep (%lu %lu)\n", cpu, count, cpu_wait_max_count);
 
         info->err = _clk_set_rate_cpu(info->clk, info->rate, 0);
-        aml_write_reg32(MESON_CPU_CONTROL_REG, 0xf);
+        meson_set_cpu_ctrl_reg(0xf);
         smp_wmb();
         dsb_sev();
     }
@@ -1356,6 +1401,14 @@ static void smp_a9_clk_change(struct clk_change_info * info)
 }
 #endif /* CONFIG_SMP */
 
+static int device_low_power = 0;
+static  int __init meson_device_low_power(char *s)
+{
+    if(strcmp(s, "1") == 0) {
+        device_low_power = 1;
+    }
+}
+__setup("meson_device_low_power=",meson_device_low_power);
 
 
 static int clk_set_rate_a9(struct clk *clk, unsigned long rate)
@@ -1367,20 +1420,19 @@ static int clk_set_rate_a9(struct clk *clk, unsigned long rate)
 
 	if (rate < 1000)
 		rate *= 1000000;
-#ifdef CONFIG_MACH_MESON6_G02_DONGLE
-#define CPU_FREQ_LIMIT 600000000
-#else
-#define CPU_FREQ_LIMIT 1200000000
-#endif
 
-	if(freq_limit && rate > CPU_FREQ_LIMIT)
+	int cpu_freq_limit = 1200000000;
+	if(device_low_power != 0) {
+		cpu_freq_limit = 600000000;
+	}
+	if(freq_limit && rate > cpu_freq_limit)
 	{
-		rate = CPU_FREQ_LIMIT;
-		printk("cpu freq limited to %ld \n", rate);
+		rate = cpu_freq_limit;
+		//printk("cpu freq limited to %ld \n", rate);
 	}		
 #ifdef CONFIG_SMP
 #if USE_ON_EACH_CPU
-	if (aml_read_reg32(MESON_CPU_CONTROL_REG)) {
+	if (meson_get_cpu_ctrl_reg()) {
 #else
 	if (num_online_cpus()>1) {
 #endif
@@ -1646,7 +1698,8 @@ static int clk_enable_mali(struct clk *clk)
 	}
 #endif
 
-	spin_lock_irqsave(&clockfw_lock, flags);
+	while(!spin_trylock_irqsave(&clockfw_lock, flags))
+		udelay(2);
 
 	cpu = clk_get_rate_a9(clk->priv);
 	_clk_set_rate_gpu(NULL, 0, cpu);
@@ -1669,7 +1722,8 @@ static int clk_disable_mali(struct clk *clk)
 	unsigned long flags;
 	unsigned long mali_flags;
 
-	spin_lock_irqsave(&clockfw_lock, flags);
+	while(!spin_trylock_irqsave(&clockfw_lock, flags))
+		udelay(2);
 #ifdef CONFIG_CPU_FREQ_DEBUG
 	printk(KERN_INFO "%s() GPU=%luMHz CPU=%luMhz\n", __FUNCTION__, clk_get_rate_gpu(NULL) / 1000000, clk_get_rate_a9(clk->priv) / 1000000);
 #endif /* CONFIG_CPU_FREQ_DEBUG */

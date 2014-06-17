@@ -1771,12 +1771,12 @@ static int hdmitx_set_dispmode(hdmitx_dev_t* hdmitx_device, Hdmi_tx_video_para_t
     mdelay(5);
 
     // power comsumption
-#ifdef CONFIG_MESON_POWER_PROFILE_LOW
-    hdmi_wr_reg(TX_HDMI_PHY_CONFIG0, 0xf0);
-#else
-    hdmi_wr_reg(TX_HDMI_PHY_CONFIG0, 0xfe);
-#endif
-    
+    if((hdmitx_device->config_data.pwr_ctl != NULL) && (hdmitx_device->config_data.pwr_ctl->pwr_level != 0)) {
+        hdmi_wr_reg(TX_HDMI_PHY_CONFIG0, 0xf0);
+    } else {
+        hdmi_wr_reg(TX_HDMI_PHY_CONFIG0, 0xfe);
+    }
+ 
     return 0;
 }    
 
@@ -2754,6 +2754,7 @@ static int hdmitx_cntl_config(hdmitx_dev_t* hdmitx_device, unsigned cmd, unsigne
             hdmi_set_reg_bits(TX_TMDS_MODE, 0x3, 6, 2);
         }
         if(argv == DVI_MODE) {
+            hdmi_set_reg_bits(TX_VIDEO_DTV_OPTION_L, 0x0, 6, 2);
             hdmi_set_reg_bits(TX_TMDS_MODE, 0x2, 6, 2);
         }
         break;

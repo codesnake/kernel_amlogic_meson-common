@@ -7,6 +7,7 @@
 #include <linux/device.h>
 #include <linux/err.h>
 #include <linux/hardirq.h>
+#include <linux/amlogic/vout/vout_notify.h>
 
 //#define PRINT_DEBUG_INFO
 #ifdef PRINT_DEBUG_INFO
@@ -349,20 +350,16 @@ static int _switch_gate(mod_type_t type, int flag)
             } else {
                 GATE_OFF(VCLK2_VENCI);
                 GATE_OFF(VCLK2_VENCI1);
-                GATE_OFF(VCLK2_VENCP);
-           #ifndef CONFIG_MACH_MESON6_G02_DONGLE
-                GATE_OFF(VCLK2_VENCP1);
-           #endif     
+                GATE_OFF(VCLK2_VENCP);  
                 GATE_OFF(VENC_P_TOP);
                 GATE_OFF(VENC_I_TOP);
                 GATE_OFF(VENCI_INT);
-           #ifndef CONFIG_MACH_MESON6_G02_DONGLE    
-                GATE_OFF(VENCP_INT);
-           #endif   
                 GATE_OFF(VCLK2_ENCI);
-           #ifndef CONFIG_MACH_MESON6_G02_DONGLE      
-                GATE_OFF(VCLK2_ENCP);
-           #endif
+                if(get_power_level() == 0) {
+                    GATE_OFF(VCLK2_VENCP1);
+                    GATE_OFF(VENCP_INT);
+                    GATE_OFF(VCLK2_ENCP);
+                }
                 GATE_OFF(VCLK2_VENCT);
                 GATE_OFF(VCLK2_VENCT1);
                 GATE_OFF(VCLK2_OTHER);
