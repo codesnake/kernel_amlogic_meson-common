@@ -12,6 +12,7 @@
 #include "register.h"
 #include "cpu.h"
 #include "canvas.h"
-#include "misc.h"
-
+#include "audio.h"
+#include "bt656.h"
+#include "vpp.h"
 #endif /* AM_REGS_H_ */

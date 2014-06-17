@@ -456,6 +456,34 @@
 #define P_MSR_CLK_REG4 		CBUS_REG_ADDR(MSR_CLK_REG4)
 #define MSR_CLK_REG5 0x21de 	///../ucode/register.h:779
 #define P_MSR_CLK_REG5 		CBUS_REG_ADDR(MSR_CLK_REG5)
+#define LED_PWM_REG0 0x21da 	///../ucode/register.h:780
+#define P_LED_PWM_REG0 		CBUS_REG_ADDR(LED_PWM_REG0)
+#define LED_PWM_REG1 0x21db 	///../ucode/register.h:781
+#define P_LED_PWM_REG1 		CBUS_REG_ADDR(LED_PWM_REG1)
+#define LED_PWM_REG2 0x21dc 	///../ucode/register.h:782
+#define P_LED_PWM_REG2 		CBUS_REG_ADDR(LED_PWM_REG2)
+#define LED_PWM_REG3 0x21dd 	///../ucode/register.h:783
+#define P_LED_PWM_REG3 		CBUS_REG_ADDR(LED_PWM_REG3)
+#define LED_PWM_REG4 0x21de 	///../ucode/register.h:784
+#define P_LED_PWM_REG4 		CBUS_REG_ADDR(LED_PWM_REG4)
+#define LED_PWM_REG5 0x21df 	///../ucode/register.h:785
+#define P_LED_PWM_REG5 		CBUS_REG_ADDR(LED_PWM_REG5)
+#define LED_PWM_REG6 0x21e0 	///../ucode/register.h:786
+#define P_LED_PWM_REG6 		CBUS_REG_ADDR(LED_PWM_REG6)
+#define VGHL_PWM_REG0 0x21e1 	///../ucode/register.h:790
+#define P_VGHL_PWM_REG0 		CBUS_REG_ADDR(VGHL_PWM_REG0)
+#define VGHL_PWM_REG1 0x21e2 	///../ucode/register.h:791
+#define P_VGHL_PWM_REG1 		CBUS_REG_ADDR(VGHL_PWM_REG1)
+#define VGHL_PWM_REG2 0x21e3 	///../ucode/register.h:792
+#define P_VGHL_PWM_REG2 		CBUS_REG_ADDR(VGHL_PWM_REG2)
+#define VGHL_PWM_REG3 0x21e4 	///../ucode/register.h:793
+#define P_VGHL_PWM_REG3 		CBUS_REG_ADDR(VGHL_PWM_REG3)
+#define VGHL_PWM_REG4 0x21e5 	///../ucode/register.h:794
+#define P_VGHL_PWM_REG4 		CBUS_REG_ADDR(VGHL_PWM_REG4)
+#define VGHL_PWM_REG5 0x21e6 	///../ucode/register.h:795
+#define P_VGHL_PWM_REG5 		CBUS_REG_ADDR(VGHL_PWM_REG5)
+#define VGHL_PWM_REG6 0x21e7 	///../ucode/register.h:796
+#define P_VGHL_PWM_REG6 		CBUS_REG_ADDR(VGHL_PWM_REG6)
 #define I2C_M_1_CONTROL_REG 0x21f0 	///../ucode/register.h:803
 #define P_I2C_M_1_CONTROL_REG 		CBUS_REG_ADDR(I2C_M_1_CONTROL_REG)
 #define I2C_M_1_SLAVE_ADDR 0x21f1 	///../ucode/register.h:804
@@ -1134,6 +1162,9 @@
 #define P_HHI_VDEC2_CLK_CNTL 		CBUS_REG_ADDR(HHI_VDEC2_CLK_CNTL)
 #define HHI_VDEC3_CLK_CNTL 0x107a 	///../ucode/register.h:1669
 #define P_HHI_VDEC3_CLK_CNTL 		CBUS_REG_ADDR(HHI_VDEC3_CLK_CNTL)
+#define HHI_EDP_APB_CLK_CNTL 0x107b 	///../ucode/register.h:1589
+#define P_HHI_EDP_APB_CLK_CNTL 		CBUS_REG_ADDR(HHI_EDP_APB_CLK_CNTL)
+
 #define HHI_VDEC4_CLK_CNTL 0x107b 	///../ucode/register.h:1670
 #define P_HHI_VDEC4_CLK_CNTL 		CBUS_REG_ADDR(HHI_VDEC4_CLK_CNTL)
 #define HHI_HDMI_PLL_CNTL 0x107c 	///../ucode/register.h:1676
@@ -1182,7 +1213,11 @@
 #define P_HHI_NAND_CLK_CNTL 		CBUS_REG_ADDR(HHI_NAND_CLK_CNTL)
 #define HHI_ISP_LED_CLK_CNTL 0x1098 	///../ucode/register.h:1700
 #define P_HHI_ISP_LED_CLK_CNTL 		CBUS_REG_ADDR(HHI_ISP_LED_CLK_CNTL)
-#define HHI_MPLL_CNTL 0x10a0 	///../ucode/register.h:1703
+#define HHI_EDP_TX_PHY_CNTL0 0x109c 	///../ucode/register.h:1619
+#define P_HHI_EDP_TX_PHY_CNTL0 		CBUS_REG_ADDR(HHI_EDP_TX_PHY_CNTL0)
+#define HHI_EDP_TX_PHY_CNTL1 0x109d 	///../ucode/register.h:1620
+#define P_HHI_EDP_TX_PHY_CNTL1 		CBUS_REG_ADDR(HHI_EDP_TX_PHY_CNTL1)
+#define HHI_MPLL_CNTL 0x10a0 	///../ucode/register.h:1621
 #define P_HHI_MPLL_CNTL 		CBUS_REG_ADDR(HHI_MPLL_CNTL)
 #define HHI_MPLL_CNTL2 0x10a1 	///../ucode/register.h:1704
 #define P_HHI_MPLL_CNTL2 		CBUS_REG_ADDR(HHI_MPLL_CNTL2)

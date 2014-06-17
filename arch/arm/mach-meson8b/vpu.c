@@ -503,7 +503,7 @@ void switch_vpu_mem_pd_vmod(unsigned int vmod, int flag)
 	else {
 		printk("switch_vpu_mem_pd: unsupport vpu mod\n");
 	}
-	printk("switch_vpu_mem_pd: %s %s\n", vpu_mod_table[vpu_mod - VPU_MOD_START], ((flag > 0) ? "OFF" : "ON"));
+	//printk("switch_vpu_mem_pd: %s %s\n", vpu_mod_table[vpu_mod - VPU_MOD_START], ((flag > 0) ? "OFF" : "ON"));
 	spin_unlock_irqrestore(&vpu_mem_lock, flags);
 }
 //***********************************************//

@@ -30,7 +30,10 @@
 #include <mach/clock.h>
 #include <plat/regops.h>
 #include <plat/io.h>
-
+#include <plat/wakeup.h>
+#ifdef CONFIG_MESON_TRUSTZONE
+#include <mach/meson-secure.h>
+#endif
 
 #ifdef CONFIG_SUSPEND_WATCHDOG
 #include <mach/watchdog.h>
@@ -76,6 +79,8 @@ static void wait_uart_empty(void)
 		udelay(100);
 	}while((aml_read_reg32(P_AO_UART_STATUS) & (1<<22)) == 0);	
 }
+struct clk* clk81;
+struct clk* clkxtal;
 
 void clk_switch(int flag)
 {
@@ -86,8 +91,7 @@ void clk_switch(int flag)
 		for (i = clk_count - 1; i >= 0; i--) {
 			if (clks[i].clk_flag) {
 				if (clks[i].clk_addr == P_HHI_MPEG_CLK_CNTL) {
-					struct clk* sys_clk = clk_get_sys("clk81", NULL);
-					uart_rate_clk = clk_get_rate(sys_clk);
+					uart_rate_clk = clk_get_rate(clk81);
 					wait_uart_empty();
 					aml_set_reg32_mask(clks[i].clk_addr,(1<<7));//gate on pll
 					udelay(10);
@@ -103,8 +107,7 @@ void clk_switch(int flag)
 	        for (i = 0; i < clk_count; i++) {
 	 		if (clks[i].clk_addr == P_HHI_MPEG_CLK_CNTL) {
 				if (aml_read_reg32(clks[i].clk_addr) & (1 << 8)) {
-					struct clk* sys_clk = clk_get_sys("xtal", NULL);
-					uart_rate_clk = clk_get_rate(sys_clk);
+					uart_rate_clk = clk_get_rate(clkxtal);
 					clks[i].clk_flag  = 1;
 					wait_uart_empty();
 					aml_clr_reg32_mask(clks[i].clk_addr, (1 << 8)); // gate off from pll
@@ -270,10 +273,14 @@ static void meson_pm_suspend(void)
 	if(det_pwr_key())//get pwr key and wakeup im
 	{
 		clr_pwr_key();
-		WRITE_AOBUS_REG(AO_RTI_STATUS_REG2, 0x1234abcd);
+		WRITE_AOBUS_REG(AO_RTI_STATUS_REG2, FLAG_WAKEUP_PWRKEY);
 	}else{
 #ifdef CONFIG_MESON_SUSPEND
+#ifdef CONFIG_MESON_TRUSTZONE
+		meson_suspend_firmware();
+#else
 		meson_power_suspend();
+#endif
 #else
 #if 0
 		//k101 power key
@@ -283,16 +290,14 @@ static void meson_pm_suspend(void)
 			udelay(1000);
 		}while((aml_read_reg32(P_AO_GPIO_I)&(1<<3)));
 #endif
-		WRITE_AOBUS_REG(AO_RTI_STATUS_REG2, 0x1234abcd);
 #endif
 	}
 	aml_set_reg32_mask(P_HHI_SYS_PLL_CNTL, (1 << 30)); //enable sys pll
 	printk(KERN_INFO "... wake up\n");
-	WRITE_AOBUS_REG(AO_RTI_STATUS_REG2, 0x1234abcd);
 #if 1
 	if (aml_read_reg32(P_AO_RTC_ADDR1) & (1<<12)) {
 	// Woke from alarm, not power button. Set flag to inform key_input driver.
-		WRITE_AOBUS_REG(AO_RTI_STATUS_REG2, 0x12345678);
+		WRITE_AOBUS_REG(AO_RTI_STATUS_REG2, FLAG_WAKEUP_ALARM);
 	}
 	// clear RTC interrupt
 	aml_write_reg32((P_AO_RTC_ADDR1),aml_read_reg32(P_AO_RTC_ADDR1)|(0xf000));
@@ -388,6 +393,9 @@ static int __init meson_pm_probe(struct platform_device *pdev)
 		return -ENOENT;
 	}
 	suspend_set_ops(&meson_pm_ops);
+	
+	clk81 = clk_get_sys("clk81", NULL);
+	clkxtal = clk_get_sys("xtal", NULL);
 	printk(KERN_INFO "meson_pm_probe done !\n");
 	return 0;
 }

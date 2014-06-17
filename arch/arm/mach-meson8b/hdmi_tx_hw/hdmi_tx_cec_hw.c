@@ -317,6 +317,7 @@ void cec_arbit_bit_time_set(unsigned bit_set, unsigned time_set, unsigned flag){
         aocec_wr_reg(AO_CEC_TXTIME_2BIT_BIT10_8, (time_set >> 8) & 0x7);
         if(flag)
             hdmi_print(INF, CEC "write 5 bit:0x%x%x \n", aocec_rd_reg(AO_CEC_TXTIME_2BIT_BIT10_8), aocec_rd_reg(AO_CEC_TXTIME_2BIT_BIT7_0));
+        break;
         //7 bit
 	case 7:
         if(flag)

@@ -53,7 +53,7 @@ unsigned p_pull_upen_addr[]={
 };
 
 /* Pad names for the pinmux subsystem */
-const static struct pinctrl_pin_desc m8_pads[] = {
+const static struct pinctrl_pin_desc m8b_pads[] = {
 	PINCTRL_PIN(GPIOAO_0,"GPIOAO_0"),
 	PINCTRL_PIN(GPIOAO_1,"GPIOAO_1"),
 	PINCTRL_PIN(GPIOAO_2,"GPIOAO_2"),
@@ -68,21 +68,6 @@ const static struct pinctrl_pin_desc m8_pads[] = {
 	PINCTRL_PIN(GPIOAO_11,"GPIOAO_11"),
 	PINCTRL_PIN(GPIOAO_12,"GPIOAO_12"),
 	PINCTRL_PIN(GPIOAO_13,"GPIOAO_13"),
-	PINCTRL_PIN(GPIOZ_0,"GPIOZ_0"),
-	PINCTRL_PIN(GPIOZ_1,"GPIOZ_1"),
-	PINCTRL_PIN(GPIOZ_2,"GPIOZ_2"),
-	PINCTRL_PIN(GPIOZ_3,"GPIOZ_3"),
-	PINCTRL_PIN(GPIOZ_4,"GPIOZ_4"),
-	PINCTRL_PIN(GPIOZ_5,"GPIOZ_5"),
-	PINCTRL_PIN(GPIOZ_6,"GPIOZ_6"),
-	PINCTRL_PIN(GPIOZ_7,"GPIOZ_7"),
-	PINCTRL_PIN(GPIOZ_8,"GPIOZ_8"),
-	PINCTRL_PIN(GPIOZ_9,"GPIOZ_9"),
-	PINCTRL_PIN(GPIOZ_10,"GPIOZ_10"),
-	PINCTRL_PIN(GPIOZ_11,"GPIOZ_11"),
-	PINCTRL_PIN(GPIOZ_12,"GPIOZ_12"),
-	PINCTRL_PIN(GPIOZ_13,"GPIOZ_13"),
-	PINCTRL_PIN(GPIOZ_14,"GPIOZ_14"),
 	PINCTRL_PIN(GPIOH_0,"GPIOH_0"),
 	PINCTRL_PIN(GPIOH_1,"GPIOH_1"),
 	PINCTRL_PIN(GPIOH_2,"GPIOH_2"),
@@ -188,22 +173,35 @@ const static struct pinctrl_pin_desc m8_pads[] = {
 	PINCTRL_PIN(GPIOX_19,"GPIOX_19"),
 	PINCTRL_PIN(GPIOX_20,"GPIOX_20"),
 	PINCTRL_PIN(GPIOX_21,"GPIOX_21"),
+	PINCTRL_PIN(DIF_TTL_0_P,"DIF_TTL_0_P"),
+	PINCTRL_PIN(DIF_TTL_0_N,"DIF_TTL_0_N"),
+	PINCTRL_PIN(DIF_TTL_1_P,"DIF_TTL_1_P"),
+	PINCTRL_PIN(DIF_TTL_1_N,"DIF_TTL_1_N"),
+	PINCTRL_PIN(DIF_TTL_2_P,"DIF_TTL_2_P"),
+	PINCTRL_PIN(DIF_TTL_2_N,"DIF_TTL_2_N"),
+	PINCTRL_PIN(DIF_TTL_3_P,"DIF_TTL_3_P"),
+	PINCTRL_PIN(DIF_TTL_3_N,"DIF_TTL_3_N"),
+	PINCTRL_PIN(DIF_TTL_4_P,"DIF_TTL_4_P"),
+	PINCTRL_PIN(DIF_TTL_4_N,"DIF_TTL_4_N"),
+	PINCTRL_PIN(HDMI_TTL_0_P,"HDMI_TTL_0_P"),
+	PINCTRL_PIN(HDMI_TTL_0_N,"HDMI_TTL_0_N"),
+	PINCTRL_PIN(HDMI_TTL_1_P,"HDMI_TTL_1_P"),
+	PINCTRL_PIN(HDMI_TTL_1_N,"HDMI_TTL_1_N"),
+	PINCTRL_PIN(HDMI_TTL_2_P,"HDMI_TTL_2_P"),
+	PINCTRL_PIN(HDMI_TTL_2_N,"HDMI_TTL_2_N"),
+	PINCTRL_PIN(HDMI_TTL_CK_P,"HDMI_TTL_CK_P"),
+	PINCTRL_PIN(HDMI_TTL_CK_N,"HDMI_TTL_CK_N"),
 	PINCTRL_PIN(GPIO_BSD_EN,"GPIO_BSD_EN"),
 	PINCTRL_PIN(GPIO_TEST_N,"GPIO_TEST_N"),
+
 };
-int m8_pin_to_pullup(unsigned int pin ,unsigned int *reg,unsigned int *bit,unsigned int *bit_en)
+int m8b_pin_to_pullup(unsigned int pin ,unsigned int *reg,unsigned int *bit,unsigned int *bit_en)
 {
 	if(pin<=GPIOAO_13)
 	{
 		*reg=5;
 		*bit=pin+16;
 		*bit_en=pin;
-	}
-	else if (pin<=GPIOZ_14)
-	{
-		*reg=1;
-		*bit=pin-GPIOZ_0;
-		*bit_en=*bit;
 	}
 	else if(pin<=GPIOH_9)
 	{
@@ -241,7 +239,7 @@ int m8_pin_to_pullup(unsigned int pin ,unsigned int *reg,unsigned int *bit,unsig
 		*bit=pin-GPIOX_0;
 		*bit_en=*bit;
 	}
-	else if(pin<=GPIO_TEST_N)
+	else if(pin == GPIO_TEST_N)
 	{
 		*reg=5;
 		*bit=pin-GPIO_TEST_N+14;
@@ -252,17 +250,12 @@ int m8_pin_to_pullup(unsigned int pin ,unsigned int *reg,unsigned int *bit,unsig
 	return 0;
 
 }
-int m8_pin_map_to_direction(unsigned int pin,unsigned int *reg,unsigned int *bit)
+int m8b_pin_map_to_direction(unsigned int pin,unsigned int *reg,unsigned int *bit)
 {
 	if(pin<=GPIOAO_13)
 	{
-		*reg=4;
+		*reg=6;
 		*bit=pin;
-	}
-	else if (pin<=GPIOZ_14)
-	{
-		*reg=1;
-		*bit=pin-GPIOZ_0+17;
 	}
 	else if(pin<=GPIOH_9)
 	{
@@ -294,6 +287,11 @@ int m8_pin_map_to_direction(unsigned int pin,unsigned int *reg,unsigned int *bit
 		*reg=0;
 		*bit=pin-GPIOX_0;
 	}
+	else if(pin<=HDMI_TTL_CK_N)
+	{
+		*reg=4;
+		*bit=pin-DIF_TTL_0_P+12;
+	}
 	//else if(pin<=GPIO_TEST_N)
 	//{
 		//*reg=5;
@@ -303,12 +301,12 @@ int m8_pin_map_to_direction(unsigned int pin,unsigned int *reg,unsigned int *bit
 		return -1;
 	return 0;
 }
-static int m8_set_pullup(unsigned int pin,unsigned int config)
+static int m8b_set_pullup(unsigned int pin,unsigned int config)
 {
 	unsigned int reg=0,bit=0,bit_en=0,ret;
 	u16 pullarg = AML_PINCONF_UNPACK_PULL_ARG(config);
 	u16 pullen = AML_PINCONF_UNPACK_PULL_EN(config);
-	ret=m8_pin_to_pullup(pin,&reg,&bit,&bit_en);
+	ret=m8b_pin_to_pullup(pin,&reg,&bit,&bit_en);
 	if(!ret)
 	{
 		if(pullen){
@@ -327,50 +325,50 @@ static int m8_set_pullup(unsigned int pin,unsigned int config)
 	return ret;
 }
 
-static struct amlogic_pinctrl_soc_data m8_pinctrl = {
-	.pins = m8_pads,
-	.npins = ARRAY_SIZE(m8_pads),
-	.meson_set_pullup=m8_set_pullup,
-	.pin_map_to_direction=m8_pin_map_to_direction,
+static struct amlogic_pinctrl_soc_data m8b_pinctrl = {
+	.pins = m8b_pads,
+	.npins = ARRAY_SIZE(m8b_pads),
+	.meson_set_pullup=m8b_set_pullup,
+	.pin_map_to_direction=m8b_pin_map_to_direction,
 };
-static struct of_device_id m8_pinctrl_of_table[]=
+static struct of_device_id m8b_pinctrl_of_table[]=
 {
 	{
-		.compatible="amlogic,pinmux-m8",
+		.compatible="amlogic,pinmux-m8b",
 	},
 	{},
 };
 
-static int  m8_pmx_probe(struct platform_device *pdev)
+static int  m8b_pmx_probe(struct platform_device *pdev)
 {
-	return amlogic_pmx_probe(pdev,&m8_pinctrl);
+	return amlogic_pmx_probe(pdev,&m8b_pinctrl);
 }
 
-static int  m8_pmx_remove(struct platform_device *pdev)
+static int  m8b_pmx_remove(struct platform_device *pdev)
 {
 	return amlogic_pmx_remove(pdev);
 }
 
-static struct platform_driver m8_pmx_driver = {
+static struct platform_driver m8b_pmx_driver = {
 	.driver = {
-		.name = "pinmux-m8",
+		.name = "pinmux-m8b",
 		.owner = THIS_MODULE,
-		.of_match_table=of_match_ptr(m8_pinctrl_of_table),
+		.of_match_table=of_match_ptr(m8b_pinctrl_of_table),
 	},
-	.probe = m8_pmx_probe,
-	.remove = m8_pmx_remove,
+	.probe = m8b_pmx_probe,
+	.remove = m8b_pmx_remove,
 };
 
-static int __init m8_pmx_init(void)
+static int __init m8b_pmx_init(void)
 {
-	return platform_driver_register(&m8_pmx_driver);
+	return platform_driver_register(&m8b_pmx_driver);
 }
-arch_initcall(m8_pmx_init);
+arch_initcall(m8b_pmx_init);
 
-static void __exit m8_pmx_exit(void)
+static void __exit m8b_pmx_exit(void)
 {
-	platform_driver_unregister(&m8_pmx_driver);
+	platform_driver_unregister(&m8b_pmx_driver);
 }
-module_exit(m8_pmx_exit);
-MODULE_DESCRIPTION("m8 pin control driver");
+module_exit(m8b_pmx_exit);
+MODULE_DESCRIPTION("m8b pin control driver");
 MODULE_LICENSE("GPL v2");

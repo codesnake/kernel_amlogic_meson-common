@@ -70,6 +70,7 @@ struct amlsd_platform {
 	unsigned int clkc_w;
 	unsigned int ctrl;
 	unsigned int clock;
+	unsigned int tune_phase;            /* store tuning result */
 	unsigned char signal_voltage;		/* signalling voltage (1.8V or 3.3V) */
 
 	unsigned int low_burst;
@@ -87,6 +88,7 @@ struct amlsd_platform {
 
     int is_sduart;
     bool is_in;
+    bool is_tuned;                      /* if card has been tuning */
 
     /* we used this flag to filter some unnecessary cmd before initialized flow */
     bool is_fir_init; // has been initialized for the first time
@@ -634,21 +636,36 @@ extern struct mmc_host *sdio_host;
 		printk("[%s] " fmt, __FUNCTION__, ##args);	\
 }while(0)
 
-
 #define print_dbg(fmt, args...) do{\
 	printk("[%s]\033[0;40;35m " fmt "\033[0m", __FUNCTION__, ##args);  \
 }while(0)
 
+//for external codec status, if using external codec, jtag should not be set. 
+extern int ext_codec;
 
+#ifndef CONFIG_MESON_TRUSTZONE
 // P_AO_SECURE_REG1 is "Secure Register 1" in <M8-Secure-AHB-Registers.doc>
 #define aml_jtag_gpioao() do{\
     aml_clr_reg32_mask(P_AO_SECURE_REG1, ((1<<5) | (1<<9))); \
+    if(!ext_codec)\
+        aml_set_reg32_mask(P_AO_SECURE_REG1, ((1<<8) | (1<<1))); \
 }while(0)
 
 #define aml_jtag_sd() do{\
     aml_clr_reg32_mask(P_AO_SECURE_REG1, ((1<<8) | (1<<1))); \
     aml_set_reg32_mask(P_AO_SECURE_REG1, ((1<<5) | (1<<9))); \
 }while(0)
+#else
+/* Secure REG can only be accessed in Secure World if TrustZone enabled.*/
+#include <mach/meson-secure.h>
+#define aml_jtag_gpioao() do {\
+	meson_secure_reg_write(P_AO_SECURE_REG1, meson_secure_reg_read(P_AO_SECURE_REG1) & (~((1<<5) | (1<<9)))); \
+} while(0)
+#define aml_jtag_sd() do {\
+	meson_secure_reg_write(P_AO_SECURE_REG1, meson_secure_reg_read(P_AO_SECURE_REG1) & (~(1<<8) | (1<<1))); \
+	meson_secure_reg_write(P_AO_SECURE_REG1, meson_secure_reg_read(P_AO_SECURE_REG1) | ((1<<5) | (1<<9))); \
+} while(0)
+#endif /* CONFIG_MESON_TRUSTZONE */
 
 #define aml_uart_pinctrl() do {\
     \

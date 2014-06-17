@@ -9,7 +9,8 @@ typedef enum {
     MOD_HDMI,
     MOD_VENC,
     MOD_TCON,
-    MOD_LVDS,
+    //MOD_LVDS,
+    MOD_LCD,
     MOD_SPI,
     MOD_UART0,
     MOD_UART1,
@@ -50,5 +51,6 @@ typedef enum {
 extern void switch_mod_gate_by_type(mod_type_t type, int flag);
 extern void switch_mod_gate_by_name(const char* mod_name, int flag);
 extern void power_gate_init(void);
+extern void switch_lcd_mod_gate(int flag);
 
 #endif /* __MOD_GATE_H */

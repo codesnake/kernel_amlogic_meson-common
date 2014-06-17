@@ -62,8 +62,8 @@ static mod_record_t mod_records[MOD_MAX_NUM + 1] = {
 		.dc_en = 0,
 		.no_share = 1,
 	},{
-		.name = "lvds",
-		.type = MOD_LVDS,
+		.name = "lcd",
+		.type = MOD_LCD,
 		.ref = 0,
 		.flag = 1,
 		.dc_en = 0,
@@ -306,11 +306,15 @@ static int _switch_gate(mod_type_t type, int flag)
 			__CLK_GATE_OFF(VCLK2_ENCT);
 		}
 		break;
-	case MOD_LVDS:
-		PRINT_INFO("turn %s lvds module\n", flag?"on":"off");
+	case MOD_LCD:
+		PRINT_INFO("turn %s lcd module\n", flag?"on":"off");
 		if (flag) {
 			__CLK_GATE_ON(VCLK2_ENCL);
+			__CLK_GATE_ON(VCLK2_VENCL);
+			__CLK_GATE_ON(EDP_CLK);
 		} else {
+			__CLK_GATE_OFF(EDP_CLK);
+			__CLK_GATE_OFF(VCLK2_VENCL);
 			__CLK_GATE_OFF(VCLK2_ENCL);
 		}
 		break;
@@ -555,6 +559,25 @@ void switch_mod_gate_by_name(const char* mod_name, int flag)
 	}
 }
 EXPORT_SYMBOL(switch_mod_gate_by_name);
+
+void switch_lcd_mod_gate(int flag)
+{
+	unsigned long flags;
+	
+	spin_lock_irqsave(&gate_lock, flags);
+	PRINT_INFO("turn %s lcd module\n", flag?"on":"off");
+	if (flag) {
+		__CLK_GATE_ON(VCLK2_ENCL);
+		__CLK_GATE_ON(VCLK2_VENCL);
+		__CLK_GATE_ON(EDP_CLK);
+	} else {
+		__CLK_GATE_OFF(EDP_CLK);
+		__CLK_GATE_OFF(VCLK2_VENCL);
+		__CLK_GATE_OFF(VCLK2_ENCL);
+	}
+	spin_unlock_irqrestore(&gate_lock, flags);
+}
+EXPORT_SYMBOL(switch_lcd_mod_gate);
 
 void power_gate_init(void)
 {
