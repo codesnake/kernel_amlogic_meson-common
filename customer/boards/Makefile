@@ -172,7 +172,10 @@ obj-$(CONFIG_MACH_MESON6_G17_M1706_T2) += board-m6g17-m1706_T2.o
 obj-$(CONFIG_MACH_MESON6_G17_M1706_T2) += board-m6g17-m1706-panel_T2.o
 obj-$(CONFIG_MACH_MESON6_G17_M170m) += board-m6g17-m170m.o
 obj-$(CONFIG_MACH_MESON6_G17_M170m) += board-m6g17-m170m-panel.o
-
+obj-$(CONFIG_MACH_MESON6_G17_M1706p) += board-m6g17-m1706p.o
+obj-$(CONFIG_MACH_MESON6_G17_M1706p) += board-m6g17-m1706p-panel.o
+obj-$(CONFIG_MACH_MESON6_M60) += board-m6-m60.o
+obj-$(CONFIG_MACH_MESON6_M60) += board-m6-m60-panel.o
 obj-$(CONFIG_MACH_MESON6_JK_V1_MXS) += board-jk_v1_mxs.o
 obj-$(CONFIG_MACH_MESON6_JK_V1_MXS) += board-jk_v1_mxs-panel.o
 obj-$(CONFIG_MACH_MESON6_G33_EMID7) += board-m6g33-emid7.o

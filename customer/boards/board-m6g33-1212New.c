@@ -850,7 +850,6 @@ static struct meson_cs_pdata_t vcck_pdata = {
         1170000, 1150000, 1130000, 1110000,
         1090000, 1070000, 1050000, 1010000,
     },
-    .default_uV = 1280000,
     .get_voltage = get_voltage,
     .set_voltage = set_voltage,
 };

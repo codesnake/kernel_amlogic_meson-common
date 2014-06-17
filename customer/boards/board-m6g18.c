@@ -839,8 +839,8 @@ static struct aml_nand_platform aml_nand_mid_platform[] = {
 #endif
     {
         .name = NAND_NORMAL_NAME,
-        .chip_enable_pad = (AML_NAND_CE0 | (AML_NAND_CE1 << 4) /* | (AML_NAND_CE2 << 8) | (AML_NAND_CE3 << 12)*/),
-        .ready_busy_pad = (AML_NAND_CE0 | (AML_NAND_CE1 << 4) /* | (AML_NAND_CE1 << 8) | (AML_NAND_CE1 << 12)*/),
+        .chip_enable_pad = (AML_NAND_CE0/* | (AML_NAND_CE1 << 4) | (AML_NAND_CE2 << 8) | (AML_NAND_CE3 << 12)*/),
+        .ready_busy_pad = (AML_NAND_CE0 /*| (AML_NAND_CE0 << 4) | (AML_NAND_CE1 << 8) | (AML_NAND_CE1 << 12)*/),
         .platform_nand_data = {
             .chip =  {
                 .nr_chips = 1,
@@ -901,7 +901,7 @@ static struct mtd_partition spi_partition_info[] = {
 #endif
         .size = 0x8000,
     },
-#ifdef CONFIG_AM_IPTV_SECURITY
+#if defined(CONFIG_AM_IPTV_SECURITY) || defined(CONFIG_SECURITY_USB_BURNING)
     {
         .name = "hashtable",
         .offset = 0x90000,
@@ -1925,9 +1925,8 @@ static struct meson_cs_pdata_t vcck_pdata = {
         1190000, 1180000, 1160000, 1140000,
         1120000, 1110000, 1090000, 1070000,
     },
-    .default_uV = 1110000,
-//    .get_voltage = get_voltage,
-//    .set_voltage = set_voltage,
+    .get_voltage = get_voltage,
+    .set_voltage = set_voltage,
 };
 static struct meson_opp vcck_opp_table[] = {
     /* freq must be in descending order */
@@ -3199,10 +3198,10 @@ static struct platform_device  *platform_devs[] = {
 
 #ifdef CONFIG_AM_DVB
 	&amlogic_dvb_device,
-#ifdef CONFIG_AM_NEW_TV_ARCH
-	&amlogic_dvb_fe_device,
+#ifdef CONFIG_AM_NEW_TV_ARCH	
+	&amlogic_dvb_fe_device,	
 #else
-#ifdef CONFIG_AM_MXL101
+#ifdef CONFIG_AM_MXL101	
 	&mxl101_device,
 #endif
 #ifdef CONFIG_AM_AVL6211
@@ -3224,13 +3223,13 @@ static struct platform_device  *platform_devs[] = {
 #endif
 
 #if defined(CONFIG_AM_TV_OUTPUT2)
-    &vout2_device,
+    &vout2_device,   
 #endif
 
 #ifdef CONFIG_AM_SMARTCARD
 	&smartcard_device,
 #endif
-
+ 
 #ifdef CONFIG_MESON_CS_DCDC_REGULATOR
 	&meson_cs_dcdc_regulator_device,
 #endif
@@ -3260,9 +3259,9 @@ static __init void meson_init_machine(void)
     aml_set_reg32_bits(AOBUS_REG_ADDR(0x24), 0, 19, 1);
     aml_set_reg32_bits(AOBUS_REG_ADDR(0x24), 0,  2, 1);
     aml_set_reg32_bits(AOBUS_REG_ADDR(0x24), 1, 18, 1);
-//#ifdef CONFIG_MESON_CS_DCDC_REGULATOR
-//    vcck_pwm_init();
-//#endif
+#ifdef CONFIG_MESON_CS_DCDC_REGULATOR
+    vcck_pwm_init();
+#endif
 #ifdef CONFIG_AML_HDMI_TX
     extern int setup_hdmi_dev_platdata(void* platform_data);
     setup_hdmi_dev_platdata(&aml_hdmi_pdata);
@@ -3274,7 +3273,7 @@ static __init void meson_init_machine(void)
 	setup_remote_device();
 #endif
 //#ifdef CONFIG_EFUSE
-//	setup_aml_efuse();
+//	setup_aml_efuse();	
 //#endif
     setup_usb_devices();
     setup_devices_resource();

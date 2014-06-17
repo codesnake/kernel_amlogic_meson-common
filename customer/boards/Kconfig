@@ -502,6 +502,18 @@ config MACH_MESON6_G17_M1706
 	help
 	  Support for Amlogic Meson6 g17_M1706 customer platform.
 	  
+config MACH_MESON6_G17_M1706p
+	depends on ARCH_MESON6
+	bool "Meson6 g17_m1706p board"
+	help
+	  Support for Amlogic Meson6 g17_M1706p customer platform.
+	  
+config MACH_MESON6_M60
+	depends on ARCH_MESON6
+	bool "Meson6  m60 board"
+	help
+	  Support for Amlogic Meson6 M60 customer platform.
+	  	  	  
 config MACH_MESON6_G17_M1706_T2
 	depends on ARCH_MESON6
 	bool "Meson6 g17_m1706_T2 board"
