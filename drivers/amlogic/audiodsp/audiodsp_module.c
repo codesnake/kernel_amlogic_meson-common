@@ -877,9 +877,16 @@ static ssize_t ac3_drc_control_show(struct class*cla, struct class_attribute* at
 {
 	char *drcmode[] = {"CUSTOM_0","CUSTOM_1","LINE","RF"};
 	char *pbuf = buf;
+#if 0	
 	pbuf += sprintf(pbuf, "\tdd+ drc mode : %s\n", drcmode[ac3_drc_control&0x3]);
 	pbuf += sprintf(pbuf, "\tdd+ drc high cut scale : %d%%\n", (ac3_drc_control>>DRC_HIGH_CUT_BIT)&0xff);
 	pbuf += sprintf(pbuf, "\tdd+ drc low boost scale : %d%%\n", (ac3_drc_control>>DRC_LOW_BST_BIT)&0xff);
+#else
+	printk( "\tdd+ drc mode : %s\n", drcmode[ac3_drc_control&0x3]);
+	printk( "\tdd+ drc high cut scale : %d%%\n", (ac3_drc_control>>DRC_HIGH_CUT_BIT)&0xff);
+	printk("\tdd+ drc low boost scale : %d%%\n", (ac3_drc_control>>DRC_LOW_BST_BIT)&0xff);
+  	pbuf += sprintf(pbuf, "%d\n",ac3_drc_control);
+#endif
 	return (pbuf-buf);
 }
 static ssize_t ac3_drc_control_store(struct class* class, struct class_attribute* attr,
