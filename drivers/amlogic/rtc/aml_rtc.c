@@ -49,8 +49,14 @@ int c_dbg_lvl = 0;
 #define RESET_RETRY_TIMES           	3
 
 #if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6
+#if (defined(CONFIG_MESON_TRUSTZONE) && defined(CONFIG_ARCH_MESON6))
+#include <mach/meson-secure.h>
+#define WR_RTC(addr, data)         meson_secure_reg_write(P_##addr, data)
+#define RD_RTC(addr)               meson_secure_reg_read(P_##addr)	
+#else
 #define WR_RTC(addr, data)         aml_write_reg32(P_##addr, data)
 #define RD_RTC(addr)               aml_read_reg32(P_##addr)	
+#endif
 #else
 #define WR_RTC(addr, data)         WRITE_AOBUS_REG(addr, data)
 #define RD_RTC(addr)                   READ_AOBUS_REG(addr)
