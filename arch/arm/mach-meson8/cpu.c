@@ -30,24 +30,38 @@
 static int meson_cpu_version[MESON_CPU_VERSION_LVL_MAX];
 int __init meson_cpu_version_init(void)
 {
-	unsigned int  *version_map;	
-	unsigned int version;	
+	unsigned int version,ver;	
+	unsigned int  *version_map;
 
 	meson_cpu_version[MESON_CPU_VERSION_LVL_MAJOR] = 
 		aml_read_reg32(P_ASSIST_HW_REV);
 
 	version_map = (unsigned int *)IO_BOOTROM_BASE;
-	version = version_map[1];
-	printk(KERN_INFO "chip version=%x\n", version);	
+	meson_cpu_version[MESON_CPU_VERSION_LVL_MISC] = version_map[1];
+	
+	version = aml_read_reg32(P_METAL_REVISION);
 	switch (version) {		
-		case 0x000025e2:			
-			meson_cpu_version[MESON_CPU_VERSION_LVL_MINOR] = 0xA;		
+		case 0x11111111:			
+			ver = 0xA;		
 			break;		
+		case 0x11111113:			
+			ver = 0xB;		
+			break;	
+		case 0x11111133:			
+			ver = 0xC;		
+			break;	
 		default:/*changed?*/			
-			meson_cpu_version[MESON_CPU_VERSION_LVL_MINOR] = 0xB;
+			ver = 0xD;
 			break;
-	}	
-
+	}
+	meson_cpu_version[MESON_CPU_VERSION_LVL_MINOR] = ver;	
+	printk(KERN_INFO "Meson chip version = Rev%X (%X:%X - %X:%X)\n", ver,
+		meson_cpu_version[MESON_CPU_VERSION_LVL_MAJOR],
+		meson_cpu_version[MESON_CPU_VERSION_LVL_MINOR],
+		meson_cpu_version[MESON_CPU_VERSION_LVL_PACK],
+		meson_cpu_version[MESON_CPU_VERSION_LVL_MISC]
+		);	
+	
 	return 0;
 }
 EXPORT_SYMBOL(meson_cpu_version_init);

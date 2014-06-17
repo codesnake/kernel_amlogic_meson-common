@@ -49,6 +49,10 @@
 #include <mach/meson-secure.h>
 #endif
 
+#include <linux/delay.h>
+extern struct arm_delay_ops arm_delay_ops;
+
+
 static DEFINE_SPINLOCK(clockfw_lock);
 static DEFINE_MUTEX(clock_ops_lock);
 
@@ -83,13 +87,13 @@ typedef union latency_data {
 static unsigned sys_pll_settings[][3] = {
                 {   24, 0x40020238, 0x01063546 }, /* fvco 1344, / 4, /14 */
                 {   48, 0x40020240, 0x01033546 }, /* fvco 1536, / 4, / 8 */
-                {   72, 0x40020248, 0x01023546 }, /* fvco 1728, / 4, / 6 */
+                {   72, 0x40020248, 0x03023546 }, /* fvco 1728, / 4, / 6 */
                 {   96, 0x40020240, 0x01013546 }, /* fvco 1536, / 4, / 4 */
                 {  120, 0x40020250, 0x03013546 }, /* fvco 1920, / 4, / 4 */
                 {  144, 0x40020260, 0x03013546 }, /* fvco 2304, / 4, / 4 */
                 {  168, 0x40010238, 0x01013546 }, /* fvco 1344, / 2, / 4 */
                 {  192, 0x40010240, 0x01013546 }, /* fvco 1536, / 2, / 4 */
-                {  216, 0x40010248, 0x01013546 }, /* fvco 1728, / 2, / 4 */
+                {  216, 0x40010248, 0x03013546 }, /* fvco 1728, / 2, / 4 */
                 {  240, 0x40010250, 0x03013546 }, /* fvco 1920, / 2, / 4 */
                 {  264, 0x40010258, 0x03013546 }, /* fvco 2112, / 2, / 4 */
                 {  288, 0x40010260, 0x03013546 }, /* fvco 2304, / 2, / 4 */
@@ -98,8 +102,8 @@ static unsigned sys_pll_settings[][3] = {
                 {  360, 0x4002023C, 0x01003546 }, /* fvco 1440, / 4, / 1 */
                 {  384, 0x40020240, 0x01003546 }, /* fvco 1536, / 4, / 1 */
                 {  408, 0x40020244, 0x01003546 }, /* fvco 1632, / 4, / 1 */
-                {  432, 0x40020248, 0x01003546 }, /* fvco 1728, / 4, / 1 */
-                {  456, 0x4002024C, 0x01003546 }, /* fvco 1824, / 4, / 1 */
+                {  432, 0x40020248, 0x03003546 }, /* fvco 1728, / 4, / 1 */
+                {  456, 0x4002024C, 0x03003546 }, /* fvco 1824, / 4, / 1 */
                 {  480, 0x40020250, 0x03003546 }, /* fvco 1920, / 4, / 1 */
                 {  504, 0x40020254, 0x03003546 }, /* fvco 2016, / 4, / 1 */
                 {  528, 0x40020258, 0x03003546 }, /* fvco 2112, / 4, / 1 */
@@ -116,10 +120,10 @@ static unsigned sys_pll_settings[][3] = {
                 {  792, 0x40010242, 0x01003546 }, /* fvco 1584, / 2, / 1 */
                 {  816, 0x40010244, 0x01003546 }, /* fvco 1632, / 2, / 1 */
                 {  840, 0x40010246, 0x01003546 }, /* fvco 1680, / 2, / 1 */
-                {  864, 0x40010248, 0x01003546 }, /* fvco 1728, / 2, / 1 */
-                {  888, 0x4001024A, 0x01003546 }, /* fvco 1776, / 2, / 1 */
-                {  912, 0x4001024C, 0x01003546 }, /* fvco 1824, / 2, / 1 */
-                {  936, 0x4001024E, 0x01003546 }, /* fvco 1872, / 2, / 1 */
+                {  864, 0x40010248, 0x03003546 }, /* fvco 1728, / 2, / 1 */
+                {  888, 0x4001024A, 0x03003546 }, /* fvco 1776, / 2, / 1 */
+                {  912, 0x4001024C, 0x03003546 }, /* fvco 1824, / 2, / 1 */
+                {  936, 0x4001024E, 0x03003546 }, /* fvco 1872, / 2, / 1 */
                 {  960, 0x40010250, 0x03003546 }, /* fvco 1920, / 2, / 1 */
                 {  984, 0x40010252, 0x03003546 }, /* fvco 1968, / 2, / 1 */
                 { 1008, 0x40010254, 0x03003546 }, /* fvco 2016, / 2, / 1 */
@@ -771,7 +775,10 @@ static unsigned long clk_get_rate_a9(struct clk * clkdev)
 static inline void udelay_scaled(unsigned long usecs, unsigned int oldMHz,
                                  unsigned int newMHz)
 {
-	udelay(usecs * newMHz / oldMHz);
+	if(arm_delay_ops.ticks_per_jiffy)
+		udelay(usecs);
+	else
+		udelay(usecs * newMHz / oldMHz);
 }
 
 /**
@@ -883,7 +890,7 @@ void meson_set_cpu_ctrl_reg(int cpu,int is_on)
 #ifdef CONFIG_MESON_TRUSTZONE
 	uint32_t value = 0;
 	value = meson_read_corectrl();
-	value |= is_on << cpu;
+	value = value & ~(1U << cpu) | (is_on << cpu);
 	value |= 1;
 	meson_modify_corectrl(value);
 #else
@@ -1118,7 +1125,7 @@ static int __init a9_clk_min(char *str)
 early_param("a9_clk_min", a9_clk_min);
 static int set_sys_pll(struct clk *clk,  unsigned long dst)
 {
-	int idx,loop,scale_mhz;
+	int idx,loop = 0;
 	static int only_once = 0;
 	unsigned int curr_cntl = aml_read_reg32(P_HHI_SYS_PLL_CNTL);
 	unsigned int cpu_clk_cntl = 0;
@@ -1157,19 +1164,12 @@ SETPLL:
 
 		aml_write_reg32(P_HHI_SYS_PLL_CNTL,  cpu_clk_cntl);
 
-		if (clk->old_rate <= dst) 
-			/* when increasing frequency, lpj has already been adjusted */
-			scale_mhz = dst / 1000000;// 
-		else
-			/* when decreasing frequency, lpj has not yet been adjusted */
-			scale_mhz = clk->rate / 1000000;
+		udelay_scaled(100, dst / 1000000, 24 /*clk_get_rate_xtal*/);
 
-		loop=0;
 		cntl = aml_read_reg32(P_HHI_SYS_PLL_CNTL);
-		while((cntl & (1<<31)) == 0){
-			udelay_scaled(100, dst / 1000000, 24 /*clk_get_rate_xtal*/);
-			cntl = aml_read_reg32(P_HHI_SYS_PLL_CNTL);
-			if(loop++ > 10000){
+		if((cntl & (1<<31)) == 0){
+			if(loop++ >= 10){
+				loop = 0;
 				printk(KERN_ERR"CPU freq: %ld MHz, syspll (%x) can't lock: \n",dst/1000000,cntl);
 				printk(KERN_ERR"  [10c0..10c4]%08x, %08x, %08x, %08x, %08x: [10a5]%08x, [10c7]%08x \n",
 					aml_read_reg32(P_HHI_SYS_PLL_CNTL),
@@ -1188,10 +1188,11 @@ SETPLL:
 				}else{
 					latency.b.afc_dsel_bp_in = !latency.b.afc_dsel_bp_in;
 					printk(KERN_ERR"  INV afc_dsel_bp_in, new latency=%08x\n",latency.d32);
+					sys_pll_settings[idx][2] = latency.d32;/*write back afc_dsel_bp_in bit.*/
 				}
 				printk(KERN_ERR"  Try again!\n");
-				goto SETPLL;
 			}
+			goto SETPLL;
 		};
 
 	}else {

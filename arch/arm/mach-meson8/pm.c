@@ -79,6 +79,8 @@ static void wait_uart_empty(void)
 		udelay(100);
 	}while((aml_read_reg32(P_AO_UART_STATUS) & (1<<22)) == 0);	
 }
+struct clk* clk81;
+struct clk* clkxtal;
 
 void clk_switch(int flag)
 {
@@ -89,8 +91,7 @@ void clk_switch(int flag)
 		for (i = clk_count - 1; i >= 0; i--) {
 			if (clks[i].clk_flag) {
 				if (clks[i].clk_addr == P_HHI_MPEG_CLK_CNTL) {
-					struct clk* sys_clk = clk_get_sys("clk81", NULL);
-					uart_rate_clk = clk_get_rate(sys_clk);
+					uart_rate_clk = clk_get_rate(clk81);
 					wait_uart_empty();
 					aml_set_reg32_mask(clks[i].clk_addr,(1<<7));//gate on pll
 					udelay(10);
@@ -106,8 +107,7 @@ void clk_switch(int flag)
 	        for (i = 0; i < clk_count; i++) {
 	 		if (clks[i].clk_addr == P_HHI_MPEG_CLK_CNTL) {
 				if (aml_read_reg32(clks[i].clk_addr) & (1 << 8)) {
-					struct clk* sys_clk = clk_get_sys("xtal", NULL);
-					uart_rate_clk = clk_get_rate(sys_clk);
+					uart_rate_clk = clk_get_rate(clkxtal);
 					clks[i].clk_flag  = 1;
 					wait_uart_empty();
 					aml_clr_reg32_mask(clks[i].clk_addr, (1 << 8)); // gate off from pll
@@ -387,6 +387,9 @@ static int __init meson_pm_probe(struct platform_device *pdev)
 		return -ENOENT;
 	}
 	suspend_set_ops(&meson_pm_ops);
+	
+	clk81 = clk_get_sys("clk81", NULL);
+	clkxtal = clk_get_sys("xtal", NULL);
 	printk(KERN_INFO "meson_pm_probe done !\n");
 	return 0;
 }

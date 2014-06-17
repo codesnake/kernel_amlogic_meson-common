@@ -499,7 +499,8 @@ int  __cpuinit meson_local_timer_setup(struct clock_event_device *evt)
 		irq_set_affinity(clk->irq.irq, cpumask_of(cpu));
 	}
 	/* Set up the IRQ handler */
-	setup_irq(clk->irq.irq, &clk->irq);
+	//setup_irq(clk->irq.irq, &clk->irq);
+	enable_percpu_irq(clk->irq.irq, 0);
 	
 	return 0;
 }
@@ -515,7 +516,8 @@ void  __cpuinit meson_local_timer_stop(struct clock_event_device *evt)
 	clk = clockevent_to_clock(evt);
 	evt->set_mode(CLOCK_EVT_MODE_UNUSED, evt);
 	aml_clr_reg32_mask(clk->mux_reg,(1 << clk->bit_enable));
-	remove_irq(clk->irq.irq, &clk->irq);
+	//remove_irq(clk->irq.irq, &clk->irq);
+	disable_percpu_irq(clk->irq.irq);
 
 	return;
 }
@@ -543,7 +545,7 @@ static void __init meson_clockevent_init(void)
      * Now all of the timer is 1us base
      */
     aml_write_reg32(P_ISA_TIMER_MUX1,0);
-
+	
 #ifdef CONFIG_SMP
     meson_timer_setup(NULL,meson8_smp_local_timer[0]);
 #else
@@ -560,9 +562,16 @@ static void __init meson_clockevent_init(void)
  */
 void __init meson_timer_init(void)
 {
+	int i;
+	struct meson_clock *clk;
 	meson_clocksource_init();
 	meson_clockevent_init();
 #ifdef CONFIG_SMP
+	for(i=1; i<NR_CPUS; i++){
+		clk = meson8_smp_local_timer[i];
+		/* Set up the IRQ handler */
+		setup_irq(clk->irq.irq, &clk->irq);
+	}
 	local_timer_register(&meson_local_timer_ops);
 #endif
 

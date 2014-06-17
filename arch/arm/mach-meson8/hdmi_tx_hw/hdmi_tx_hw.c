@@ -474,7 +474,7 @@ static void hdmi_tvenc4k2k_set(Hdmi_tx_video_para_t* param)
         vs_adjust   = 1;
     } else {
         hs_begin    = de_h_end + front_porch_venc;
-        vs_adjust   = 0;
+        vs_adjust   = 1;
     }
     hs_end  = modulo(hs_begin + hsync_pixels_venc,   total_pixels_venc);
     aml_write_reg32(P_ENCP_DVI_HSO_BEGIN,  hs_begin);
@@ -1264,21 +1264,81 @@ void hdmi_hw_init(hdmitx_dev_t* hdmitx_device)
     delay_us(10);
 }    
 
-#ifdef CONFIG_ARCH_MESON6
-// TODO, need test in m8
-// When 1080p50hz output, we shall manually configure
+// When have below format output, we shall manually configure
 // bolow register to get stable Video Timing.
-static void hdmi_reconfig_packet_setting(void)
+static void hdmi_reconfig_packet_setting(HDMI_Video_Codes_t vic)
 {
-    hdmi_wr_reg(TX_PACKET_ALLOC_ACTIVE_1, 0x01);
-    hdmi_wr_reg(TX_PACKET_ALLOC_ACTIVE_2, 0x12);
-    hdmi_wr_reg(TX_PACKET_ALLOC_EOF_1, 0x10);
-    hdmi_wr_reg(TX_PACKET_ALLOC_EOF_2, 0x12);
-    hdmi_wr_reg(TX_PACKET_ALLOC_SOF_1, 0xb6);
-    hdmi_wr_reg(TX_PACKET_ALLOC_SOF_2, 0x11);
-    hdmi_wr_reg(TX_PACKET_CONTROL_1, (hdmi_rd_reg(TX_PACKET_CONTROL_1)) | (1 << 7));    // bit[7]: forced_packet_timing
+    switch(vic) {
+    case HDMI_1080p50:
+        hdmi_wr_reg(TX_PACKET_CONTROL_1, 0x3a);         //0x7e
+        hdmi_wr_reg(TX_PACKET_ALLOC_ACTIVE_1, 0x01);    //0x78
+        hdmi_wr_reg(TX_PACKET_ALLOC_ACTIVE_2, 0x12);    //0x79
+        hdmi_wr_reg(TX_PACKET_ALLOC_EOF_1, 0x10);       //0x7a
+        hdmi_wr_reg(TX_PACKET_ALLOC_EOF_2, 0x12);       //0x7b
+        hdmi_wr_reg(TX_CORE_ALLOC_VSYNC_0, 0x01);       //0x81
+        hdmi_wr_reg(TX_CORE_ALLOC_VSYNC_1, 0x00);       //0x82
+        hdmi_wr_reg(TX_CORE_ALLOC_VSYNC_2, 0x0a);       //0x83
+        hdmi_wr_reg(TX_PACKET_ALLOC_SOF_1, 0xb6);       //0x7c
+        hdmi_wr_reg(TX_PACKET_ALLOC_SOF_2, 0x11);       //0x7d
+        hdmi_wr_reg(TX_PACKET_CONTROL_1, 0xba);         //0x7e
+        break;
+    case HDMI_4k2k_30:
+        hdmi_wr_reg(TX_PACKET_CONTROL_1, 0x3a);         //0x7e
+        hdmi_wr_reg(TX_PACKET_ALLOC_ACTIVE_1, 0x01);    //0x78
+        hdmi_wr_reg(TX_PACKET_ALLOC_ACTIVE_2, 0x0f);    //0x79
+        hdmi_wr_reg(TX_PACKET_ALLOC_EOF_1, 0x3a);       //0x7a
+        hdmi_wr_reg(TX_PACKET_ALLOC_EOF_2, 0x12);       //0x7b
+        hdmi_wr_reg(TX_CORE_ALLOC_VSYNC_0, 0x01);       //0x81
+        hdmi_wr_reg(TX_CORE_ALLOC_VSYNC_1, 0x00);       //0x82
+        hdmi_wr_reg(TX_CORE_ALLOC_VSYNC_2, 0x0a);       //0x83
+        hdmi_wr_reg(TX_PACKET_ALLOC_SOF_1, 0x60);       //0x7c
+        hdmi_wr_reg(TX_PACKET_ALLOC_SOF_2, 0x52);       //0x7d
+        hdmi_wr_reg(TX_PACKET_CONTROL_1, 0xba);         //0x7e
+        break;
+    case HDMI_4k2k_25:
+        hdmi_wr_reg(TX_PACKET_CONTROL_1, 0x3a);         //0x7e
+        hdmi_wr_reg(TX_PACKET_ALLOC_ACTIVE_1, 0x01);    //0x78
+        hdmi_wr_reg(TX_PACKET_ALLOC_ACTIVE_2, 0x12);    //0x79
+        hdmi_wr_reg(TX_PACKET_ALLOC_EOF_1, 0x44);       //0x7a
+        hdmi_wr_reg(TX_PACKET_ALLOC_EOF_2, 0x12);       //0x7b
+        hdmi_wr_reg(TX_CORE_ALLOC_VSYNC_0, 0x01);       //0x81
+        hdmi_wr_reg(TX_CORE_ALLOC_VSYNC_1, 0x00);       //0x82
+        hdmi_wr_reg(TX_CORE_ALLOC_VSYNC_2, 0x0a);       //0x83
+        hdmi_wr_reg(TX_PACKET_ALLOC_SOF_1, 0xda);       //0x7c
+        hdmi_wr_reg(TX_PACKET_ALLOC_SOF_2, 0x52);       //0x7d
+        hdmi_wr_reg(TX_PACKET_CONTROL_1, 0xba);         //0x7e
+        break;
+    case HDMI_4k2k_24:
+        hdmi_wr_reg(TX_PACKET_CONTROL_1, 0x3a);         //0x7e
+        hdmi_wr_reg(TX_PACKET_ALLOC_ACTIVE_1, 0x01);    //0x78
+        hdmi_wr_reg(TX_PACKET_ALLOC_ACTIVE_2, 0x12);    //0x79
+        hdmi_wr_reg(TX_PACKET_ALLOC_EOF_1, 0x47);       //0x7a
+        hdmi_wr_reg(TX_PACKET_ALLOC_EOF_2, 0x12);       //0x7b
+        hdmi_wr_reg(TX_CORE_ALLOC_VSYNC_0, 0x01);       //0x81
+        hdmi_wr_reg(TX_CORE_ALLOC_VSYNC_1, 0x00);       //0x82
+        hdmi_wr_reg(TX_CORE_ALLOC_VSYNC_2, 0x0a);       //0x83
+        hdmi_wr_reg(TX_PACKET_ALLOC_SOF_1, 0xf8);       //0x7c
+        hdmi_wr_reg(TX_PACKET_ALLOC_SOF_2, 0x52);       //0x7d
+        hdmi_wr_reg(TX_PACKET_CONTROL_1, 0xba);         //0x7e
+        break;
+    case HDMI_4k2k_smpte_24:
+        hdmi_wr_reg(TX_PACKET_CONTROL_1, 0x3a);         //0x7e
+        hdmi_wr_reg(TX_PACKET_ALLOC_ACTIVE_1, 0x01);    //0x78
+        hdmi_wr_reg(TX_PACKET_ALLOC_ACTIVE_2, 0x12);    //0x79
+        hdmi_wr_reg(TX_PACKET_ALLOC_EOF_1, 0x47);       //0x7a
+        hdmi_wr_reg(TX_PACKET_ALLOC_EOF_2, 0x12);       //0x7b
+        hdmi_wr_reg(TX_CORE_ALLOC_VSYNC_0, 0x01);       //0x81
+        hdmi_wr_reg(TX_CORE_ALLOC_VSYNC_1, 0x00);       //0x82
+        hdmi_wr_reg(TX_CORE_ALLOC_VSYNC_2, 0x0a);       //0x83
+        hdmi_wr_reg(TX_PACKET_ALLOC_SOF_1, 0xf8);       //0x7c
+        hdmi_wr_reg(TX_PACKET_ALLOC_SOF_2, 0x52);       //0x7d
+        hdmi_wr_reg(TX_PACKET_CONTROL_1, 0xba);         //0x7e
+        break;
+    default:
+        break;
+    }
+    hdmi_print(IMP, SYS "reconfig packet setting done\n");
 }
-#endif
 
 static void hdmi_hw_reset(hdmitx_dev_t* hdmitx_device, Hdmi_tx_video_para_t *param)
 {
@@ -1386,6 +1446,9 @@ static void hdmi_hw_reset(hdmitx_dev_t* hdmitx_device, Hdmi_tx_video_para_t *par
     //tmp_add_data[2]   = 1'b1 ;  // mem_copy_done_config
     //tmp_add_data[1]   = 1'b1 ;  // sys_trigger_config_semi_manu
     //tmp_add_data[0]   = 1'b0 ;  // Rsrv
+
+    tmp_add_data = 58;
+    hdmi_wr_reg(TX_PACKET_CONTROL_1, tmp_add_data);
 
     tmp_add_data = 0x0c; // for hdcp, can not use 0x0e 
     hdmi_wr_reg(TX_HDCP_EDID_CONFIG, tmp_add_data);
@@ -1627,11 +1690,7 @@ static void hdmi_hw_reset(hdmitx_dev_t* hdmitx_device, Hdmi_tx_video_para_t *par
             hdmi_wr_reg(TX_SYS5_TX_SOFT_RESET_2, 0x00);        
         }
     }
-#ifdef CONFIG_ARCH_MESON6       //todo
-    if(param->VIC == HDMI_1080p50) {
-        hdmi_reconfig_packet_setting();  // For 1080p50hz only
-    }
-#endif
+    hdmi_reconfig_packet_setting(param->VIC);
 }
 
 static void hdmi_audio_init(unsigned char spdif_flag)
@@ -2845,6 +2904,15 @@ static int hdmitx_cntl_ddc(hdmitx_dev_t* hdmitx_device, unsigned cmd, unsigned a
         break;
     case DDC_HDCP_OP:
         if(argv == HDCP_ON) {
+#ifdef CONFIG_AML_HDMI_TX_HDCP
+            // check if bit7 is enable, if not, enable first
+            if(hdmi_rd_reg(TX_PACKET_CONTROL_1) & (1 << 7)) {
+                hdmi_print(IMP, SYS "already configure PACKET_CONTROL\n");// do nothing
+            }
+            else {
+                hdmi_reconfig_packet_setting(hdmitx_device->cur_VIC);
+            }
+#endif
             hdmi_set_reg_bits(TX_HDCP_MODE, 1, 7, 1);
         }
         if(argv == HDCP_OFF) {
@@ -2902,6 +2970,7 @@ static int hdmitx_cntl_config(hdmitx_dev_t* hdmitx_device, unsigned cmd, unsigne
             hdmi_set_reg_bits(TX_TMDS_MODE, 0x3, 6, 2);
         }
         if(argv == DVI_MODE) {
+            hdmi_set_reg_bits(TX_VIDEO_DTV_OPTION_L, 0x0, 6, 2);
             hdmi_set_reg_bits(TX_TMDS_MODE, 0x2, 6, 2);
         }
         break;

@@ -48,8 +48,8 @@
 #define TRUSTZONE_MON_CORE_WR_STATUS1_INDEX     0x206
 #define TRUSTZONE_MON_CORE_BOOTADDR_INDEX       0x207
 #define TRUSTZONE_MON_CORE_DDR_INDEX            0x208
-#define TRUSTZONE_MON_CORE_RD_SOC_REV1				0x209
-#define TRUSTZONE_MON_CORE_RD_SOC_REV2				0x20A
+#define TRUSTZONE_MON_CORE_RD_SOC_REV1          0x209
+#define TRUSTZONE_MON_CORE_RD_SOC_REV2          0x20A
 
 #define TRUSTZONE_MON_SUSPNED_FIRMWARE          0x300
 #define TRUSTZONE_MON_SAVE_CPU_GIC              0x400
@@ -82,8 +82,8 @@ extern uint32_t meson_secure_reg_read(uint32_t addr);
 extern uint32_t meson_secure_reg_write(uint32_t addr, uint32_t val);
 extern u32 meson_read_socrev1(void);
 extern u32 meson_read_socrev2(void);
-extern uint32_t meson_secure_mem_size(vold);
-extern uint32_t meson_secure_mem_end(vold);
+extern uint32_t meson_secure_mem_size(void);
+extern uint32_t meson_secure_mem_end(void);
 
 // efuse HAL_API arg
 struct efuse_hal_api_arg{
@@ -109,8 +109,8 @@ struct memconfig_hal_api_arg{
 	unsigned int memconfigbuf_count;
 };
 #define MEMCONFIG_NUM	2
-extern int meson_trustzone_memconfig();
-extern unsigned int meson_trustzone_getmemsecure_size();
+extern int meson_trustzone_memconfig(void);
+extern unsigned int meson_trustzone_getmemsecure_size(void);
 extern int meson_trustzone_getmemconfig(unsigned char* name, unsigned int* startphyaddr, unsigned int* endphyaddr);
 
 #endif

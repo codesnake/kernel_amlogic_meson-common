@@ -70,6 +70,7 @@ struct amlsd_platform {
 	unsigned int clkc_w;
 	unsigned int ctrl;
 	unsigned int clock;
+	unsigned int tune_phase;            /* store tuning result */
 	unsigned char signal_voltage;		/* signalling voltage (1.8V or 3.3V) */
 
 	unsigned int low_burst;
@@ -87,6 +88,9 @@ struct amlsd_platform {
 
     int is_sduart;
     bool is_in;
+    bool is_tuned;                      /* if card has been tuning */
+    bool need_retuning;
+	struct delayed_work	retuning;
 
     /* we used this flag to filter some unnecessary cmd before initialized flow */
     bool is_fir_init; // has been initialized for the first time
