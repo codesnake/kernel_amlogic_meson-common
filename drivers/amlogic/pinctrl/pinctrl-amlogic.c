@@ -82,7 +82,7 @@ void amlogic_pinctrl_dt_free_map(struct pinctrl_dev *pctldev,
 		if (map[i].type == PIN_MAP_TYPE_CONFIGS_GROUP)
 			kfree(map[i].data.configs.configs);
 	}
-	vfree(map);
+	kfree(map);
 }
 
 
@@ -120,7 +120,7 @@ int amlogic_pinctrl_dt_node_to_map(struct pinctrl_dev *pctldev,
 	if (!purecfg&&config)
 		new_num =2;
 
-	new_map = vmalloc(sizeof(*new_map) * new_num);
+	new_map = kzalloc(sizeof(*new_map) * new_num,GFP_KERNEL);
 	if (!new_map){
 		printk("vmalloc map fail\n");
 		return -ENOMEM;
@@ -152,7 +152,7 @@ int amlogic_pinctrl_dt_node_to_map(struct pinctrl_dev *pctldev,
 	return 0;
 
 free_group:
-	vfree(new_map);
+	kfree(new_map);
 	return ret;
 }
 #else
@@ -471,7 +471,7 @@ static int amlogic_pinctrl_parse_group(struct platform_device *pdev,
 			ret=amlogic_gpio_name_map_num(gpioname);
 			if(ret<0){
 				ret= -EINVAL;
-				dev_err(&pdev->dev, "change name to num  error\n");
+				dev_err(&pdev->dev, "%s change name to num  error\n",gpioname);
 				goto err;
 			}
 			g->pins[i]=ret;
@@ -700,6 +700,8 @@ static void amlogic_dump_pinctrl_data(struct platform_device *pdev)
 	}
 }
 #endif
+struct pinctrl_dev *pctl;
+
 int  amlogic_pmx_probe(struct platform_device *pdev,struct amlogic_pinctrl_soc_data *soc_data)
 {
 	struct amlogic_pmx *apmx;
@@ -743,7 +745,9 @@ int  amlogic_pmx_probe(struct platform_device *pdev,struct amlogic_pinctrl_soc_d
 	}
 	pinctrl_add_gpio_range(apmx->pctl, &amlogic_gpio_ranges);
 	pctdev_name=dev_name(&pdev->dev);
+	pinctrl_provide_dummies();
 	dev_info(&pdev->dev, "Probed amlogic pinctrl driver\n");
+	pctl=apmx->pctl;
 
 	return 0;
 err:
