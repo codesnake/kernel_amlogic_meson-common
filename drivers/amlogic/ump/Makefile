@@ -8,97 +8,61 @@
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 #
 
-# Set default configuration to use, if Makefile didn't provide one.
-# Change this to use a different config.h
+# Skip this Makefile when included from modpost
+ifeq ($(KBUILD_EXTMOD),)
+
+# For each arch check: CROSS_COMPILE , KDIR , CFLAGS += -DARCH
+
+export ARCH ?= arm
+BUILD ?= debug
+
+TARGET_PLATFORM ?= aml-meson
 CONFIG ?= aml-meson-m400-1
+BUILD ?= debug
 
-ifneq ($(KBUILD_SRC),)
-	ifneq ($(wildcard $(KBUILD_SRC)/$(src)),)
-		TOP_KBUILD_SRC := $(KBUILD_SRC)/
-	endif
+# Check that required parameters are supplied.
+ifeq ($(CONFIG),)
+$(error "CONFIG must be specified.")
+endif
+ifeq ($(CPU)$(KDIR),)
+$(error "KDIR or CPU must be specified.")
 endif
 
-# Validate selected config
-ifneq ($(shell [ -d $(TOP_KBUILD_SRC)$(src)/arch-$(CONFIG) ] && [ -f  $(TOP_KBUILD_SRC)$(src)/arch-$(CONFIG)/config.h ] && echo "OK"), OK)
-$(warning Current directory is $(src))
-$(error No configuration found for config $(CONFIG). Check that arch-$(CONFIG)/config.h exists)
+# Get any user defined KDIR-<names> or maybe even a hardcoded KDIR
+-include KDIR_CONFIGURATION
+
+# Define host system directory
+KDIR-$(shell uname -m):=/lib/modules/$(shell uname -r)/build
+
+ifeq ($(ARCH), arm)
+	# when compiling for ARM we're cross compiling
+	export CROSS_COMPILE ?= arm-none-linux-gnueabi-
+endif
+
+# look up KDIR based om CPU selection
+KDIR ?= $(KDIR-$(CPU))
+
+export CONFIG
+
+export CONFIG_UMP := m
+ifeq ($(BUILD),debug)
+export CONFIG_UMP_DEBUG := y
 else
-# Link arch to the selected arch-config directory
-$(shell [ -L $(TOP_KBUILD_SRC)$(src)/arch ] && rm $(TOP_KBUILD_SRC)$(src)/arch)
-$(shell ln -sf arch-$(CONFIG) $(TOP_KBUILD_SRC)$(src)/arch)
-$(shell touch $(TOP_KBUILD_SRC)$(src)/arch/config.h)
+export CONFIG_UMP_DEBUG := n
 endif
 
-UDD_FILE_PREFIX = ../mali/
-
-# Get subversion revision number, fall back to 0000 if no svn info is available
-SVN_REV := $(shell (cd $(TOP_KBUILD_SRC)$(DRIVER_DIR); echo "$(SVN_INFO)" | grep '^Revision: '| sed -e 's/^Revision: //' ) 2>/dev/null )
-ifeq ($(SVN_REV),)
-SVN_REV := $(MALI_RELEASE_NAME)
-else
-SVN_REV := $(MALI_RELEASE_NAME)-r$(SVN_REV)
+ifeq ($(KDIR),)
+$(error No KDIR found for platform $(CPU))
 endif
 
-ccflags-y += -DSVN_REV=$(SVN_REV)
-ccflags-y += -DSVN_REV_STRING=\"$(SVN_REV)\"
+all:
+	$(MAKE) -C $(KDIR) M=$(CURDIR) modules
 
-ccflags-y += -I$(src) -I$(TOP_KBUILD_SRC)$(src)/common -I$(TOP_KBUILD_SRC)$(src)/linux -I$(TOP_KBUILD_SRC)$(src)/../mali/common -I$(src)/../mali/linux -I$(src)/../ump/include/ump
-ccflags-y += -I$(srctree)/drivers/staging/android
-ccflags-y += -DMALI_STATE_TRACKING=0
-ccflags-$(CONFIG_UMP_DEBUG) += -DDEBUG
+kernelrelease:
+	$(MAKE) -C $(KDIR) kernelrelease
 
-# For customer releases the Linux Device Drivers will be provided as ARM proprietary and GPL releases:
-# The ARM proprietary product will only include the license/proprietary directory
-# The GPL product will only include the license/gpl directory
+clean:
+	$(MAKE) -C $(KDIR) M=$(CURDIR) clean
+	$(MAKE) -C $(KDIR) M=$(CURDIR)/../mali clean
 
-ifeq ($(wildcard $(TOP_KBUILD_SRC)$(src)/linux/license/gpl/*),)
-ccflags-y += -I$(TOP_KBUILD_SRC)$(src)/linux/license/proprietary
-else
-ccflags-y += -I$(TOP_KBUILD_SRC)$(src)/linux/license/gpl
 endif
-
-
-$(obj)/__mali_osk_atomics.c : $(src)/$(UDD_FILE_PREFIX)linux/mali_osk_atomics.c
-	@cp -f $< $@
-$(obj)/__mali_osk_locks.c : $(src)/$(UDD_FILE_PREFIX)linux/mali_osk_locks.c
-	@cp -f $< $@
-$(obj)/__mali_osk_memory.c : $(src)/$(UDD_FILE_PREFIX)linux/mali_osk_memory.c
-	@cp -f $< $@
-$(obj)/__mali_osk_math.c : $(src)/$(UDD_FILE_PREFIX)linux/mali_osk_math.c
-	@cp -f $< $@
-$(obj)/__mali_osk_misc.c : $(src)/$(UDD_FILE_PREFIX)linux/mali_osk_misc.c
-	@cp -f $< $@
-
-ump-y = common/ump_kernel_common.o \
-	common/ump_kernel_descriptor_mapping.o \
-	common/ump_kernel_api.o \
-	common/ump_kernel_ref_drv.o \
-	linux/ump_kernel_linux.o \
-	linux/ump_kernel_memory_backend_os.o \
-	linux/ump_kernel_memory_backend_dedicated.o \
-	linux/ump_memory_backend.o \
-	linux/ump_ukk_wrappers.o \
-	linux/ump_ukk_ref_wrappers.o \
-	linux/ump_osk_atomics.o \
-	linux/ump_osk_low_level_mem.o \
-	linux/ump_osk_misc.o \
-	__mali_osk_locks.o \
-	__mali_osk_memory.o \
-	__mali_osk_atomics.o \
-	__mali_osk_math.o \
-	__mali_osk_misc.o 
-
-
-
-
-#	$(UDD_FILE_PREFIX)linux/mali_osk_atomics.o \
-#	$(UDD_FILE_PREFIX)linux/mali_osk_locks.o \
-#	$(UDD_FILE_PREFIX)linux/mali_osk_memory.o \
-#	$(UDD_FILE_PREFIX)linux/mali_osk_math.o \
-#	$(UDD_FILE_PREFIX)linux/mali_osk_misc.o
-
-
-clean-files := __mali_osk*.c 
-
-obj-$(CONFIG_UMP) := ump.o
-

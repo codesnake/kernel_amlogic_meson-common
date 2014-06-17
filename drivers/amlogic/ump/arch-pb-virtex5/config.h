@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2010, 2013 ARM Limited. All rights reserved.
+ * Copyright (C) 2010-2013 ARM Limited. All rights reserved.
  * 
  * This program is free software and is provided to you under the terms of the GNU General Public License version 2
  * as published by the Free Software Foundation, and any use by you of this program is subject to the terms of such GNU licence.
@@ -8,23 +8,11 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
  */
 
-/**
- * @file ump_kernel_license.h
- * Defines for the macro MODULE_LICENSE.
- */
+#ifndef __ARCH_CONFIG_H__
+#define __ARCH_CONFIG_H__
 
-#ifndef __UMP_KERNEL_LICENSE_H__
-#define __UMP_KERNEL_LICENSE_H__
+#define ARCH_UMP_BACKEND_DEFAULT          0
+#define ARCH_UMP_MEMORY_ADDRESS_DEFAULT   0xE1000000
+#define ARCH_UMP_MEMORY_SIZE_DEFAULT 16UL * 1024UL * 1024UL
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
-#define UMP_KERNEL_LINUX_LICENSE     "GPL"
-#define UMP_LICENSE_IS_GPL 1
-
-#ifdef __cplusplus
-}
-#endif
-
-#endif /* __UMP_KERNEL_LICENSE_H__ */
+#endif /* __ARCH_CONFIG_H__ */
