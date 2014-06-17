@@ -6,7 +6,17 @@
 #include <linux/i2c.h>
 #include <linux/i2c-aml.h>
 
-#define AML_I2C_REDUCE_CPURATE
+#define ENABLE_GPIO_TRIGGER
+
+#define I2C_DELAY_MODE 0
+#define I2C_INTERRUPT_MODE 1
+#define I2C_TIMER_POLLING_MODE 2
+
+#define I2C_STATE_IDLE  0
+#define I2C_STATE_WORKING  1
+#define I2C_STATE_SUSPEND 2
+
+
 #define ADAPTER_NAME    "aml_i2c_adap"
 #define NAME_LEN 8
 #define AML_I2C_MAX_TOKENS		8
@@ -197,15 +207,22 @@ struct aml_i2c {
 	#define			MASTER_B		1
 	unsigned char		token_tag[AML_I2C_MAX_TOKENS];
 	unsigned int 		msg_flags;
-#ifdef AML_I2C_REDUCE_CPURATE
+
+    int mode;
+    int state;
     struct completion   aml_i2c_completion;
     struct hrtimer      aml_i2c_hrtimer;
     int irq;
-    int mode;
-#endif //AML_I2C_REDUCE_CPURATE
+    struct i2c_msg *msgs;
+    int msgs_num;
+    unsigned char *xfer_buf;
+    int xfer_num;
+    int remain_len;
+#ifdef ENABLE_GPIO_TRIGGER
+    int trig_gpio;
+#endif
 
 	struct i2c_adapter  	adap;
-	struct i2c_adapter  	adap2;/*the same adapter, different speed*/
 	struct aml_i2c_ops* ops;
 
 	struct aml_i2c_reg_master __iomem* master_regs;
@@ -213,7 +230,6 @@ struct aml_i2c {
 	pinmux_set_t	master_pinmux;
 	
 	unsigned int		master_i2c_speed;
-	unsigned int		master_i2c_speed2;/*the same adapter, different speed*/
 	struct mutex     *lock;
       struct class      cls;
 	unsigned int 		cur_token;

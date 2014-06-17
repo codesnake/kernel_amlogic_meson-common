@@ -27,39 +27,26 @@ static int i2c_silence = 0;
 static struct mutex *ab_share_lock = 0;
 #endif
 
-#ifdef AML_I2C_REDUCE_CPURATE
 #include <linux/ktime.h>
 #include <linux/hrtimer.h>
 #include <linux/interrupt.h>
 #include <linux/semaphore.h>
-#define I2C_DELAY_MODE 0
-#define I2C_INTERRUPT_MODE 1
-#define I2C_TIMER_POLLING_MODE 2
-static enum hrtimer_restart aml_i2c_hrtimer_notify(struct hrtimer *hrtimer)
-{
-    struct aml_i2c *i2c = container_of(hrtimer, struct aml_i2c, aml_i2c_hrtimer);
-    complete(&i2c->aml_i2c_completion);
-    return HRTIMER_NORESTART;
-}
-static irqreturn_t aml_i2c_complete_isr(int irq, void *dev_id)
-{
-//  static int irq_count = 0;
-  struct aml_i2c *i2c;
-	i2c = (struct aml_i2c *)dev_id;
-
-  complete(&i2c->aml_i2c_completion);
-  //printk("i2c(master %d) irq count: %d\n", i2c->master_no, irq_count++);
-	return IRQ_HANDLED;
-}
-#endif //AML_I2C_REDUCE_CPURATE
 #include <mach/pinmux.h>
 #include <linux/pinctrl/consumer.h>
 #include <linux/of_i2c.h>
 #include <linux/of_address.h>
 
+#ifdef CONFIG_OF
+#include <linux/amlogic/aml_gpio_consumer.h>
+#include <linux/of.h>
+#else
+#include <mach/gpio.h>
+#include <mach/gpio_data.h>
+#endif
 int aml_i2c_device_num = 0;
 static struct aml_i2c_platform *aml_i2c_properties_list;
-#define AML_I2C_PRINT(fmt,args...)	printk(KERN_DEBUG "[aml_i2c]" fmt,##args)
+static int i2c_speed[] = {AML_I2C_SPPED_50K, AML_I2C_SPPED_100K, AML_I2C_SPPED_200K, AML_I2C_SPPED_300K, AML_I2C_SPPED_400K};
+
 
 static void aml_i2c_set_clk(struct aml_i2c *i2c, unsigned int speed)
 {
@@ -90,6 +77,9 @@ static void aml_i2c_set_platform_data(struct aml_i2c *i2c,
 	i2c->mode = plat->use_pio & 3;
 	i2c->irq = plat->use_pio >> 2;
 	i2c->master_no = plat->master_no;
+#ifdef ENABLE_GPIO_TRIGGER
+	i2c->trig_gpio = -1;
+#endif
 
 	if(IS_ERR(plat->master_state_name)){
 		printk("error: no master_state_name");
@@ -185,44 +175,17 @@ static int aml_i2c_wait_ack(struct aml_i2c *i2c)
 	int i;
 	struct aml_i2c_reg_ctrl* ctrl;
 
-#ifdef AML_I2C_REDUCE_CPURATE
-	ktime_t kt;
-  int delay_us = (1000000 * 9) / (i2c->master_i2c_speed) + 10;
-#endif //AML_I2C_REDUCE_CPURATE
-
 	for(i=0; i<i2c->wait_count; i++) {
-#ifdef AML_I2C_REDUCE_CPURATE
-    if (i2c->mode == I2C_INTERRUPT_MODE) {
-      wait_for_completion_interruptible(&i2c->aml_i2c_completion);
-    }
-	  else if (i2c->mode == I2C_TIMER_POLLING_MODE) {
-      kt = ktime_set(0, delay_us * 1000);
-      hrtimer_set_expires(&i2c->aml_i2c_hrtimer, kt);
-      hrtimer_start(&i2c->aml_i2c_hrtimer, kt, HRTIMER_MODE_REL);
-      wait_for_completion_interruptible(&i2c->aml_i2c_completion);
-    }
-    else
-#endif //AML_I2C_REDUCE_CPURATE
-    {
-      udelay(i2c->wait_ack_interval);
-    }
-
 		ctrl = (struct aml_i2c_reg_ctrl*)&(i2c->master_regs->i2c_ctrl);
 		if(ctrl->status == IDLE){
       i2c->cur_token = ctrl->cur_token;
       return (ctrl->error ? (-EIO) : 0);		  
 		}
-#ifndef AML_I2C_REDUCE_CPURATE
-    if (!in_atomic())
+    if (!in_atomic() && (i2c->mode == I2C_DELAY_MODE))
 			cond_resched();
-#endif //AML_I2C_REDUCE_CPURATE
+    udelay(i2c->wait_ack_interval);
 	}
 
-	/*
-	  * dangerous -ETIMEOUT, set to gpio here,
-	  * set pinxmux again in next i2c_transfer in xfer_prepare
-	  */
-	aml_i2c_clr_pinmux(i2c);
 	return -ETIMEDOUT;
 }
 
@@ -297,7 +260,6 @@ static void aml_i2c_stop(struct aml_i2c *i2c)
   	udelay(i2c->wait_xfer_interval);
   }
 	aml_i2c_clear_token_list(i2c);	
-	aml_i2c_clr_pinmux(i2c);
 }
 
 static int aml_i2c_read(struct aml_i2c *i2c, unsigned char *buf,
@@ -401,6 +363,179 @@ static struct aml_i2c_ops aml_i2c_m1_ops = {
 	.stop		= aml_i2c_stop,
 };
 
+static ktime_t get_xfer_time(struct aml_i2c *i2c)
+{
+  int delay_us;
+	ktime_t kt;
+  delay_us = (1000000 * 9 * i2c->xfer_num) / (i2c->master_i2c_speed) + 10;
+  kt = ktime_set(0, delay_us * 1000);
+  return kt;
+}
+
+static int aml_i2c_handle_data(struct aml_i2c *i2c, int tag_num)
+{
+  if (!tag_num) {
+    aml_i2c_clear_token_list(i2c);
+  }
+  i2c->xfer_num = 0;
+  while ((i2c->remain_len > 0) && (tag_num < AML_I2C_MAX_TOKENS)) {
+		i2c->token_tag[tag_num] = TOKEN_DATA;
+		if ((i2c->msg_flags & I2C_M_RD) && (i2c->remain_len == 1)) {
+		  i2c->token_tag[tag_num] = TOKEN_DATA_LAST;
+		}
+		tag_num++;
+		i2c->xfer_num++;
+		i2c->remain_len--;
+	}
+	if ((!i2c->msgs_num) && (!i2c->remain_len)) {
+	  /* the last msg and the last data */
+	  if (tag_num < AML_I2C_MAX_TOKENS) {
+	    /* the token list is not full, we can send the STOP together */
+	    i2c->token_tag[tag_num] = TOKEN_STOP;
+	  }
+	  else {
+	    /* the token list is full, we have to sign a stop flag and wait next trasfer*/
+	    i2c->remain_len = -1;
+	  }
+	}
+	else if (i2c->remain_len < 0) {
+	  i2c->remain_len = 0;
+	  i2c->token_tag[tag_num] = TOKEN_STOP;
+  }
+
+  aml_i2c_set_token_list(i2c);
+	if (!(i2c->msg_flags & I2C_M_RD) && i2c->xfer_num) {
+    aml_i2c_fill_data(i2c, i2c->xfer_buf, i2c->xfer_num);
+    i2c->xfer_buf += i2c->xfer_num;
+  }
+  aml_i2c_start_token_xfer(i2c);
+  if (i2c->mode == I2C_TIMER_POLLING_MODE) {
+    hrtimer_set_expires(&i2c->aml_i2c_hrtimer, get_xfer_time(i2c));
+  }
+	return i2c->xfer_num;
+}
+
+static int aml_i2c_handle_msg(struct aml_i2c *i2c, struct i2c_msg *msg)
+{
+  int tag_num = 0;
+  
+	i2c->msg_flags = msg->flags;
+	i2c->remain_len = msg->len;
+	i2c->xfer_buf = msg->buf;
+	i2c->msgs++;
+	i2c->msgs_num--;
+	i2c->ops->do_address(i2c, msg->addr);
+	aml_i2c_clear_token_list(i2c);
+	if (!(i2c->msg_flags & I2C_M_NOSTART)) {
+		i2c->token_tag[tag_num++] = TOKEN_START;
+	}
+	i2c->token_tag[tag_num++] =
+	(i2c->msg_flags & I2C_M_RD) ? TOKEN_SLAVE_ADDR_READ : TOKEN_SLAVE_ADDR_WRITE;
+
+	aml_i2c_handle_data(i2c, tag_num);
+	//printk("i2c msg: flag=%x, len=%d, addr=%x\n", p->flags, p->len, p->addr);
+	return 0;
+}
+
+static int aml_i2c_int_xfer(struct aml_i2c *i2c, struct i2c_msg *msgs, int num)
+{
+  int ret;
+    
+  i2c->state = I2C_STATE_WORKING;
+  i2c->msgs = msgs;
+  i2c->msgs_num = num;
+  aml_i2c_handle_msg(i2c, i2c->msgs);
+
+  if (i2c->mode == I2C_TIMER_POLLING_MODE) {
+    hrtimer_start(&i2c->aml_i2c_hrtimer, get_xfer_time(i2c), HRTIMER_MODE_REL);
+  }
+  wait_for_completion_interruptible_timeout(&i2c->aml_i2c_completion, msecs_to_jiffies(50));
+  if (i2c->state == I2C_STATE_IDLE) {
+    ret = 0;
+  }
+  else if (i2c->state == I2C_STATE_WORKING) {
+    ret = -ETIME;
+  }
+  else {
+    ret = i2c->state;
+  }
+  i2c->state = I2C_STATE_IDLE;
+  return ret;
+}
+
+static irqreturn_t aml_i2c_complete_isr(int irq, void *dev_id)
+{
+  int ret;
+  struct aml_i2c *i2c = (struct aml_i2c *)dev_id;
+  
+	if (i2c->state != I2C_STATE_WORKING) {
+    i2c->state = I2C_STATE_IDLE;
+    return IRQ_HANDLED;
+  }
+
+  ret = aml_i2c_wait_ack(i2c);
+  if (ret < 0) {
+    i2c->state = ret;
+    complete(&i2c->aml_i2c_completion);
+    return IRQ_HANDLED;
+  }
+
+  if ((i2c->msg_flags & I2C_M_RD) && (i2c->xfer_num)) {
+    aml_i2c_get_read_data(i2c, i2c->xfer_buf, i2c->xfer_num);
+    i2c->xfer_buf += i2c->xfer_num;
+  }
+
+  if (i2c->remain_len) {
+    aml_i2c_handle_data(i2c, 0);
+  }
+  else if (i2c->msgs_num > 0) {
+    aml_i2c_handle_msg(i2c, i2c->msgs);
+  }
+  else {
+    i2c->state = I2C_STATE_IDLE;
+    complete(&i2c->aml_i2c_completion);
+  }
+  
+	return IRQ_HANDLED;
+}
+
+static enum hrtimer_restart aml_i2c_hrtimer_notify(struct hrtimer *hrtimer)
+{
+  int ret;
+  struct aml_i2c *i2c = container_of(hrtimer, struct aml_i2c, aml_i2c_hrtimer);
+
+	if (i2c->state != I2C_STATE_WORKING) {
+    i2c->state = I2C_STATE_IDLE;
+    return HRTIMER_NORESTART;
+  }
+
+  ret = aml_i2c_wait_ack(i2c);
+  if (ret < 0) {
+    i2c->state = ret;
+    complete(&i2c->aml_i2c_completion);
+    return HRTIMER_NORESTART;
+  }
+
+  if ((i2c->msg_flags & I2C_M_RD) && (i2c->xfer_num)) {
+    aml_i2c_get_read_data(i2c, i2c->xfer_buf, i2c->xfer_num);
+    i2c->xfer_buf += i2c->xfer_num;
+  }
+
+  if (i2c->remain_len) {
+    aml_i2c_handle_data(i2c, 0);
+    return HRTIMER_RESTART;
+  }
+  else if (i2c->msgs_num > 0) {
+    aml_i2c_handle_msg(i2c, i2c->msgs);
+    return HRTIMER_RESTART;
+  }
+  else {
+    i2c->state = I2C_STATE_IDLE;
+    complete(&i2c->aml_i2c_completion);
+  }
+  return HRTIMER_NORESTART;
+}
+
 /*General i2c master transfer*/
 static int aml_i2c_xfer(struct i2c_adapter *i2c_adap, struct i2c_msg *msgs,
 							int num)
@@ -408,19 +543,35 @@ static int aml_i2c_xfer(struct i2c_adapter *i2c_adap, struct i2c_msg *msgs,
 	struct aml_i2c *i2c = i2c_get_adapdata(i2c_adap);
 	struct i2c_msg * p=NULL;
 	unsigned int i;
-	unsigned int ret=0;
-///	struct aml_i2c_reg_ctrl* ctrl;
-///	struct aml_i2c_reg_master __iomem* regs = i2c->master_regs;
+	unsigned int ret=0, speed=0;
 
-	if(i2c_silence) return -1;
+	if(i2c_silence || !msgs || !num) return -1;
 	BUG_ON(!i2c);
 	/*should not use spin_lock, cond_resched in wait ack*/
 	mutex_lock(i2c->lock);
 
+	if(i2c->state != I2C_STATE_IDLE) {
+	  mutex_unlock(i2c->lock);
+    return -EPERM;
+	}
+
+	speed = (msgs->flags>>1) & 0x7;
+	if (speed > 0 && speed < 6) {
+		ret = i2c->master_i2c_speed;
+		i2c->master_i2c_speed = i2c_speed[speed-1];
+		speed = ret;
+	}
+	else {
+		speed = 0;
+	}
+	
 	i2c->ops->xfer_prepare(i2c, i2c->master_i2c_speed);
 	/*make sure change speed before start*/
     mb();
-
+  if (i2c->mode != I2C_DELAY_MODE) {
+    ret = aml_i2c_int_xfer(i2c, &msgs[0], num);
+  }
+  else {
 	for (i = 0; !ret && i < num; i++) {
 		p = &msgs[i];
 		i2c->msg_flags = p->flags;
@@ -434,60 +585,28 @@ static int aml_i2c_xfer(struct i2c_adapter *i2c_adap, struct i2c_msg *msgs,
 	}
 
 	i2c->ops->stop(i2c);
+  }
 
+	if (speed) {
+		i2c->master_i2c_speed = speed;
+	}
+	aml_i2c_clr_pinmux(i2c);
 	AML_I2C_PRINT_DATA(i2c->adap.name);
 
 	if (ret) {
+#ifdef ENABLE_GPIO_TRIGGER
+    if (i2c->trig_gpio >= 0) {
+      i = amlogic_get_value(i2c->trig_gpio, "aml_i2c_trig");
+      amlogic_gpio_direction_output(i2c->trig_gpio, !i, "aml_i2c_trig");
+    }
+#endif
 		dev_err(&i2c_adap->dev, "[aml_i2c_xfer] error ret = %d (%s) token %d, "
                    "master_no(%d) %dK addr 0x%x\n",
                    ret, ret == -EIO ? "-EIO" : "-ETIMEOUT", i2c->cur_token,
 			i2c->master_no, i2c->master_i2c_speed/1000,
 			i2c->cur_slave_addr);
 	}
-	mutex_unlock(i2c->lock);
-	/* Return the number of messages processed, or the error code*/
-	return ( ret ? (-EAGAIN) : num);	
-}
 
-/*General i2c master transfer , speed set by i2c->master_i2c_speed2*/
-static int aml_i2c_xfer_s2(struct i2c_adapter *i2c_adap, struct i2c_msg *msgs,
-							int num)
-{
-	struct aml_i2c *i2c = i2c_get_adapdata(i2c_adap);
-	struct i2c_msg * p=NULL;
-	unsigned int i;
-	unsigned int ret=0;
-
-	if(i2c_silence) return -1;
-	BUG_ON(!i2c);
-	mutex_lock(i2c->lock);
-	BUG_ON(!i2c->master_i2c_speed2);
-	i2c->ops->xfer_prepare(i2c, i2c->master_i2c_speed2);
-    mb();
-
-	for (i = 0; !ret && i < num; i++) {
-		p = &msgs[i];
-		i2c->msg_flags = p->flags;
-		ret = i2c->ops->do_address(i2c, p->addr);
-		if (ret || !p->len)
-			continue;
-		if (p->flags & I2C_M_RD)
-			ret = i2c->ops->read(i2c, p->buf, p->len);
-		else
-			ret = i2c->ops->write(i2c, p->buf, p->len);
-	}
-
-	i2c->ops->stop(i2c);
-
-	AML_I2C_PRINT_DATA(i2c->adap2.name);
-
-	if (ret) {
-		dev_err(&i2c_adap->dev, "[aml_i2c_xfer_s2] error ret = %d (%s) token %d\t"
-                   "master_no(%d)  %dK addr 0x%x\n",
-                   ret, ret == -EIO ? "-EIO" : "-ETIMEOUT", i2c->cur_token,
-			i2c->master_no, i2c->master_i2c_speed2/1000,
-			i2c->cur_slave_addr);
-	}
 	mutex_unlock(i2c->lock);
 	/* Return the number of messages processed, or the error code*/
 	return ( ret ? (-EAGAIN) : num);	
@@ -500,11 +619,6 @@ static u32 aml_i2c_func(struct i2c_adapter *i2c_adap)
 
 static const struct i2c_algorithm aml_i2c_algorithm = {
     .master_xfer = aml_i2c_xfer,
-    .functionality = aml_i2c_func,
-};
-
-static const struct i2c_algorithm aml_i2c_algorithm_s2 = {
-    .master_xfer = aml_i2c_xfer_s2,
     .functionality = aml_i2c_func,
 };
 
@@ -693,10 +807,11 @@ static ssize_t test_slave_device(struct class *class,
  
     struct i2c_adapter *i2c_adap;
     struct aml_i2c *i2c;
+    struct i2c_msg msgs[2];
     unsigned int bus_num=0, slave_addr=0, speed=0, wnum=0, rnum=0;
-    u8 wbuf[4]={0}, rbuf[4]={0};
-    int wret=1, rret=1, i;
-    bool restart = 0;
+    u8 wbuf[4]={0}, rbuf[128]={0};
+    int ret, i;
+    bool nostart = 0;
     
     if (buf[0] == 'h') {
       printk("i2c slave test help\n");
@@ -713,11 +828,11 @@ static ssize_t test_slave_device(struct class *class,
     
     i = sscanf(buf, "%d%x%d%d%d%x%x%x%x", &bus_num, &slave_addr, &speed, &wnum, &rnum, 
      (unsigned int *)&wbuf[0], (unsigned int *)&wbuf[1], (unsigned int *)&wbuf[2], (unsigned int *)&wbuf[3]);
-    restart = !!(rnum & 0x80);
+    nostart = (rnum & 0x80) ? I2C_M_NOSTART : 0;
     rnum &= 0x7f;
     printk("bus_num=%d, slave_addr=%x, speed=%d, wnum=%d, rnum=%d\n",
       bus_num, slave_addr, speed, wnum, rnum);
-    if ((i<(wnum+5)) || (!slave_addr) || (!speed) ||(wnum>4) || (rnum>4) || (!(wnum | rnum))) {
+    if ((i<(wnum+5)) || (!slave_addr) || (!speed) ||(wnum>4) || (!(wnum | rnum))) {
       printk("invalid data\n");
       return -EINVAL;
     }
@@ -733,103 +848,118 @@ static ssize_t test_slave_device(struct class *class,
       return -EINVAL;
     }
       
-  	aml_i2c_pinmux_master(i2c);
-  	aml_i2c_set_clk(i2c, speed);
-   	i2c->cur_slave_addr = slave_addr&0x7f;
-   	i2c->master_regs->i2c_slave_addr = i2c->cur_slave_addr<<1;
-    i2c->msg_flags = 0;
-    wret = aml_i2c_write(i2c, &wbuf[0], wnum);
-    /* if restart=0, a stop and a start condition will be do between the writing and reading;
-     * else only the restart condition will be do.
-    */
-    if ((!restart) && wnum) {
-      aml_i2c_stop(i2c);
-      udelay(10);
-  	  aml_i2c_pinmux_master(i2c);
-  	}
-    i2c->msg_flags = 0; // restart
-    rret = aml_i2c_read(i2c, &rbuf[0], rnum);
-    aml_i2c_stop(i2c);
+    msgs[0].flags = !I2C_M_RD;
+    msgs[0].addr  = slave_addr;
+    msgs[0].len   = wnum;
+    msgs[0].buf   = &wbuf[0];
 
+    msgs[1].flags = I2C_M_RD | nostart;
+    msgs[1].addr  = slave_addr;
+    msgs[1].len   = rnum;
+    msgs[1].buf   = &rbuf[0];
+    
+  	mutex_lock(i2c->lock);
+    i2c->master_i2c_speed = speed;
+  	mutex_unlock(i2c->lock);
+    ret = i2c_transfer(i2c_adap, msgs, 2);
     if (wnum) {
       printk("write %d data to slave (", wnum);
       for (i=0; i<wnum; i++)
         printk("0x%x, ", wbuf[i]);
-      printk(") %s!\n", (wret==0) ? "success" : "failed");
+      printk(") %s!\n", (ret==2) ? "success" : "failed");
     }
     if (rnum) {
       printk("read %d data from slave (", rnum);
       for (i=0; i<rnum; i++)
         printk("0x%x, ", rbuf[i]);
-      printk(") %s!\n", (rret==0) ? "success" : "failed");        
+      printk(") %s!\n", (ret==2) ? "success" : "failed");
     }
      
     return count;
 }
 
-#ifdef AML_I2C_REDUCE_CPURATE
 static ssize_t show_i2c_mode(struct class *class, struct class_attribute *attr, char *buf)
 {
-    struct i2c_adapter *i2c_adap;
-    struct aml_i2c *i2c;
-    int i;
-    int device_id;
-    struct aml_i2c_platform * aml_i2c_property;
-    aml_i2c_property = aml_i2c_properties_list;
-
-    for (i=0; i<aml_i2c_device_num; i++) {
-		AML_I2C_PRINT("%s %s %d: i= %d\n",__FILE__,__func__,__LINE__,i);
-			device_id = aml_i2c_property->master_no;
-			aml_i2c_property =container_of((aml_i2c_property->list.next), struct aml_i2c_platform, list.next);
-      i2c_adap = i2c_get_adapter(device_id);
-	    i2c = i2c_get_adapdata(i2c_adap);
-
-      printk("i2c(%d) work in mode %d\n", i, i2c->mode);
-	  }
+    struct aml_i2c *i2c = container_of(class, struct aml_i2c, cls);
+    printk("i2c master(%d) work in mode %d\n", i2c->master_no, i2c->mode);
     return 1;
 }
 
 static ssize_t store_i2c_mode(struct class *class, struct class_attribute *attr, const char *buf, size_t count)
 {
-    struct i2c_adapter *i2c_adap;
-    struct aml_i2c *i2c;
-    struct aml_i2c_platform *plat;
-    unsigned int bus_num, mode;
+    struct aml_i2c *i2c = container_of(class, struct aml_i2c, cls);
+    unsigned int mode;
     int ret;
 
-    ret = sscanf(buf, "%d%d", &bus_num, &mode);
-    if ((ret != 2) || (bus_num > 2) || (mode > 2)) {
-       printk("Invalid data\n");
-       return -EINVAL;
+    ret = sscanf(buf, "%d", &mode);
+    if ((ret != 1) || (mode > 2)) {
+      printk("Invalid data\n");
+      return -EINVAL;
     }
-    i2c_adap = i2c_get_adapter(bus_num);
-	  i2c= i2c_get_adapdata(i2c_adap);
-    if (mode != i2c->mode) {
-      if (i2c->mode == I2C_INTERRUPT_MODE)
-  	    free_irq(i2c->irq, i2c);
-      else if (i2c->mode == I2C_TIMER_POLLING_MODE)
-        hrtimer_cancel(&i2c->aml_i2c_hrtimer);
 
-      if (mode == I2C_TIMER_POLLING_MODE) {
-        hrtimer_init(&i2c->aml_i2c_hrtimer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
-        i2c->aml_i2c_hrtimer.function = aml_i2c_hrtimer_notify;
-      }
-      else if (mode == I2C_INTERRUPT_MODE) {
-				struct list_head *p;
-				list_for_each(p, &aml_i2c_properties_list->list){
-					plat = list_entry(p,struct aml_i2c_platform, list);
-					if(plat->master_no == bus_num)
-						break;
-				}
-//        plat = (struct aml_i2c_platform *)aml_i2c_properties_config[bus_num].drv_data;
-			  i2c->irq = plat->use_pio >> 2;
-        ret = request_irq(i2c->irq, aml_i2c_complete_isr, IRQF_DISABLED, "aml_i2c", i2c);
-        printk("i2c master(%d) request irq(%d) %s\n", bus_num, i2c->irq, 
-            (ret < 0) ? "failed":"succeeded");
-      }
-      printk("change i2c(%d) mode: %d-->%d\n", bus_num, i2c->mode, mode);
-      i2c->mode = mode;
+	  mutex_lock(i2c->lock);
+    if (mode == i2c->mode) {
+      printk("i2c master(%d) worked in mode %d already!\n", i2c->master_no, mode);
+      ret = -EINVAL;
+      goto exit_store_i2c_mode;
     }
+    else if (mode == I2C_INTERRUPT_MODE) {
+      if (!i2c->irq) {
+        printk("i2c master(%d) cannot work in interrupt mode!\n", i2c->master_no);
+        ret = -EINVAL;
+        goto exit_store_i2c_mode;
+      }
+      ret = request_irq(i2c->irq, aml_i2c_complete_isr, IRQF_DISABLED, "aml_i2c", i2c);
+      if (ret < 0) {
+        printk("i2c master(%d) request irq %d failed\n", i2c->master_no, i2c->irq);
+        goto exit_store_i2c_mode;
+      }
+    }
+    else if (mode == I2C_TIMER_POLLING_MODE) {
+      hrtimer_init(&i2c->aml_i2c_hrtimer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
+      i2c->aml_i2c_hrtimer.function = aml_i2c_hrtimer_notify;
+    }
+
+    if (i2c->mode == I2C_INTERRUPT_MODE)
+	    free_irq(i2c->irq, i2c);
+    else if (i2c->mode == I2C_TIMER_POLLING_MODE)
+      hrtimer_cancel(&i2c->aml_i2c_hrtimer);
+
+    printk("change i2c master(%d) mode: %d-->%d\n", i2c->master_no, i2c->mode, mode);
+    i2c->mode = mode;
+    ret = count;
+exit_store_i2c_mode:
+	  mutex_unlock(i2c->lock);
+    return ret;
+      }
+
+#ifdef ENABLE_GPIO_TRIGGER
+static ssize_t store_trig_gpio(struct class *class, struct class_attribute *attr, const char *buf, size_t count)
+{
+    struct aml_i2c *i2c = container_of(class, struct aml_i2c, cls);
+    unsigned char gpio_name[20];
+    int gpio;
+    
+    if (count >= ARRAY_SIZE(gpio_name)) return -1;
+    sscanf(buf, "%s", gpio_name);
+    mutex_lock(i2c->lock);
+    if (i2c->trig_gpio >= 0) {
+      printk("free old trig_gpio(%d)!\n", i2c->trig_gpio);
+      amlogic_gpio_free(i2c->trig_gpio, "aml_i2c_trig");
+      i2c->trig_gpio = -1;
+    }
+    if ((gpio = amlogic_gpio_name_map_num(gpio_name)) < 0) {
+      printk("error: %s cannot map to gpio!\n", gpio_name);
+    }
+    else if (amlogic_gpio_request(gpio, "aml_i2c_trig")) {
+      printk("error: %s(%d) has been used!\n", gpio_name, gpio);
+    }
+    else {
+      printk("success: select %s(%d) as trig_gpio!\n", gpio_name, gpio);
+      i2c->trig_gpio = gpio;
+      amlogic_gpio_direction_output(gpio, 1, "aml_i2c_trig");
+    }
+	  mutex_unlock(i2c->lock);
     return count;
 }
 #endif //AML_I2C_REDUCE_CPURATE
@@ -841,11 +971,13 @@ static struct class_attribute i2c_class_attrs[] = {
     __ATTR(cbus_reg,  S_IWUSR, NULL,    store_register),
     __ATTR(customize,  S_IWUSR, NULL,    rw_special_reg),
     __ATTR(test_slave,  S_IWUSR, NULL,    test_slave_device),
-#ifdef AML_I2C_REDUCE_CPURATE
     __ATTR(mode,  S_IRUGO | S_IWUSR, show_i2c_mode,   store_i2c_mode),
-#endif //AML_I2C_REDUCE_CPURATE
+#ifdef ENABLE_GPIO_TRIGGER
+    __ATTR(trig_gpio,  S_IWUSR, NULL,   store_trig_gpio),
+#endif
     __ATTR_NULL
 };
+
 #ifdef CONFIG_OF
 static const struct of_device_id meson6_i2c_dt_match[];
 #endif
@@ -990,35 +1122,9 @@ static int aml_i2c_probe(struct platform_device *pdev)
   }
   dev_info(&pdev->dev, "add adapter %s(%p)\n", i2c->adap.name, &i2c->adap);
   of_i2c_register_devices(&i2c->adap);
-
-  /*need 2 different speed in 1 adapter, add a virtual one*/
-  if(plat->master_i2c_speed2){
-      i2c->master_i2c_speed2 = plat->master_i2c_speed2;
-      /*setup adapter 2*/
-      i2c->adap2.nr = i2c->adap.nr+1;
-      i2c->adap2.class = I2C_CLASS_HWMON;
-      i2c->adap2.algo = &aml_i2c_algorithm_s2;
-      i2c->adap2.retries = 2;
-      i2c->adap2.timeout = 5;
-      //memset(i2c->adap.name, 0 , 48);
-      sprintf(i2c->adap2.name, ADAPTER_NAME"%d", i2c->adap2.nr);
-      i2c_set_adapdata(&i2c->adap2, i2c);
-      ret = i2c_add_numbered_adapter(&i2c->adap2);
-      if (ret < 0)
-      {
-          dev_err(&pdev->dev, "Adapter %s registration failed\n",
-          i2c->adap2.name);
-          i2c_del_adapter(&i2c->adap);
-          kzfree(i2c);
-          return -1;
-      }
-      dev_info(&pdev->dev, "add adapter %s\n", i2c->adap2.name);
-  }
   dev_info(&pdev->dev, "aml i2c bus driver.\n");
 
-
-
-#ifdef AML_I2C_REDUCE_CPURATE
+  	i2c->state = I2C_STATE_IDLE;
     init_completion(&i2c->aml_i2c_completion);
     if (i2c->mode == I2C_TIMER_POLLING_MODE) {
       hrtimer_init(&i2c->aml_i2c_hrtimer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
@@ -1028,12 +1134,13 @@ static int aml_i2c_probe(struct platform_device *pdev)
     else if (i2c->mode == I2C_INTERRUPT_MODE) {
       ret = request_irq(i2c->irq, aml_i2c_complete_isr, IRQF_DISABLED, "aml_i2c", i2c);
       if (ret < 0) {
-        dev_err(&pdev->dev, "\n**************** request %d irq failed*************\n", i2c->irq);
+        dev_err(&pdev->dev, "master %d request irq(%d) failed!\n", device_id, i2c->irq);
+        i2c->mode = I2C_DELAY_MODE;
       }
-      else 
-       printk("master %d work in interrupt mode(irq=%d)\n", device_id, i2c->irq);
+      else {
+        printk("master %d work in interrupt mode(irq=%d)\n", device_id, i2c->irq);
+      }
     }
-#endif //AML_I2C_REDUCE_CPURATE
     /*setup class*/
     i2c->cls.name = kzalloc(NAME_LEN, GFP_KERNEL);
     if(i2c->adap.nr)
@@ -1053,16 +1160,12 @@ static int aml_i2c_probe(struct platform_device *pdev)
 static int aml_i2c_remove(struct platform_device *pdev)
 {
     struct aml_i2c *i2c = platform_get_drvdata(pdev);
-#ifdef AML_I2C_REDUCE_CPURATE
     if (i2c->mode == I2C_INTERRUPT_MODE)
 	    free_irq(i2c->irq, i2c);
     if (i2c->mode == I2C_TIMER_POLLING_MODE)
     hrtimer_cancel(&i2c->aml_i2c_hrtimer);
-#endif //AML_I2C_REDUCE_CPURATE
     mutex_destroy(i2c->lock);
     i2c_del_adapter(&i2c->adap);
-    if(i2c->adap2.nr)
-        i2c_del_adapter(&i2c->adap2);
     kzfree(i2c);
     i2c= NULL;
     return 0;
@@ -1080,6 +1183,55 @@ static const struct of_device_id meson6_i2c_dt_match[]={
 #define meson6_i2c_dt_match NULL
 #endif
 
+//static	int aml_i2c_suspend(struct platform_device *pdev, pm_message_t state)
+static	int aml_i2c_suspend(struct device *dev)
+{
+    struct platform_device *pdev = to_platform_device(dev); 
+	struct i2c_adapter *adapter;
+	struct aml_i2c *i2c;
+
+    printk("%s\n", __func__);
+	adapter = i2c_get_adapter(pdev->id==-1? 0: pdev->id);
+	BUG_ON(!adapter);
+	i2c = i2c_get_adapdata(adapter);
+	BUG_ON(!i2c);
+	if (i2c->mode == I2C_INTERRUPT_MODE) {
+  	mutex_lock(i2c->lock);
+  	i2c->state = I2C_STATE_SUSPEND;
+		disable_irq(i2c->irq);
+	  mutex_unlock(i2c->lock);
+	  printk("%s: disable #%d irq\n", __func__, i2c->irq);
+	}
+
+	return 0;
+}
+
+//static	int aml_i2c_resume(struct platform_device *pdev)
+static	int aml_i2c_resume(struct device *dev)
+{
+    struct platform_device *pdev = to_platform_device(dev); 
+	struct i2c_adapter *adapter;
+	struct aml_i2c *i2c;
+
+    printk("%s\n", __func__);
+	adapter = i2c_get_adapter(pdev->id==-1? 0: pdev->id);
+	BUG_ON(!adapter);
+	i2c = i2c_get_adapdata(adapter);
+	BUG_ON(!i2c);
+	if (i2c->mode == I2C_INTERRUPT_MODE) {
+    mutex_lock(i2c->lock);
+    i2c->state = I2C_STATE_IDLE;
+		enable_irq(i2c->irq);
+	  mutex_unlock(i2c->lock);
+	  printk("%s: enable #%d irq\n", __func__, i2c->irq);
+	}
+	return 0;
+}
+
+static struct dev_pm_ops aml_i2c_pm_ops = {
+    .suspend_noirq = aml_i2c_suspend,
+    .resume_noirq  = aml_i2c_resume,
+};
 
 static struct platform_driver aml_i2c_driver = {
     .probe = aml_i2c_probe,
@@ -1088,7 +1240,10 @@ static struct platform_driver aml_i2c_driver = {
         .name = "aml-i2c",
         .owner = THIS_MODULE,
         .of_match_table=meson6_i2c_dt_match,
+        .pm = &aml_i2c_pm_ops, 
     },
+//	.suspend = aml_i2c_suspend,
+//	.resume = aml_i2c_resume,
 };
 
 static int __init aml_i2c_init(void)
