@@ -30,7 +30,11 @@
   * communicate Head lock mutex location: the last 4B of HEAD; inited by secureOS
   * Data: 128KB
 */
+#if defined(CONFIG_ARCH_MESON6)
 #define SHARE_MEM_PHY_START   0x3c100000-0x20400
+#elif defined(CONFIG_ARCH_MESON8)
+#define SHARE_MEM_PHY_START   0x061dfc00
+#endif
 #define SHARE_MEM_HEAD_OFFSET 0x0
 #define SHARE_MEM_DATA_OFFSET 0x400
 #define SHARE_MEM_PHY_SIZE 0x20400
@@ -63,7 +67,7 @@ extern void init_mutex(unsigned int* lock);
 extern unsigned int unlock_mutex(unsigned int* lock);
 extern void write_to_flash(unsigned char* psrc, unsigned size);
 
-static int secure_monitor_probe(struct platform_device *pdev)
+static int secure_monitor_start(void)
 {	
 	int ret=0;
 	printk("%s:%d\n", __FUNCTION__, __LINE__);
@@ -102,28 +106,6 @@ flash_monitor_probe_exit:
 	return ret;
 }
 
-static int secure_monitor_remove(struct platform_device *pdev)
-{
-	int ret=0;
-	printk("**************flash_secure_remove start!\n");
-	if(secure_task){
-		kthread_stop(secure_task);
-		secure_task = NULL;
-	}
-		
-	if(secure_monitor_buf.psbuf)
-		iounmap(secure_monitor_buf.psbuf);
-	secure_monitor_buf.psbuf = NULL;
-	
-	if(secure_monitor_buf.pfbuf)
-		kfree(secure_monitor_buf.pfbuf);
-	secure_monitor_buf.pfbuf = NULL;	
-	
-	printk("**************flash_secure_remove end!\n");
-	return ret;	
-}
-
-
 void write_to_flash(unsigned char* psrc, unsigned size)
 {	
 #ifdef CONFIG_SECURE_NAND
@@ -154,7 +136,7 @@ extern 	int secure_storage_spi_write(u8 *buf,u32 len);
 	return;
 #endif
 
-#elif CONFIG_EMMC_SECURE_STORAGE
+#ifdef CONFIG_EMMC_SECURE_STORAGE
 extern 	int mmc_secure_storage_ops(unsigned char * buf, unsigned int len, int wr_flag);
 	unsigned char * secure_ptr = psrc;
 	int error = 0;
@@ -209,20 +191,11 @@ static int secure_writer_monitor(void *arg)
 	return 0;
 }
 
-static struct platform_driver secure_monitor_driver = {
-	.probe = secure_monitor_probe,
-	.remove = secure_monitor_remove,
-	.driver = {
-		.name = SECURE_MONITOR_DEVICE_NAME,
-		.owner = THIS_MODULE,
-	},
-};
-
 static int __init secure_monitor_init(void)
 {
 	int ret=-1;
 	printk("%s:%d\n", __FUNCTION__, __LINE__);
-	ret = platform_driver_register(&secure_monitor_driver);
+	ret = secure_monitor_start();
 	if(ret != 0){
 		printk(KERN_ERR "failed to register flash monitor driver, error %d\n", ret);
 		return -ENODEV;
@@ -232,7 +205,23 @@ static int __init secure_monitor_init(void)
 
 static void __exit secure_monitor_exit(void)
 {
-	platform_driver_unregister(&secure_monitor_driver);
+	int ret=0;
+	printk("**************flash_secure_remove start!\n");
+	if(secure_task){
+		kthread_stop(secure_task);
+		secure_task = NULL;
+	}
+
+	if(secure_monitor_buf.psbuf)
+		iounmap(secure_monitor_buf.psbuf);
+	secure_monitor_buf.psbuf = NULL;
+
+	if(secure_monitor_buf.pfbuf)
+		kfree(secure_monitor_buf.pfbuf);
+	secure_monitor_buf.pfbuf = NULL;
+
+	printk("**************flash_secure_remove end!\n");
+	return ret;
 }
 
 module_init(secure_monitor_init);
