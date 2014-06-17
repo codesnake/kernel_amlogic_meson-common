@@ -48,6 +48,10 @@ extern void Set3DProcessPara(unsigned mode);
 #ifdef CONFIG_POST_PROCESS_MANAGER_PPSCALER
 static bool scaler_pos_reset = false;
 #endif
+
+#include "../amports/amports_config.h"
+
+
 platform_type_t get_platform_type()
 {
 	return	platform_type;
@@ -1139,7 +1143,7 @@ int  init_ppmgr_device(void)
     if(ppmgr_buffer_init(0) < 0) goto unregister_dev;
     //if(start_vpp_task()<0) return -1;
     ppmgr_device.use_prot = 1;
-#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8
+#if HAS_VPU_PROT
     ppmgr_device.disable_prot = 0;
 #else
     ppmgr_device.disable_prot = 1;
