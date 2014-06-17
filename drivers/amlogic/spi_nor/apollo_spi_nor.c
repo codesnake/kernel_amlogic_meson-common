@@ -48,6 +48,8 @@ struct amlogic_spi {
 	struct device *dev;
 	struct pinctrl *p;
 	char *spi_state_name;
+	struct pinctrl_state *spi_state;
+	struct pinctrl_state *spi_idlestate;
 #endif
 };
 
@@ -140,10 +142,10 @@ static void spi_hw_init(struct amlogic_spi	*amlogic_spi)
 	//SET_PERI_REG_MASK(SPI_FLASH_USER,(1<<2));
 	aml_set_reg32_mask(P_SPI_FLASH_USER, (1<<2));
 }
-
+ int xx_spi=0;
 static void spi_hw_enable(struct amlogic_spi	*amlogic_spi)
 {
-int retry = 0;
+int retry = 0,ret;
 	DECLARE_WAITQUEUE(spi_wait, current);
 #if (defined(CONFIG_ARCH_MESON3) || defined(CONFIG_ARCH_MESON6) ||defined(CONFIG_ARCH_MESON8))
   /*clear_mio_mux(2,7<<19);
@@ -159,9 +161,8 @@ int retry = 0;
 	#ifdef CONFIG_OF
 	for (retry=0; retry<10; retry++) {
 		mutex_lock(&spi_nand_mutex);
-		amlogic_spi->p = devm_pinctrl_get_select(amlogic_spi->dev,amlogic_spi->spi_state_name);
-		if(IS_ERR(amlogic_spi->p)){
-			amlogic_spi->p = NULL;
+		ret =  pinctrl_select_state(amlogic_spi->p, amlogic_spi->spi_state);
+		if(ret<0){
 			mutex_unlock(&spi_nand_mutex);
 			printk("set spi pinmux error\n");
 		}
@@ -189,10 +190,13 @@ static void spi_hw_disable(struct amlogic_spi	*amlogic_spi)
 {
 #if (defined(CONFIG_ARCH_MESON6) || defined(CONFIG_ARCH_MESON8))
 #ifdef CONFIG_OF
+	int ret=0;
 	if(amlogic_spi->p)
-	{
-		devm_pinctrl_put(amlogic_spi->p);
-		amlogic_spi->p = NULL;
+	{	
+		ret = pinctrl_select_state(amlogic_spi->p, amlogic_spi->spi_idlestate);
+		
+		if(ret<0)
+			printk("select idle state error\n");
 		mutex_unlock(&spi_nand_mutex);
 	}
 #else
@@ -636,7 +640,19 @@ static int amlogic_spi_nor_probe(struct platform_device *pdev)
 	amlogic_spi->spi_dev.dev.platform_data = pdev->dev.platform_data;
 	spin_lock_init(&amlogic_spi->lock);
 	INIT_LIST_HEAD(&amlogic_spi->msg_queue);
-
+	amlogic_spi->p = devm_pinctrl_get(amlogic_spi->dev);
+	if (IS_ERR(amlogic_spi->p))
+		return amlogic_spi->p;
+	amlogic_spi->spi_state=pinctrl_lookup_state(amlogic_spi->p,amlogic_spi->spi_state_name);
+	if (IS_ERR(amlogic_spi->spi_state)) {
+		pinctrl_put(amlogic_spi->p);
+		return ERR_PTR(PTR_ERR(amlogic_spi->spi_state));
+	}
+	amlogic_spi->spi_idlestate=pinctrl_lookup_state(amlogic_spi->p,"dummy");
+	if (IS_ERR(amlogic_spi->spi_idlestate)) {
+		pinctrl_put(amlogic_spi->p);
+		return ERR_PTR(PTR_ERR(amlogic_spi->spi_idlestate));
+	}
 	status = spi_register_master(master);
 	if (status < 0)
 		goto err1;
