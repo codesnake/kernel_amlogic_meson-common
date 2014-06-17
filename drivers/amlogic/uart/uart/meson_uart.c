@@ -144,11 +144,13 @@ static void am_uart_stop_tx(struct uart_port *port)
 	am_uart_t *uart = mup->uart;
 
 
-	mutex_lock(&mup->info_mutex);
+	//mutex_lock(&mup->info_mutex);
+	preempt_disable();
 	mode = readl(&uart->mode);
 	mode &= ~UART_TXENB;
 	writel(mode, &uart->mode);
-	mutex_unlock(&mup->info_mutex);
+	//mutex_unlock(&mup->info_mutex);
+	preempt_enable();
 }
 
 static void am_uart_start_tx(struct uart_port *port)
@@ -180,11 +182,13 @@ static void am_uart_stop_rx(struct uart_port *port)
 	struct meson_uart_port * mup = &am_ports[port->line];
 	am_uart_t *uart = mup->uart;
 
-	mutex_lock(&mup->info_mutex);
+	//mutex_lock(&mup->info_mutex);
+	preempt_disable();
 	mode = readl(&uart->mode);
 	mode &= ~UART_RXENB;
 	writel(mode, &uart->mode);
-	mutex_unlock(&mup->info_mutex);
+	preempt_enable();
+	//mutex_unlock(&mup->info_mutex);
 }
 
 static void am_uart_enable_ms(struct uart_port *port)
