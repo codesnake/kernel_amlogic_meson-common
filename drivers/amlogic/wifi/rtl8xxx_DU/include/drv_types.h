@@ -65,12 +65,12 @@ typedef struct _ADAPTER _adapter, ADAPTER,*PADAPTER;
 
 #include <rtw_cmd.h>
 #include <wlan_bssdef.h>
+#include <rtw_security.h>
 #include <rtw_xmit.h>
 #include <rtw_recv.h>
 #include <hal_intf.h>
 #include <hal_com.h>
 #include <rtw_qos.h>
-#include <rtw_security.h>
 #include <rtw_pwrctrl.h>
 #include <rtw_io.h>
 #include <rtw_eeprom.h>
@@ -248,6 +248,8 @@ struct dvobj_priv
 {
 	_adapter *if1; //PRIMARY_ADAPTER
 	_adapter *if2; //SECONDARY_ADAPTER
+
+	s32 processing_dev_remove;
 
 	//for local/global synchronization
 	_mutex hw_init_mutex;
@@ -463,6 +465,7 @@ struct _ADAPTER{
 	struct	recv_priv	recvpriv;
 	struct	sta_priv	stapriv;
 	struct	security_priv	securitypriv;
+	_lock   security_key_mutex; // add for CONFIG_IEEE80211W, none 11w also can use
 	struct	registry_priv	registrypriv;	
 	struct	pwrctrl_priv	pwrctrlpriv;
 	struct 	eeprom_priv eeprompriv;

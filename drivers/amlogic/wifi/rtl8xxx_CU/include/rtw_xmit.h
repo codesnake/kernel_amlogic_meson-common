@@ -34,7 +34,7 @@
 
 #elif defined (CONFIG_USB_HCI)
 #ifdef CONFIG_USB_TX_AGGREGATION
-	#ifdef CONFIG_PLATFORM_ARM_SUNxI
+	#if defined(CONFIG_PLATFORM_ARM_SUNxI) || defined(CONFIG_PLATFORM_ARM_SUN6I)
 		#define MAX_XMITBUF_SZ (12288)  //12k 1536*8
 	#elif defined (CONFIG_PLATFORM_MSTAR)
 		#define MAX_XMITBUF_SZ	7680	// 7.5k
@@ -360,6 +360,9 @@ struct pkt_attrib
 #ifdef CONFIG_TCP_CSUM_OFFLOAD_TX
 	u8	hw_tcp_csum;
 #endif
+	union Keytype	dot11tkiptxmickey;
+	//union Keytype	dot11tkiprxmickey;
+	union Keytype	dot118021x_UncstKey;
 };
 #endif
 
@@ -704,6 +707,9 @@ extern thread_return rtw_xmit_thread(thread_context context);
 extern u32 rtw_calculate_wlan_pkt_size_by_attribue(struct pkt_attrib *pattrib);
 #define rtw_wlan_pkt_size(f) rtw_calculate_wlan_pkt_size_by_attribue(&f->attrib)
 extern s32 rtw_xmitframe_coalesce(_adapter *padapter, _pkt *pkt, struct xmit_frame *pxmitframe);
+#ifdef CONFIG_IEEE80211W
+extern s32 rtw_mgmt_xmitframe_coalesce(_adapter *padapter, _pkt *pkt, struct xmit_frame *pxmitframe);
+#endif //CONFIG_IEEE80211W
 #ifdef CONFIG_TDLS
 s32 rtw_xmit_tdls_coalesce(_adapter *padapter, struct xmit_frame *pxmitframe, u8 action);
 #endif //CONFIG_TDLS

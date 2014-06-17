@@ -330,6 +330,15 @@ void rtw_proc_init_one(struct net_device *dev)
 			return;
 		}
 		entry->write_proc = proc_set_log_level;
+		
+#ifdef DBG_MEM_ALLOC
+		entry = create_proc_read_entry("mstat", S_IFREG | S_IRUGO,
+				   rtw_proc, proc_get_mstat, dev);
+		if (!entry) {
+			DBG_871X("Unable to create_proc_read_entry!\n");
+			return;
+		}
+#endif /* DBG_MEM_ALLOC */
 	}
 
 
@@ -549,6 +558,7 @@ void rtw_proc_init_one(struct net_device *dev)
 		DBG_871X("Unable to create_proc_read_entry!\n");
 		return;
 	}
+	entry->write_proc = proc_set_best_channel;
 #endif
 
 	entry = create_proc_read_entry("rx_signal", S_IFREG | S_IRUGO,
@@ -627,6 +637,16 @@ void rtw_proc_init_one(struct net_device *dev)
 	entry->write_proc = proc_set_sreset;
 #endif /* DBG_CONFIG_ERROR_DETECT */
 
+#ifdef CONFIG_DM_ADAPTIVITY
+	entry = create_proc_read_entry("dm_adaptivity", S_IFREG | S_IRUGO,
+				   dir_dev, proc_get_dm_adaptivity, dev);
+	if (!entry) {
+		DBG_871X("Unable to create_proc_read_entry!\n");
+		return;
+	}
+	entry->write_proc = proc_set_dm_adaptivity;
+#endif /* CONFIG_DM_ADAPTIVITY */
+
 }
 
 void rtw_proc_remove_one(struct net_device *dev)
@@ -698,6 +718,10 @@ void rtw_proc_remove_one(struct net_device *dev)
 		remove_proc_entry("sreset", dir_dev);
 #endif /* DBG_CONFIG_ERROR_DETECT */
 
+#ifdef CONFIG_DM_ADAPTIVITY
+		remove_proc_entry("dm_adaptivity", dir_dev);
+#endif
+
 		remove_proc_entry(dev->name, rtw_proc);
 		dir_dev = NULL;
 
@@ -715,6 +739,9 @@ void rtw_proc_remove_one(struct net_device *dev)
 			remove_proc_entry("ver_info", rtw_proc);
 
 			remove_proc_entry("log_level", rtw_proc);
+			#ifdef DBG_MEM_ALLOC
+			remove_proc_entry("mstat", rtw_proc);
+			#endif /* DBG_MEM_ALLOC */
 #if(LINUX_VERSION_CODE < KERNEL_VERSION(2,6,24))
 			remove_proc_entry(rtw_proc_name, proc_net);
 #else
@@ -1087,6 +1114,33 @@ struct net_device *rtw_init_netdev(_adapter *old_padapter)
 
 }
 
+void rtw_unregister_netdevs(struct dvobj_priv *dvobj)
+{
+	int i;
+	_adapter *padapter = NULL;
+
+	for (i=0;i<dvobj->iface_nums;i++) {
+		struct net_device *pnetdev = NULL;
+
+		padapter = dvobj->padapters[i];
+
+		if (padapter == NULL)
+			continue;
+
+		pnetdev = padapter->pnetdev;
+
+		if((padapter->DriverState != DRIVER_DISAPPEAR) && pnetdev) {
+			unregister_netdev(pnetdev); //will call netdev_close()
+			rtw_proc_remove_one(pnetdev);
+		}
+
+		#ifdef CONFIG_IOCTL_CFG80211
+		rtw_wdev_unregister(padapter->rtw_wdev);
+		#endif
+	}
+
+}
+
 u32 rtw_start_drv_threads(_adapter *padapter)
 {
 
@@ -1135,12 +1189,7 @@ void rtw_stop_drv_threads (_adapter *padapter)
 	if(padapter->isprimary == _TRUE)
 #endif //CONFIG_CONCURRENT_MODE
 	{
-		//Below is to termindate rtw_cmd_thread & event_thread...
-		_rtw_up_sema(&padapter->cmdpriv.cmd_queue_sema);
-		//_rtw_up_sema(&padapter->cmdpriv.cmd_done_sema);
-		if(padapter->cmdThread){
-			_rtw_down_sema(&padapter->cmdpriv.terminate_cmdthread_sema);
-		}
+		rtw_stop_cmd_thread(padapter);
 	}
 
 #ifdef CONFIG_EVENT_THREAD_MODE
@@ -1240,6 +1289,36 @@ u8 rtw_init_default_value(_adapter *padapter)
 #endif
 	return ret;
 }
+
+struct dvobj_priv *devobj_init(void)
+{
+	struct dvobj_priv *pdvobj = NULL;
+
+	if ((pdvobj = (struct dvobj_priv*)rtw_zmalloc(sizeof(*pdvobj))) == NULL)
+		return NULL;
+
+	_rtw_mutex_init(&pdvobj->hw_init_mutex);
+	_rtw_mutex_init(&pdvobj->h2c_fwcmd_mutex);
+	_rtw_mutex_init(&pdvobj->setch_mutex);
+	_rtw_mutex_init(&pdvobj->setbw_mutex);
+
+	pdvobj->processing_dev_remove = _FALSE;
+
+	return pdvobj;
+}
+
+void devobj_deinit(struct dvobj_priv *pdvobj)
+{
+	if(!pdvobj)
+		return;
+
+	_rtw_mutex_free(&pdvobj->hw_init_mutex);
+	_rtw_mutex_free(&pdvobj->h2c_fwcmd_mutex);
+	_rtw_mutex_free(&pdvobj->setch_mutex);
+	_rtw_mutex_free(&pdvobj->setbw_mutex);
+
+	rtw_mfree((u8*)pdvobj, sizeof(*pdvobj));
+}	
 
 u8 rtw_reset_drv_sw(_adapter *padapter)
 {
@@ -1361,7 +1440,9 @@ _func_enter_;
 		ret8=_FAIL;
 		goto exit;
 	}
-
+	// add for CONFIG_IEEE80211W, none 11w also can use
+	_rtw_spinlock_init(&padapter->security_key_mutex);
+	
 	// We don't need to memset padapter->XXX to zero, because adapter is allocated by rtw_zvmalloc().
 	//_rtw_memset((unsigned char *)&padapter->securitypriv, 0, sizeof (struct security_priv));
 
@@ -1489,8 +1570,9 @@ u8 rtw_free_drv_sw(_adapter *padapter)
 		}
 	}
 	#endif
-
-
+	// add for CONFIG_IEEE80211W, none 11w also can use
+	_rtw_spinlock_free(&padapter->security_key_mutex);
+	
 #ifdef CONFIG_BR_EXT
 	_rtw_spinlock_free(&padapter->br_ext_lock);
 #endif	// CONFIG_BR_EXT
@@ -1840,12 +1922,6 @@ void rtw_drv_stop_vir_if(_adapter *padapter)
 
 	pnetdev = padapter->pnetdev;
 
-	if(pnetdev)
-	{
-		unregister_netdev(pnetdev); //will call netdev_close()
-		rtw_proc_remove_one(pnetdev);
-	}
-
 	rtw_cancel_all_timer(padapter);
 
 	if(padapter->bup == _TRUE)
@@ -1866,11 +1942,6 @@ void rtw_drv_stop_vir_if(_adapter *padapter)
 
 		padapter->bup = _FALSE;
 	}
-
-#ifdef CONFIG_IOCTL_CFG80211
-	rtw_wdev_unregister(padapter->rtw_wdev);
-#endif //CONFIG_IOCTL_CFG80211
-
 }
 
 void rtw_drv_free_vir_if(_adapter *padapter)
@@ -2229,17 +2300,9 @@ void rtw_drv_if2_free(_adapter *if2)
 void rtw_drv_if2_stop(_adapter *if2)
 {
 	_adapter *padapter = if2;
-	struct net_device *pnetdev = NULL;
 
 	if (padapter == NULL)
 		return;
-
-	pnetdev = padapter->pnetdev;
-
-	if (pnetdev) {
-		unregister_netdev(pnetdev); //will call netdev_close()
-		rtw_proc_remove_one(pnetdev);
-	}
 
 	rtw_cancel_all_timer(padapter);
 
@@ -2259,11 +2322,6 @@ void rtw_drv_if2_stop(_adapter *if2)
 
 		padapter->bup = _FALSE;
 	}
-
-	#ifdef CONFIG_IOCTL_CFG80211
-	rtw_wdev_unregister(padapter->rtw_wdev);
-	#endif
-
 }
 #endif //end of CONFIG_CONCURRENT_MODE
 
@@ -2418,14 +2476,6 @@ int _netdev_open(struct net_device *pnetdev)
 			goto netdev_open_error;
 		}
 
-
-		if (init_hw_mlme_ext(padapter) == _FAIL)
-		{
-			RT_TRACE(_module_os_intfs_c_,_drv_err_,("can't init mlme_ext_priv\n"));
-			goto netdev_open_error;
-		}
-
-
 #ifdef CONFIG_DRVEXT_MODULE
 		init_drvext(padapter);
 #endif
@@ -2514,7 +2564,6 @@ int  ips_netdrv_open(_adapter *padapter)
 
 
 	padapter->bDriverStopped = _FALSE;
-	padapter->bSurpriseRemoved = _FALSE;
 	padapter->bCardDisableWOHSM = _FALSE;
 	//padapter->bup = _TRUE;
 

@@ -712,14 +712,24 @@ _func_enter_;
 	    param->sta_addr[2] == 0xff && param->sta_addr[3] == 0xff &&
 	    param->sta_addr[4] == 0xff && param->sta_addr[5] == 0xff) 
 	{
-		if (param->u.crypt.idx >= WEP_KEYS)
+
+		if (param->u.crypt.idx >= WEP_KEYS
+#ifdef CONFIG_IEEE80211W
+			&& param->u.crypt.idx > BIP_MAX_KEYID
+#endif //CONFIG_IEEE80211W
+			)
 		{
 			ret = -EINVAL;
 			goto exit;
 		}
-	} else {
-		ret = -EINVAL;
-		goto exit;
+	} 
+	else 
+	{
+
+		{
+			ret = -EINVAL;
+			goto exit;
+		}
 	}
 
 	if (strcmp(param->u.crypt.alg, "WEP") == 0)
@@ -847,17 +857,40 @@ _func_enter_;
 				}
 				else//group key
 				{ 					
-					_rtw_memcpy(padapter->securitypriv.dot118021XGrpKey[param->u.crypt.idx].skey,  param->u.crypt.key,(param->u.crypt.key_len>16 ?16:param->u.crypt.key_len));
-					_rtw_memcpy(padapter->securitypriv.dot118021XGrptxmickey[param->u.crypt.idx].skey,&(param->u.crypt.key[16]),8);
-					_rtw_memcpy(padapter->securitypriv.dot118021XGrprxmickey[param->u.crypt.idx].skey,&(param->u.crypt.key[24]),8);
-                                        padapter->securitypriv.binstallGrpkey = _TRUE;	
-					//DEBUG_ERR(("\n param->u.crypt.key_len=%d\n", param->u.crypt.key_len));
-					//DEBUG_ERR(("\n ~~~~stastakey:groupkey\n"));
-					DBG_871X("\n ~~~~stastakey:groupkey\n");
-
-					padapter->securitypriv.dot118021XGrpKeyid = param->u.crypt.idx;
-
-					rtw_set_key(padapter,&padapter->securitypriv,param->u.crypt.idx, 1);
+					if(strcmp(param->u.crypt.alg, "TKIP") == 0 || strcmp(param->u.crypt.alg, "CCMP") == 0)
+					{
+						_rtw_memcpy(padapter->securitypriv.dot118021XGrpKey[param->u.crypt.idx].skey,  param->u.crypt.key,(param->u.crypt.key_len>16 ?16:param->u.crypt.key_len));
+						//only TKIP group key need to install this
+						if(param->u.crypt.key_len > 16)
+						{
+							_rtw_memcpy(padapter->securitypriv.dot118021XGrptxmickey[param->u.crypt.idx].skey,&(param->u.crypt.key[16]),8);
+							_rtw_memcpy(padapter->securitypriv.dot118021XGrprxmickey[param->u.crypt.idx].skey,&(param->u.crypt.key[24]),8);
+						}
+						padapter->securitypriv.binstallGrpkey = _TRUE;	
+						//DEBUG_ERR((" param->u.crypt.key_len=%d\n", param->u.crypt.key_len));
+						DBG_871X(" ~~~~set sta key:groupkey\n");
+	
+						padapter->securitypriv.dot118021XGrpKeyid = param->u.crypt.idx;
+	
+						rtw_set_key(padapter,&padapter->securitypriv,param->u.crypt.idx, 1);
+					}
+#ifdef CONFIG_IEEE80211W
+					else if(strcmp(param->u.crypt.alg, "BIP") == 0)
+					{
+						int no;
+						//printk("BIP key_len=%d , index=%d @@@@@@@@@@@@@@@@@@\n", param->u.crypt.key_len, param->u.crypt.idx);
+						//save the IGTK key, length 16 bytes
+						_rtw_memcpy(padapter->securitypriv.dot11wBIPKey[param->u.crypt.idx].skey,  param->u.crypt.key,(param->u.crypt.key_len>16 ?16:param->u.crypt.key_len));
+						/*printk("IGTK key below:\n");
+						for(no=0;no<16;no++)
+							printk(" %02x ", padapter->securitypriv.dot11wBIPKey[param->u.crypt.idx].skey[no]);
+						printk("\n");*/
+						padapter->securitypriv.dot11wBIPKeyid = param->u.crypt.idx;
+						padapter->securitypriv.binstallBIPkey = _TRUE;
+						DBG_871X(" ~~~~set sta key:IGKT\n");
+					}
+#endif //CONFIG_IEEE80211W
+					
 #ifdef CONFIG_P2P
 					if(rtw_p2p_chk_state(pwdinfo, P2P_STATE_PROVISIONING_ING))
 					{
@@ -2159,9 +2192,8 @@ static int rtw_wx_get_scan(struct net_device *dev, struct iw_request_info *a,
 
 		//report network only if the current channel set contains the channel to which this network belongs
 		if(rtw_ch_set_search_ch(padapter->mlmeextpriv.channel_set, pnetwork->network.Configuration.DSConfig) >= 0
-			#ifdef CONFIG_VALIDATE_SSID
+			&& rtw_mlme_band_check(padapter, pnetwork->network.Configuration.DSConfig) == _TRUE
 			&& _TRUE == rtw_validate_ssid(&(pnetwork->network.Ssid))
-			#endif
 		)
 		{
 			ev=translate_scan(padapter, a, pnetwork, ev, stop);
@@ -3084,6 +3116,11 @@ static int rtw_wx_set_enc_ext(struct net_device *dev,
 	case IW_ENCODE_ALG_CCMP:
 		alg_name = "CCMP";
 		break;
+#ifdef CONFIG_IEEE80211W
+	case IW_ENCODE_ALG_AES_CMAC:
+		alg_name = "BIP";
+		break;
+#endif //CONFIG_IEEE80211W
 	default:	
 		return -1;
 	}
@@ -3091,7 +3128,11 @@ static int rtw_wx_set_enc_ext(struct net_device *dev,
 	strncpy((char *)param->u.crypt.alg, alg_name, IEEE_CRYPT_ALG_NAME_LEN);
 
 	
-	if(pext->ext_flags & IW_ENCODE_EXT_GROUP_KEY)//?
+	if((pext->ext_flags & IW_ENCODE_EXT_GROUP_KEY)//?
+#ifdef CONFIG_IEEE80211W
+		|| (pext->ext_flags & IW_ENCODE_ALG_AES_CMAC)
+#endif //CONFIG_IEEE80211W
+	)
 	{
 		param->u.crypt.set_tx = 0;
 	}
@@ -4064,20 +4105,10 @@ static int rtw_p2p_set_intent(struct net_device *dev,
 	struct wifidirect_info 			*pwdinfo= &(padapter->wdinfo);
 	u8							intent = pwdinfo->intent;
 
-	switch( wrqu->data.length )
-	{
-		case 1:
-		{
-			intent = extra[ 0 ] - '0';
-			break;
-		}
-		case 2:
-		{
-			intent = str_2char2num( extra[ 0 ], extra[ 1 ]);
-			break;
-		}
-	}
+	extra[ wrqu->data.length ] = 0x00;
 
+	intent = rtw_atoi( extra );
+	
 	if ( intent <= 15 )
 	{
 		pwdinfo->intent= intent;
@@ -4090,7 +4121,7 @@ static int rtw_p2p_set_intent(struct net_device *dev,
 	DBG_871X( "[%s] intent = %d\n", __FUNCTION__, intent);
 
 	return ret;
-		
+
 }
 
 static int rtw_p2p_set_listen_ch(struct net_device *dev,
@@ -4103,19 +4134,8 @@ static int rtw_p2p_set_listen_ch(struct net_device *dev,
 	struct wifidirect_info *pwdinfo= &(padapter->wdinfo);
 	u8	listen_ch = pwdinfo->listen_channel;	//	Listen channel number
 
-	switch( wrqu->data.length )
-	{
-		case 1:
-		{
-			listen_ch = extra[ 0 ] - '0';
-			break;
-		}
-		case 2:
-		{
-			listen_ch = str_2char2num( extra[ 0 ], extra[ 1 ]);
-			break;
-		}
-	}
+	extra[ wrqu->data.length ] = 0x00;
+	listen_ch = rtw_atoi( extra );
 
 	if ( ( listen_ch == 1 ) || ( listen_ch == 6 ) || ( listen_ch == 11 ) )
 	{
@@ -4145,20 +4165,9 @@ static int rtw_p2p_set_op_ch(struct net_device *dev,
 	struct wifidirect_info *pwdinfo= &(padapter->wdinfo);
 	u8	op_ch = pwdinfo->operating_channel;	//	Operating channel number
 
-	switch( wrqu->data.length )
-	{
-		case 1:
-		{
-			op_ch = extra[ 0 ] - '0';
-			break;
-		}
-		case 2:
-		{
-			op_ch = str_2char2num( extra[ 0 ], extra[ 1 ]);
-			break;
-		}
-	}
+	extra[ wrqu->data.length ] = 0x00;
 
+	op_ch = ( u8 ) rtw_atoi( extra );
 	if ( op_ch > 0 )
 	{
 		pwdinfo->operating_channel = op_ch;
@@ -4171,7 +4180,7 @@ static int rtw_p2p_set_op_ch(struct net_device *dev,
 	DBG_871X( "[%s] op_ch = %d\n", __FUNCTION__, pwdinfo->operating_channel );
 	
 	return ret;
-		
+
 }
 
 
@@ -5338,6 +5347,79 @@ exit:
 		
 }
 
+static int hexstr2bin(const char *hex, u8 *buf, size_t len)
+{
+	size_t i;
+	int a;
+	const char *ipos = hex;
+	u8 *opos = buf;
+
+	for (i = 0; i < len; i++) {
+		a = hex2byte_i(ipos);
+		if (a < 0)
+			return -1;
+		*opos++ = a;
+		ipos += 2;
+	}
+	return 0;
+}
+
+static int uuid_str2bin(const char *str, u8 *bin)
+{
+	const char *pos;
+	u8 *opos;
+
+	pos = str;
+	opos = bin;
+
+	if (hexstr2bin(pos, opos, 4))
+		return -1;
+	pos += 8;
+	opos += 4;
+
+	if (*pos++ != '-' || hexstr2bin(pos, opos, 2))
+		return -1;
+	pos += 4;
+	opos += 2;
+
+	if (*pos++ != '-' || hexstr2bin(pos, opos, 2))
+		return -1;
+	pos += 4;
+	opos += 2;
+
+	if (*pos++ != '-' || hexstr2bin(pos, opos, 2))
+		return -1;
+	pos += 4;
+	opos += 2;
+
+	if (*pos++ != '-' || hexstr2bin(pos, opos, 6))
+		return -1;
+
+	return 0;
+}
+
+static int rtw_p2p_set_wps_uuid(struct net_device *dev,
+	struct iw_request_info *info,
+	union iwreq_data *wrqu, char *extra)
+{
+
+	int ret = 0;
+	_adapter				*padapter = (_adapter *)rtw_netdev_priv(dev);
+	struct wifidirect_info			*pwdinfo = &(padapter->wdinfo);
+
+	DBG_871X("[%s] data = %s\n", __FUNCTION__, extra);
+
+	if ((36 == strlen(extra)) && (uuid_str2bin(extra, pwdinfo->uuid) == 0)) 
+	{
+		pwdinfo->external_uuid = 1;
+	} else {
+		pwdinfo->external_uuid = 0;
+		ret = -EINVAL;
+	}
+
+	return ret;
+
+}
 #ifdef CONFIG_WFD
 static int rtw_p2p_set_pc(struct net_device *dev,
                                struct iw_request_info *info,
@@ -5732,6 +5814,7 @@ static int rtw_p2p_prov_disc(struct net_device *dev,
 		return( ret );
 	}
 
+
 	_enter_critical_bh(&(pmlmepriv->scanned_queue.lock), &irqL);
 
 	phead = get_list_head(queue);
@@ -6054,6 +6137,11 @@ static int rtw_p2p_set(struct net_device *dev,
 		wrqu->data.length -= 11;
 		rtw_p2p_set_persistent( dev, info, wrqu, &extra[11] );
 	}
+	else if ( _rtw_memcmp ( extra, "uuid=", 5) )
+	{
+		wrqu->data.length -= 5;
+		ret = rtw_p2p_set_wps_uuid( dev, info, wrqu, &extra[5] );
+	}
 #ifdef CONFIG_WFD
 	else if ( _rtw_memcmp( extra, "sa=", 3 ) )
 	{
@@ -6220,7 +6308,7 @@ static int rtw_p2p_get2(struct net_device *dev,
 bad:
 	if (buffer)
 	{
-		_rtw_mfree(buffer, length);
+		rtw_mfree(buffer, length);
 	}
 
 #endif //CONFIG_P2P
@@ -7276,7 +7364,7 @@ static int set_group_key(_adapter *padapter, u8 *key, u8 alg, int keyid)
 		
 	psetkeyparm->keyid=(u8)keyid;
 	if (is_wep_enc(alg))
-		padapter->mlmepriv.key_mask |= BIT(psetkeyparm->keyid);
+		padapter->securitypriv.key_mask |= BIT(psetkeyparm->keyid);
 
 	psetkeyparm->algorithm = alg;
 
@@ -7829,7 +7917,7 @@ static int rtw_del_sta(struct net_device *dev, struct ieee_param *param)
 	psta = rtw_get_stainfo(pstapriv, param->sta_addr);
 	if(psta)
 	{
-		u8 updated;
+		u8 updated=_FALSE;
 	
 		//DBG_871X("free psta=%p, aid=%d\n", psta, psta->aid);
 
@@ -11647,7 +11735,7 @@ static const struct iw_priv_args rtw_private_args[] = {
 #endif // CONFIG_WOWLAN
 	{
 		SIOCIWFIRSTPRIV + 0x10,
-		IW_PRIV_TYPE_CHAR | P2P_PRIVATE_IOCTL_SET_LEN, 0, "p2p_set"
+		IW_PRIV_TYPE_CHAR | 1024, 0, "p2p_set"
 	},
 	{
 		SIOCIWFIRSTPRIV + 0x11,
@@ -11684,7 +11772,7 @@ static const struct iw_priv_args rtw_private_args[] = {
 #ifdef CONFIG_INTEL_WIDI
 	{
 		SIOCIWFIRSTPRIV + 0x1E,
-		IW_PRIV_TYPE_CHAR | 64, 0, "widi_set"
+		IW_PRIV_TYPE_CHAR | 1024, 0, "widi_set"
 	},
 	{
 		SIOCIWFIRSTPRIV + 0x1F,

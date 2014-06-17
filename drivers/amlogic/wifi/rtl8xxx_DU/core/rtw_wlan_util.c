@@ -2253,15 +2253,15 @@ int rtw_handle_dualmac(_adapter *adapter, bool init)
 		goto exit;
 
 	if (init) {
-		if ((dvobj->NumInterfaces == 2) && (adapter->registrypriv.mac_phy_mode != 1)) {
-			dvobj->DualMacMode = _TRUE;
+		rtw_hal_get_def_var(adapter, HAL_DEF_DUAL_MAC_MODE, &dvobj->DualMacMode);
+		if (dvobj->DualMacMode == _TRUE) {
 			// temply disable IPS For 92D-VC
 			adapter->registrypriv.ips_mode = IPS_NONE;
 		}
 		
 		/* For SMSP on 92DU-VC, driver do not probe another Interface. */
 		if ((dvobj->DualMacMode != _TRUE) && (dvobj->InterfaceNumber != 0)) {
-			DBG_871X("%s(): Do not init another USB Interface because SMSP\n",__FUNCTION__);
+			DBG_871X("%s(): Do not init another Interface because SMSP\n",__FUNCTION__);
 			status = _FAIL;
 			goto exit;
 		}

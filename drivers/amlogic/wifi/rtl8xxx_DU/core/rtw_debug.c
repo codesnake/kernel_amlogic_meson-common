@@ -122,6 +122,20 @@ int proc_set_log_level(struct file *file, const char *buffer,
 	
 }
 
+#ifdef DBG_MEM_ALLOC
+int proc_get_mstat(char *page, char **start,
+			  off_t offset, int count,
+			  int *eof, void *data)
+{	
+	int len = 0;
+
+	len += _rtw_mstat_dump(page+len, count-len);
+	*eof = 1;
+
+	return len;
+}
+#endif /* DBG_MEM_ALLOC */
+
 int proc_get_write_reg(char *page, char **start,
 			  off_t offset, int count,
 			  int *eof, void *data)
@@ -1206,6 +1220,31 @@ int proc_get_best_channel(char *page, char **start,
 	*eof = 1;
 	return len;
 
+}
+
+int proc_set_best_channel(struct file *file, const char *buffer,
+		unsigned long count, void *data)
+{
+	struct net_device *dev = (struct net_device *)data;
+	_adapter *padapter = (_adapter *)rtw_netdev_priv(dev);
+	struct mlme_ext_priv *pmlmeext = &padapter->mlmeextpriv;
+	char tmp[32];
+
+	if(count < 1)
+		return -EFAULT;
+
+	if(buffer && !copy_from_user(tmp, buffer, sizeof(tmp)))
+	{
+		int i;
+		for(i = 0; pmlmeext->channel_set[i].ChannelNum != 0; i++)
+		{
+			pmlmeext->channel_set[i].rx_count = 0;
+		}
+
+		DBG_871X("set %s\n", "Clean Best Channel Count");
+	}
+
+	return count;
 }
 #endif /* CONFIG_FIND_BEST_CHANNEL */
 

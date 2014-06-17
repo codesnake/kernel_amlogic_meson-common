@@ -91,7 +91,7 @@ void rtw_wdev_unregister(struct wireless_dev *wdev);
 void rtw_cfg80211_init_wiphy(_adapter *padapter);
 
 void rtw_cfg80211_surveydone_event_callback(_adapter *padapter);
-
+int rtw_cfg80211_check_bss(_adapter *padapter);
 void rtw_cfg80211_indicate_connect(_adapter *padapter);
 void rtw_cfg80211_indicate_disconnect(_adapter *padapter);
 void rtw_cfg80211_indicate_scan_done(struct rtw_wdev_priv *pwdev_priv, bool aborted);

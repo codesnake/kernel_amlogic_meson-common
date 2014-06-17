@@ -226,6 +226,23 @@ struct rtw_usb_drv {
 	int drv_registered;
 };
 
+static void rtw_dev_shutdown(struct device *dev)
+{
+	struct usb_interface *usb_intf = container_of(dev, struct usb_interface, dev);
+	struct dvobj_priv *dvobj = usb_get_intfdata(usb_intf);
+	_adapter *adapter = dvobj->if1;
+	int i;
+
+	DBG_871X("%s\n", __func__);
+
+	for (i = 0; i<dvobj->iface_nums; i++) {
+		adapter = dvobj->padapters[i];
+		adapter->bSurpriseRemoved = _TRUE;
+	}
+
+	ATOMIC_SET(&dvobj->continual_urb_error, MAX_CONTINUAL_URB_ERR+1);
+}
+
 #ifdef CONFIG_RTL8192C
 static struct usb_device_id rtl8192c_usb_id_tbl[] ={
 	RTL8192C_USB_IDS
@@ -244,6 +261,12 @@ struct rtw_usb_drv rtl8192c_usb_drv = {
 	#endif
 	#ifdef CONFIG_AUTOSUSPEND
 	.usbdrv.supports_autosuspend = 1,
+	#endif
+
+	#if (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 19))
+	.usbdrv.drvwrap.driver.shutdown = rtw_dev_shutdown,
+	#else
+	.usbdrv.driver.shutdown = rtw_dev_shutdown,
 	#endif
 };
 
@@ -268,6 +291,12 @@ struct rtw_usb_drv rtl8192d_usb_drv = {
 	#endif
 	#ifdef CONFIG_AUTOSUSPEND
 	.usbdrv.supports_autosuspend = 1,
+	#endif
+
+	#if (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 19))
+	.usbdrv.drvwrap.driver.shutdown = rtw_dev_shutdown,
+	#else
+	.usbdrv.driver.shutdown = rtw_dev_shutdown,
 	#endif
 };
 static struct rtw_usb_drv *usb_drv = &rtl8192d_usb_drv;
@@ -371,15 +400,9 @@ static struct dvobj_priv *usb_dvobj_init(struct usb_interface *usb_intf)
 
 _func_enter_;
 
-	if ((pdvobjpriv = (struct dvobj_priv*)rtw_zmalloc(sizeof(*pdvobjpriv))) == NULL) {
+	if((pdvobjpriv = devobj_init()) == NULL) {
 		goto exit;
 	}
-
-	_rtw_mutex_init(&pdvobjpriv->hw_init_mutex);
-	_rtw_mutex_init(&pdvobjpriv->h2c_fwcmd_mutex);
-	_rtw_mutex_init(&pdvobjpriv->setch_mutex);
-	_rtw_mutex_init(&pdvobjpriv->setbw_mutex);
-
 
 	pdvobjpriv->pusbintf = usb_intf ;
 	pusbd = pdvobjpriv->pusbdev = interface_to_usbdev(usb_intf);
@@ -513,11 +536,7 @@ _func_enter_;
 free_dvobj:
 	if (status != _SUCCESS && pdvobjpriv) {
 		usb_set_intfdata(usb_intf, NULL);
-		_rtw_mutex_free(&pdvobjpriv->hw_init_mutex);
-		_rtw_mutex_free(&pdvobjpriv->h2c_fwcmd_mutex);
-		_rtw_mutex_free(&pdvobjpriv->setch_mutex);
-		_rtw_mutex_free(&pdvobjpriv->setbw_mutex);
-		rtw_mfree((u8*)pdvobjpriv, sizeof(*pdvobjpriv));
+		devobj_deinit(pdvobjpriv);
 		pdvobjpriv = NULL;
 	}
 exit:
@@ -544,11 +563,7 @@ _func_enter_;
 			}
 		}*/
 		rtw_deinit_intf_priv(dvobj);
-		_rtw_mutex_free(&dvobj->hw_init_mutex);
-		_rtw_mutex_free(&dvobj->h2c_fwcmd_mutex);
-		_rtw_mutex_free(&dvobj->setch_mutex);
-		_rtw_mutex_free(&dvobj->setbw_mutex);
-		rtw_mfree((u8*)dvobj, sizeof(*dvobj));
+		devobj_deinit(dvobj);
 	}
 
 	//DBG_871X("%s %d\n", __func__, ATOMIC_READ(&usb_intf->dev.kobj.kref.refcount));
@@ -872,6 +887,8 @@ static int rtw_suspend(struct usb_interface *pusb_intf, pm_message_t message)
 	rtw_cancel_all_timer(padapter);
 	LeaveAllPowerSaveMode(padapter);
 
+	rtw_stop_cmd_thread(padapter);
+
 	_enter_pwrlock(&pwrpriv->lock);
 	//padapter->net_closed = _TRUE;
 	//s1.
@@ -1017,24 +1034,6 @@ int rtw_resume_process(_adapter *padapter)
 
 		pwrpriv->bInternalAutoSuspend = _FALSE;
 		pwrpriv->brfoffbyhw = _FALSE;
-		{
-			DBG_871X("enc_algorithm(%x),wepkeymask(%x)\n",
-				padapter->securitypriv.dot11PrivacyAlgrthm,pwrpriv->wepkeymask);
-			if(	(_WEP40_ == padapter->securitypriv.dot11PrivacyAlgrthm) ||
-				(_WEP104_ == padapter->securitypriv.dot11PrivacyAlgrthm))
-			{
-				sint keyid;
-
-				for(keyid=0;keyid<4;keyid++){
-					if(pwrpriv->wepkeymask & BIT(keyid)) {
-						if(keyid == padapter->securitypriv.dot11PrivacyKeyIndex)
-							rtw_set_key(padapter,&padapter->securitypriv, keyid, 1);
-						else
-							rtw_set_key(padapter,&padapter->securitypriv, keyid, 0);
-					}
-				}
-			}
-		}
 	}
 #endif
 	_exit_pwrlock(&pwrpriv->lock);
@@ -1198,15 +1197,6 @@ _adapter *rtw_usb_if1_init(struct dvobj_priv *dvobj,
 	SET_NETDEV_DEV(pnetdev, dvobj_to_dev(dvobj));
 	padapter = rtw_netdev_priv(pnetdev);
 
-	if (rtw_handle_dualmac(padapter, 1) != _SUCCESS)
-		goto free_adapter;
-
-#ifdef CONFIG_IOCTL_CFG80211
-	if(rtw_wdev_alloc(padapter, dvobj_to_dev(dvobj)) != 0) {
-		goto handle_dualmac;
-	}
-#endif
-
 	//step 2. hook HalFunc, allocate HalData
 	if(padapter->chip_type == RTL8188C_8192C) {
 		#ifdef CONFIG_RTL8192C
@@ -1218,7 +1208,7 @@ _adapter *rtw_usb_if1_init(struct dvobj_priv *dvobj,
 		#endif
 	} else {
 		DBG_871X("Detect NULL_CHIP_TYPE\n");
-		goto free_wdev;
+		goto free_hal_data;
 	}
 
 	//step 3.
@@ -1239,10 +1229,19 @@ _adapter *rtw_usb_if1_init(struct dvobj_priv *dvobj,
 	//step 4. read efuse/eeprom data and get mac_addr
 	rtw_hal_read_chip_info(padapter);
 
+	if (rtw_handle_dualmac(padapter, 1) != _SUCCESS)
+		goto free_hal_data;
+
+#ifdef CONFIG_IOCTL_CFG80211
+	if(rtw_wdev_alloc(padapter, dvobj_to_dev(dvobj)) != 0) {
+		goto handle_dualmac;
+	}
+#endif
+
 	//step 5.
 	if (rtw_init_drv_sw(padapter) == _FAIL) {
 		RT_TRACE(_module_hci_intfs_c_,_drv_err_,("Initialize driver software resource Failed!\n"));
-		goto free_hal_data;
+		goto free_wdev;
 	}
 
 #ifdef CONFIG_PM
@@ -1299,9 +1298,6 @@ _adapter *rtw_usb_if1_init(struct dvobj_priv *dvobj,
 
 	status = _SUCCESS;
 
-free_hal_data:
-	if(status != _SUCCESS && padapter->HalData)
-		rtw_mfree(padapter->HalData, sizeof(*(padapter->HalData)));
 free_wdev:
 	if(status != _SUCCESS) {
 		#ifdef CONFIG_IOCTL_CFG80211
@@ -1312,6 +1308,9 @@ free_wdev:
 handle_dualmac:
 	if (status != _SUCCESS)
 		rtw_handle_dualmac(padapter, 0);
+free_hal_data:
+	if(status != _SUCCESS && padapter->HalData)
+		rtw_mfree(padapter->HalData, sizeof(*(padapter->HalData)));
 free_adapter:
 	if (status != _SUCCESS) {
 		if (pnetdev)
@@ -1332,21 +1331,12 @@ static void rtw_usb_if1_deinit(_adapter *if1)
 	if(check_fwstate(pmlmepriv, _FW_LINKED))
 		rtw_disassoc_cmd(if1, 0, _FALSE);
 
-
 #ifdef CONFIG_AP_MODE
 	free_mlme_ap_info(if1);
 	#ifdef CONFIG_HOSTAPD_MLME
 	hostapd_mode_unload(if1);
 	#endif
 #endif
-
-	if(if1->DriverState != DRIVER_DISAPPEAR)
-	{
-		if(pnetdev) {
-			unregister_netdev(pnetdev); //will call netdev_close()
-			rtw_proc_remove_one(pnetdev);
-		}
-	}
 
 	rtw_cancel_all_timer(if1);
 #ifdef CONFIG_WOWLAN
@@ -1360,11 +1350,8 @@ static void rtw_usb_if1_deinit(_adapter *if1)
 	rtw_handle_dualmac(if1, 0);
 
 #ifdef CONFIG_IOCTL_CFG80211
-	if(if1->rtw_wdev)
-	{
-		rtw_wdev_unregister(if1->rtw_wdev);
+	if (if1->rtw_wdev)
 		rtw_wdev_free(if1->rtw_wdev);
-	}
 #endif //CONFIG_IOCTL_CFG80211
 
 	rtw_free_drv_sw(if1);
@@ -1489,6 +1476,10 @@ _func_exit_;
 	DBG_871X("+rtw_dev_remove\n");
 	RT_TRACE(_module_hci_intfs_c_,_drv_err_,("+dev_remove()\n"));
 
+	dvobj->processing_dev_remove = _TRUE;
+
+	rtw_unregister_netdevs(dvobj);
+
 	if(usb_drv->drv_registered == _TRUE)
 	{
 		//DBG_871X("r871xu_dev_remove():padapter->bSurpriseRemoved == _TRUE\n");
@@ -1535,9 +1526,6 @@ _func_exit_;
 	rtw_sw_export=NULL;
 #endif
 
-	#ifdef DBG_MEM_ALLOC
-	rtw_dump_mem_stat ();
-	#endif
 _func_exit_;
 
 	return;
@@ -1606,8 +1594,6 @@ static void __exit rtw_drv_halt(void)
 	RT_TRACE(_module_hci_intfs_c_,_drv_err_,("+rtw_drv_halt\n"));
 	DBG_871X("+rtw_drv_halt\n");
 
-	rtw_suspend_lock_uninit();
-
 	usb_drv->drv_registered = _FALSE;
 	usb_deregister(&usb_drv->usbdrv);
 
@@ -1622,7 +1608,10 @@ static void __exit rtw_drv_halt(void)
 	wifi_pm_power(0);
 #endif
 
+	rtw_suspend_lock_uninit();
 	DBG_871X("-rtw_drv_halt\n");
+
+	rtw_mstat_dump();
 }
 
 

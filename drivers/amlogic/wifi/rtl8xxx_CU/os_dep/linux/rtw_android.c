@@ -278,7 +278,7 @@ int rtw_android_set_country(struct net_device *net, char *command, int total_len
 {
 	_adapter *adapter = (_adapter *)rtw_netdev_priv(net);
 	char *country_code = command + strlen(android_wifi_cmd_str[ANDROID_WIFI_CMD_COUNTRY]) + 1;
-	int ret;
+	int ret = _FAIL;
 	
 	ret = rtw_set_country(adapter, country_code);
 
@@ -287,7 +287,6 @@ int rtw_android_set_country(struct net_device *net, char *command, int total_len
 
 int rtw_android_get_p2p_dev_addr(struct net_device *net, char *command, int total_len)
 {
-	int ret;
 	int bytes_written = 0;
 
 	//We use the same address as our HW MAC address
@@ -299,7 +298,6 @@ int rtw_android_get_p2p_dev_addr(struct net_device *net, char *command, int tota
 
 int rtw_android_set_block(struct net_device *net, char *command, int total_len)
 {
-	int ret;
 	_adapter *adapter = (_adapter *)rtw_netdev_priv(net);
 	char *block_value = command + strlen(android_wifi_cmd_str[ANDROID_WIFI_CMD_BLOCK]) + 1;
 
@@ -308,6 +306,29 @@ int rtw_android_set_block(struct net_device *net, char *command, int total_len)
 	#endif
 	
 	return 0;
+}
+
+int rtw_android_setband(struct net_device *net, char *command, int total_len)
+{
+	_adapter *adapter = (_adapter *)rtw_netdev_priv(net);
+	char *arg = command + strlen(android_wifi_cmd_str[ANDROID_WIFI_CMD_SETBAND]) + 1;
+	u32 band = GHZ_MAX;
+	int ret = _FAIL;
+
+	sscanf(arg, "%u", &band);
+	ret = rtw_set_band(adapter, band);
+
+	return (ret==_SUCCESS)?0:-1;
+}
+
+int rtw_android_getband(struct net_device *net, char *command, int total_len)
+{
+	_adapter *adapter = (_adapter *)rtw_netdev_priv(net);
+	int bytes_written = 0;
+
+	bytes_written = snprintf(command, total_len, "%u", adapter->setband);
+
+	return bytes_written;
 }
 
 int get_int_from_command( char* pcmd )
@@ -455,17 +476,11 @@ int rtw_android_priv_cmd(struct net_device *net, struct ifreq *ifr, int cmd)
 		break;
 		
 	case ANDROID_WIFI_CMD_SETBAND:
-	{
-		uint band = *(command + strlen("SETBAND") + 1) - '0';
-		_adapter*	padapter = ( _adapter * ) rtw_netdev_priv(net);
-
-		if (padapter->chip_type == RTL8192D)
-			padapter->setband = band;
-
+		bytes_written = rtw_android_setband(net, command, priv_cmd.total_len);
 		break;
-	}
+
 	case ANDROID_WIFI_CMD_GETBAND:
-		//bytes_written = wl_android_get_band(net, command, priv_cmd.total_len);
+		bytes_written = rtw_android_getband(net, command, priv_cmd.total_len);
 		break;
 		
 	case ANDROID_WIFI_CMD_COUNTRY:
@@ -606,7 +621,7 @@ response:
 exit:
 	rtw_unlock_suspend();
 	if (command) {
-		kfree(command);
+		rtw_mfree(command, priv_cmd.total_len);
 	}
 
 	return ret;

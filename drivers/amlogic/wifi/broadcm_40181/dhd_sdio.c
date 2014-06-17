@@ -803,6 +803,9 @@ dhdsdio_clk_kso_enab(dhd_bus_t *bus, bool on)
 	int err = 0;
 	int try_cnt = 0;
 
+	if (!bus->dhd->conf->kso_enable)
+		return 0;
+
 	KSO_DBG(("%s> op:%s\n", __FUNCTION__, (on ? "KSO_SET" : "KSO_CLR")));
 
 	wr_val |= (on << SBSDIO_FUNC1_SLEEPCSR_KSO_SHIFT);
@@ -4583,6 +4586,11 @@ dhd_bus_init(dhd_pub_t *dhdp, bool enforce_mutex)
 	if (enforce_mutex)
 		dhd_os_sdlock(bus->dhd);
 
+	if (bus->sih->chip == BCM43362_CHIP_ID) {
+		printf("%s: delay 100ms for BCM43362\n", __FUNCTION__);
+		OSL_DELAY(100000); // terence 20131209: delay for 43362
+	}
+
 	/* Make sure backplane clock is on, needed to generate F2 interrupt */
 	dhdsdio_clkctl(bus, CLK_AVAIL, FALSE);
 	if (bus->clkstate != CLK_AVAIL) {
@@ -7058,6 +7066,17 @@ dhdsdio_probe(uint16 venid, uint16 devid, uint16 bus_no, uint16 slot,
 		DHD_ERROR(("%s: dhdsdio_probe_attach failed\n", __FUNCTION__));
 		goto fail;
 	}
+	
+#ifdef PROP_TXSTATUS
+	// terence 20131215: disable_proptx should be set before dhd_attach
+	if (bus->sih->chip == BCM4339_CHIP_ID) {
+		printf("%s: Enable prop_txstatus\n", __FUNCTION__);
+		disable_proptx = 0;
+	} else {
+		printf("%s: Disable prop_txstatus\n", __FUNCTION__);
+		disable_proptx = 1;
+	}
+#endif
 
 	/* Attach to the dhd/OS/network interface */
 	if (!(bus->dhd = dhd_attach(osh, bus, SDPCM_RESERVE))) {
@@ -7772,9 +7791,11 @@ dhdsdio_download_firmware(struct dhd_bus *bus, osl_t *osh, void *sdh)
 
 	/* External conf takes precedence if specified */
 	dhd_conf_preinit(bus->dhd);
-	dhd_conf_download_config(bus->dhd);
+	dhd_conf_read_config(bus->dhd);
 	dhd_conf_set_fw_path(bus->dhd, bus->fw_path);
 	dhd_conf_set_nv_path(bus->dhd, bus->nv_path);
+	dhd_conf_set_fw_name_by_mac(bus->dhd, bus->sdh, bus->fw_path);
+	dhd_conf_set_nv_name_by_mac(bus->dhd, bus->sdh, bus->nv_path);
 
 	printk("Final fw_path=%s\n", bus->fw_path);
 	printk("Final nv_path=%s\n", bus->nv_path);
@@ -8446,6 +8467,7 @@ dhd_bus_devreset(dhd_pub_t *dhdp, uint8 flag)
 					/* Re-init bus, enable F2 transfer */
 					bcmerror = dhd_bus_init((dhd_pub_t *) bus->dhd, FALSE);
 					if (bcmerror == BCME_OK) {
+						bcmsdh_set_drvdata(dhdp); // terence 20131214: fix for null pointer issue
 #if defined(OOB_INTR_ONLY)
 						/* make sure oob intr get registered */
 						if (!bcmsdh_is_oob_intr_registered()) {
@@ -8460,6 +8482,7 @@ dhd_bus_devreset(dhd_pub_t *dhdp, uint8 flag)
 
 						bus->dhd->dongle_reset = FALSE;
 						bus->dhd->up = TRUE;
+						bus->dhd->hang_was_sent = 0;
 
 #if !defined(IGNORE_ETH0_DOWN)
 						/* Restore flow control  */

@@ -5446,6 +5446,9 @@ _func_enter_;
 			//BCN_VALID, BIT16 of REG_TDECTRL = BIT0 of REG_TDECTRL+2, write 1 to clear, Clear by sw
 			rtw_write8(Adapter, REG_TDECTRL+2, rtw_read8(Adapter, REG_TDECTRL+2) | BIT0); 
 			break;
+		case HW_VAR_USB_RXAGG_PAGE_TO:
+			rtw_write8(Adapter, REG_USB_DMA_AGG_TO, *((u8 *)val));
+			break;
 		default:
 			break;
 	}
@@ -5570,6 +5573,12 @@ GetHalDefVar8192DUsb(
 			break;
 		case HAL_DEF_DBG_DM_FUNC:
 			*(( u8*)pValue) = pHalData->dmpriv.DMFlag;
+			break;
+		case HAL_DEF_DUAL_MAC_MODE:
+			if ((pHalData->MacPhyMode92D == DUALMAC_DUALPHY) ||(pHalData->MacPhyMode92D == DUALMAC_SINGLEPHY))
+				*(( u8*)pValue) = _TRUE;
+			else
+				*(( u8*)pValue) = _FALSE;
 			break;
 		default:
 			//RT_TRACE(COMP_INIT, DBG_WARNING, ("GetHalDefVar8192CUsb(): Unkown variable: %d!\n", eVariable));

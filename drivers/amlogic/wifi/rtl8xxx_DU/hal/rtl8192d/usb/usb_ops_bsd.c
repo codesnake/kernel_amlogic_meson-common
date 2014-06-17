@@ -584,8 +584,7 @@ static int _usbctrl_vendorreq_async_write(struct usb_device *udev, u8 request, u
 		pipe = usb_sndctrlpipe(udev, 0);//write_out
 		reqtype =  REALTEK_USB_VENQT_WRITE;		
 	}		
-	
-	//buf = kmalloc(sizeof(*buf), GFP_ATOMIC);
+
 	buf = (struct rtl819x_async_write_data *)rtw_zmalloc(sizeof(*buf));
 	if (!buf)
 		return -ENOMEM;
@@ -961,11 +960,7 @@ static int recvbuf2recvframe(_adapter *padapter, struct recv_buf *precvbuf)
 		precvframe->u.hdr.precvbuf = NULL;	//can't access the precvbuf for new arch.
 		precvframe->u.hdr.len=0;
 
-#if (LINUX_VERSION_CODE < KERNEL_VERSION(2,6,18)) // http://www.mail-archive.com/netdev@vger.kernel.org/msg17214.html
-		pkt_copy = dev_alloc_skb((pkt_offset>1612?pkt_offset:1612) + shift_sz + 8);		
-#else			
-		pkt_copy = netdev_alloc_skb(padapter->pnetdev, (pkt_offset>1612?pkt_offset:1612) + shift_sz + 8);
-#endif		
+		pkt_copy = rtw_skb_alloc((pkt_offset>1612?pkt_offset:1612) + shift_sz + 8);
 
 		if(pkt_copy)
 		{					
@@ -985,7 +980,7 @@ static int recvbuf2recvframe(_adapter *padapter, struct recv_buf *precvbuf)
 		else
 		{	
 			DBG_8192C("recvbuf2recvframe:can not allocate memory for skb copy\n");				
-			//precvframe->u.hdr.pkt = skb_clone(pskb, GFP_ATOMIC);	
+			//precvframe->u.hdr.pkt = rtw_skb_clone(pskb);
 			//precvframe->u.hdr.rx_head = precvframe->u.hdr.rx_data = precvframe->u.hdr.rx_tail = pbuf;
 			//precvframe->u.hdr.rx_end = pbuf + (pkt_offset>1612?pkt_offset:1612);
 
@@ -1340,7 +1335,7 @@ int recvbuf2recvframe(_adapter *padapter, struct sk_buff  *pskb)
 			goto _exit_recvbuf2recvframe;
 #else // PLATFORM_FREEBSD
 			//DBG_8192C("recvbuf2recvframe:can not allocate memory for skb copy\n");				
-			precvframe->u.hdr.pkt = skb_clone(pskb, GFP_ATOMIC);	
+			precvframe->u.hdr.pkt = rtw_skb_clone(pskb);
 			precvframe->u.hdr.rx_head = precvframe->u.hdr.rx_data = precvframe->u.hdr.rx_tail = pbuf;
 			precvframe->u.hdr.rx_end = pbuf + alloc_sz;
 #endif // PLATFORM_FREEBSD
@@ -1348,7 +1343,7 @@ int recvbuf2recvframe(_adapter *padapter, struct sk_buff  *pskb)
 
 #else // CONFIG_BSD_RX_USE_MBUF
 
-		pkt_copy = dev_alloc_skb(alloc_sz);
+		pkt_copy = rtw_skb_alloc(alloc_sz);
 
 		//printf("%s()-%d: pkt_copy = %p, pkt_copy->head = %p\n", __FUNCTION__, __LINE__, pkt_copy, pkt_copy->head);
 		if(pkt_copy)
@@ -1426,7 +1421,7 @@ void rtl8192du_recv_tasklet(void *priv, int npending)
 		if ((padapter->bDriverStopped == _TRUE)||(padapter->bSurpriseRemoved== _TRUE))
 		{
 			DBG_8192C("recv_tasklet => bDriverStopped or bSurpriseRemoved \n");
-			dev_kfree_skb_any(pskb);
+			rtw_skb_free(pskb);
 			break;
 		}
 	
@@ -1440,7 +1435,7 @@ void rtl8192du_recv_tasklet(void *priv, int npending)
 		skb_queue_tail(&precvpriv->free_recv_skb_queue, pskb);
 		
 #else
-		dev_kfree_skb_any(pskb);
+		rtw_skb_free(pskb);
 #endif
 				
 	}
@@ -1474,7 +1469,7 @@ void usb_read_port_complete(struct urb *purb, struct pt_regs *regs)
 	#else
 		if(precvbuf->pskb){
 			DBG_8192C("==> free skb(%p)\n",precvbuf->pskb);
-			dev_kfree_skb_any(precvbuf->pskb);				
+			rtw_skb_free(precvbuf->pskb);
 		}	
 	#endif
 	
@@ -1608,18 +1603,9 @@ _func_enter_;
 		//re-assign for linux based on skb
 		if((precvbuf->reuse == _FALSE) || (precvbuf->pskb == NULL))
 		{
-			
-#ifdef PLATFORM_FREEBSD
-			precvbuf->pskb = dev_alloc_skb(MAX_RECVBUF_SZ + RECVBUFF_ALIGN_SZ);
-#else // PLATFORM_FREEBSD
-			//precvbuf->pskb = alloc_skb(MAX_RECVBUF_SZ, GFP_ATOMIC);//don't use this after v2.6.25
-#if (LINUX_VERSION_CODE < KERNEL_VERSION(2,6,18)) // http://www.mail-archive.com/netdev@vger.kernel.org/msg17214.html
-			precvbuf->pskb = dev_alloc_skb(MAX_RECVBUF_SZ + RECVBUFF_ALIGN_SZ);
-#else			
-			precvbuf->pskb = netdev_alloc_skb(adapter->pnetdev, MAX_RECVBUF_SZ + RECVBUFF_ALIGN_SZ);
-#endif //(LINUX_VERSION_CODE < KERNEL_VERSION(2,6,18))
-#endif //PLATFORM_FREEBSD
-			if(precvbuf->pskb == NULL)		
+			precvbuf->pskb = rtw_skb_alloc(MAX_RECVBUF_SZ + RECVBUFF_ALIGN_SZ);
+
+			if(precvbuf->pskb == NULL)	
 			{
 				RT_TRACE(_module_hci_ops_os_c_,_drv_err_,("init_recvbuf(): alloc_skb fail!\n"));
 				return _FAIL;

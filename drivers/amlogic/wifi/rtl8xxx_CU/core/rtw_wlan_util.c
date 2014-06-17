@@ -454,6 +454,9 @@ inline u8 rtw_get_oper_ch(_adapter *adapter)
 
 inline void rtw_set_oper_ch(_adapter *adapter, u8 ch)
 {
+	if (adapter_to_dvobj(adapter)->oper_channel != ch)
+		adapter_to_dvobj(adapter)->on_oper_ch_time = rtw_get_current_time();
+
 	adapter_to_dvobj(adapter)->oper_channel = ch;
 }
 
@@ -475,6 +478,19 @@ inline u8 rtw_get_oper_choffset(_adapter *adapter)
 inline void rtw_set_oper_choffset(_adapter *adapter, u8 offset)
 {
 	adapter_to_dvobj(adapter)->oper_ch_offset = offset;
+}
+
+inline u32 rtw_get_on_oper_ch_time(_adapter *adapter)
+{
+	return adapter_to_dvobj(adapter)->on_oper_ch_time;
+}
+
+inline u32 rtw_get_on_cur_ch_time(_adapter *adapter)
+{
+	if (adapter->mlmeextpriv.cur_channel == adapter_to_dvobj(adapter)->oper_channel)
+		return adapter_to_dvobj(adapter)->on_oper_ch_time;
+	else
+		return 0;
 }
 
 void SelectChannel(_adapter *padapter, unsigned char channel)
@@ -2237,15 +2253,15 @@ int rtw_handle_dualmac(_adapter *adapter, bool init)
 		goto exit;
 
 	if (init) {
-		if ((dvobj->NumInterfaces == 2) && (adapter->registrypriv.mac_phy_mode != 1)) {
-			dvobj->DualMacMode = _TRUE;
+		rtw_hal_get_def_var(adapter, HAL_DEF_DUAL_MAC_MODE, &dvobj->DualMacMode);
+		if (dvobj->DualMacMode == _TRUE) {
 			// temply disable IPS For 92D-VC
 			adapter->registrypriv.ips_mode = IPS_NONE;
 		}
 		
 		/* For SMSP on 92DU-VC, driver do not probe another Interface. */
 		if ((dvobj->DualMacMode != _TRUE) && (dvobj->InterfaceNumber != 0)) {
-			DBG_871X("%s(): Do not init another USB Interface because SMSP\n",__FUNCTION__);
+			DBG_871X("%s(): Do not init another Interface because SMSP\n",__FUNCTION__);
 			status = _FAIL;
 			goto exit;
 		}

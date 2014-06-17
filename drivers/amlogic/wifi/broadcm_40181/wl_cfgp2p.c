@@ -595,7 +595,7 @@ wl_cfgp2p_init_discovery(struct wl_priv *wl)
 
 	CFGP2P_DBG(("enter\n"));
 
-	if (wl_to_p2p_bss_bssidx(wl, P2PAPI_BSSCFG_DEVICE) != 0) {
+	if (wl_to_p2p_bss_bssidx(wl, P2PAPI_BSSCFG_DEVICE) != 0 && wl_to_p2p_bss_bssidx(wl, P2PAPI_BSSCFG_DEVICE) != WL_INVALID) {
 		CFGP2P_ERR(("do nothing, already initialized\n"));
 		return ret;
 	}
@@ -689,8 +689,6 @@ wl_cfgp2p_enable_discovery(struct wl_priv *wl, struct net_device *dev,
 		goto set_ie;
 	}
 
-	wl_set_p2p_status(wl, DISCOVERY_ON);
-
 	CFGP2P_DBG(("enter\n"));
 
 	ret = wl_cfgp2p_init_discovery(wl);
@@ -718,6 +716,7 @@ set_ie:
 			goto exit;
 		}
 	}
+	wl_set_p2p_status(wl, DISCOVERY_ON);
 exit:
 	return ret;
 }
@@ -733,6 +732,11 @@ wl_cfgp2p_disable_discovery(struct wl_priv *wl)
 	s32 ret = BCME_OK;
 	CFGP2P_DBG((" enter\n"));
 	wl_clr_p2p_status(wl, DISCOVERY_ON);
+
+	if(!wl->p2p) { // terence 20130113: Fix for p2p NULL pointer
+		CFGP2P_ERR(("wl->p2p is NULL\n"));
+		return -1;
+	}
 
 	if (wl_to_p2p_bss_bssidx(wl, P2PAPI_BSSCFG_DEVICE) == 0) {
 		CFGP2P_ERR((" do nothing, not initialized\n"));
@@ -1616,8 +1620,9 @@ wl_cfgp2p_cancel_listen(struct wl_priv *wl, struct net_device *ndev,
 		if (notify)
 			if (ndev && ndev->ieee80211_ptr) {
 #if defined(WL_CFG80211_P2P_DEV_IF)
-				cfg80211_remain_on_channel_expired(wdev, wl->last_roc_id,
-					&wl->remain_on_chan, GFP_KERNEL);
+				if (wdev) // terence 20140106: fix for NULL pointer of wdev
+					cfg80211_remain_on_channel_expired(wdev, wl->last_roc_id,
+						&wl->remain_on_chan, GFP_KERNEL);
 #else
 				cfg80211_remain_on_channel_expired(ndev, wl->last_roc_id,
 					&wl->remain_on_chan, wl->remain_on_chan_type, GFP_KERNEL);

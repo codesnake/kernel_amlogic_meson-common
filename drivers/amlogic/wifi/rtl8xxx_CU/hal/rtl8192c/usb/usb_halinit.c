@@ -5449,18 +5449,20 @@ _func_enter_;
 			{
 				DIG_T	*pDigTable = &pdmpriv->DM_DigTable;					
 				u32 		rx_gain = ((u32 *)(val))[0];
-				
+
 				if(rx_gain == 0xff){//restore rx gain
 					pDigTable->CurIGValue = pDigTable->BackupIGValue;
 					PHY_SetBBReg(Adapter, rOFDM0_XAAGCCore1, 0x7f,pDigTable->CurIGValue );
 					PHY_SetBBReg(Adapter, rOFDM0_XBAGCCore1, 0x7f,pDigTable->CurIGValue);
 				}
 				else{
-					pDigTable->BackupIGValue = pDigTable->CurIGValue;					
+					pDigTable->BackupIGValue = pDigTable->CurIGValue;
 					PHY_SetBBReg(Adapter, rOFDM0_XAAGCCore1, 0x7f,rx_gain );
 					PHY_SetBBReg(Adapter, rOFDM0_XBAGCCore1, 0x7f,rx_gain);
 					pDigTable->CurIGValue = (u8)rx_gain;
 				}
+
+
 			}
 			break;
 		case HW_VAR_TRIGGER_GPIO_0:
@@ -5669,6 +5671,9 @@ _func_enter_;
 		case HW_VAR_BCN_VALID:
 			//BCN_VALID, BIT16 of REG_TDECTRL = BIT0 of REG_TDECTRL+2, write 1 to clear, Clear by sw
 			rtw_write8(Adapter, REG_TDECTRL+2, rtw_read8(Adapter, REG_TDECTRL+2) | BIT0); 
+			break;
+		case HW_VAR_USB_RXAGG_PAGE_TO:
+			rtw_write8(Adapter, REG_USB_DMA_AGG_TO, *((u8 *)val));
 			break;
 		default:
 			break;

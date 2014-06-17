@@ -294,6 +294,9 @@ void rtw_remove_bcn_ie(_adapter *padapter, WLAN_BSSID_EX *pnetwork, u8 index)
 
 		dst_ie = p;
 	}
+	else {
+		return;
+	}
 
 	if(remainder_ielen>0)
 	{
@@ -551,7 +554,7 @@ if (chk_alive_num) {
 			psta->keep_alive_trycnt = 0;
 			continue;
 		}
-		else if (psta->keep_alive_trycnt <= 3)
+		else if (psta->keep_alive_trycnt <= 30)
 		{
 			DBG_871X("ack check for asoc expire, keep_alive_trycnt=%d\n", psta->keep_alive_trycnt);
 			psta->expire_to = 1;

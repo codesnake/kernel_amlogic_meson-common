@@ -558,6 +558,14 @@ DM_Write_DIG(
 		// Just not to modified it for SD3 testing.
 		//PHY_SetBBReg(pAdapter, rOFDM0_XAAGCCore1, bMaskByte0, DM_DigTable.CurIGValue);
 		//PHY_SetBBReg(pAdapter, rOFDM0_XBAGCCore1, bMaskByte0, DM_DigTable.CurIGValue);
+#if defined CONFIG_WIDI_DIG_3E && defined CONFIG_INTEL_WIDI
+		if( pAdapter->mlmepriv.widi_enable == _TRUE )
+		{
+			PHY_SetBBReg(pAdapter, rOFDM0_XAAGCCore1, 0x7f, 0x3e);
+			PHY_SetBBReg(pAdapter, rOFDM0_XBAGCCore1, 0x7f, 0x3e);
+		}
+		else
+#endif //defined CONFIG_WIDI_DIG_3E && defined CONFIG_INTEL_WIDI
 		PHY_SetBBReg(pAdapter, rOFDM0_XAAGCCore1, 0x7f, pDM_DigTable->CurIGValue);
 		PHY_SetBBReg(pAdapter, rOFDM0_XBAGCCore1, 0x7f, pDM_DigTable->CurIGValue);
 		if(pDM_DigTable->CurIGValue != 0x17)

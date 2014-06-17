@@ -294,6 +294,9 @@ void rtw_remove_bcn_ie(_adapter *padapter, WLAN_BSSID_EX *pnetwork, u8 index)
 
 		dst_ie = p;
 	}
+	else {
+		return;
+	}
 
 	if(remainder_ielen>0)
 	{

@@ -159,15 +159,7 @@ int	rtl8192du_init_recv_priv(_adapter *padapter)
 
 		for(i=0; i<NR_PREALLOC_RECV_SKB; i++)
 		{
-	#ifdef PLATFORM_FREEBSD
-			pskb = dev_alloc_skb(MAX_RECVBUF_SZ + RECVBUFF_ALIGN_SZ);
-	#else
-	#if (LINUX_VERSION_CODE < KERNEL_VERSION(2,6,18)) // http://www.mail-archive.com/netdev@vger.kernel.org/msg17214.html
-			pskb = dev_alloc_skb(MAX_RECVBUF_SZ + RECVBUFF_ALIGN_SZ);
-	#else
-			pskb = netdev_alloc_skb(padapter->pnetdev, MAX_RECVBUF_SZ + RECVBUFF_ALIGN_SZ);
-	#endif //(LINUX_VERSION_CODE < KERNEL_VERSION(2,6,18))
-	#endif //PLATFORM_FREEBSD
+			pskb = rtw_skb_alloc(MAX_RECVBUF_SZ + RECVBUFF_ALIGN_SZ);
 
 			if(pskb)
 			{
@@ -232,7 +224,7 @@ void rtl8192du_free_recv_priv (_adapter *padapter)
 		DBG_8192C(KERN_WARNING "rx_skb_queue not empty\n");
 	}
 
-	skb_queue_purge(&precvpriv->rx_skb_queue);
+	rtw_skb_queue_purge(&precvpriv->rx_skb_queue);
 
 #ifdef CONFIG_PREALLOC_RECV_SKB
 
@@ -240,7 +232,7 @@ void rtl8192du_free_recv_priv (_adapter *padapter)
 		DBG_8192C(KERN_WARNING "free_recv_skb_queue not empty, %d\n", skb_queue_len(&precvpriv->free_recv_skb_queue));
 	}
 
-	skb_queue_purge(&precvpriv->free_recv_skb_queue);
+	rtw_skb_queue_purge(&precvpriv->free_recv_skb_queue);
 
 #endif
 
@@ -250,14 +242,14 @@ void rtl8192du_free_recv_priv (_adapter *padapter)
 	struct sk_buff  *pskb;
 	while (NULL != (pskb = skb_dequeue(&precvpriv->rx_skb_queue)))
 	{
-		dev_kfree_skb_any(pskb);
+		rtw_skb_free(pskb);
 				
 	}
 
 #ifdef CONFIG_PREALLOC_RECV_SKB
 	while (NULL != (pskb = skb_dequeue(&precvpriv->free_recv_skb_queue)))
 	{
-		dev_kfree_skb_any(pskb);
+		rtw_skb_free(pskb);
 				
 	}
 #endif	

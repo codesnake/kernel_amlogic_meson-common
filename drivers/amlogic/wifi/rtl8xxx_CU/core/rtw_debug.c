@@ -21,6 +21,7 @@
 
 
 #include <rtw_debug.h>
+#include <../hal/dm.h>
 
 //#ifdef CONFIG_DEBUG_RTL871X
 
@@ -120,6 +121,20 @@ int proc_set_log_level(struct file *file, const char *buffer,
 	return count;
 	
 }
+
+#ifdef DBG_MEM_ALLOC
+int proc_get_mstat(char *page, char **start,
+			  off_t offset, int count,
+			  int *eof, void *data)
+{	
+	int len = 0;
+
+	len += _rtw_mstat_dump(page+len, count-len);
+	*eof = 1;
+
+	return len;
+}
+#endif /* DBG_MEM_ALLOC */
 
 int proc_get_write_reg(char *page, char **start,
 			  off_t offset, int count,
@@ -1206,6 +1221,31 @@ int proc_get_best_channel(char *page, char **start,
 	return len;
 
 }
+
+int proc_set_best_channel(struct file *file, const char *buffer,
+		unsigned long count, void *data)
+{
+	struct net_device *dev = (struct net_device *)data;
+	_adapter *padapter = (_adapter *)rtw_netdev_priv(dev);
+	struct mlme_ext_priv *pmlmeext = &padapter->mlmeextpriv;
+	char tmp[32];
+
+	if(count < 1)
+		return -EFAULT;
+
+	if(buffer && !copy_from_user(tmp, buffer, sizeof(tmp)))
+	{
+		int i;
+		for(i = 0; pmlmeext->channel_set[i].ChannelNum != 0; i++)
+		{
+			pmlmeext->channel_set[i].rx_count = 0;
+		}
+
+		DBG_871X("set %s\n", "Clean Best Channel Count");
+	}
+
+	return count;
+}
 #endif /* CONFIG_FIND_BEST_CHANNEL */
 
 #if defined(DBG_CONFIG_ERROR_DETECT)
@@ -1246,6 +1286,52 @@ int proc_set_sreset(struct file *file, const char *buffer, unsigned long count, 
 	
 }
 #endif /* DBG_CONFIG_ERROR_DETECT */
+
+#ifdef CONFIG_DM_ADAPTIVITY
+int proc_get_dm_adaptivity(char *page, char **start,
+			  off_t offset, int count,
+			  int *eof, void *data)
+{
+	struct net_device *dev = data;
+	_adapter *padapter = (_adapter *)rtw_netdev_priv(dev);
+	int len = 0;
+
+	len += dm_adaptivity_get_parm_str(padapter, page, count);
+
+	*eof = 1;
+	return len;
+}
+
+int proc_set_dm_adaptivity(struct file *file, const char *buffer,
+		unsigned long count, void *data)
+{
+	struct net_device *dev = (struct net_device *)data;
+	_adapter *padapter = (_adapter *)rtw_netdev_priv(dev);
+	char tmp[32];
+	u32 TH_L2H_ini;
+	s8 TH_EDCCA_HL_diff;
+	u32 IGI_Base;
+	int ForceEDCCA;
+	u8 AdapEn_RSSI;
+	u8 IGI_LowerBound;
+
+	if (count < 1)
+		return -EFAULT;
+
+	if (buffer && !copy_from_user(tmp, buffer, sizeof(tmp))) {
+
+		int num = sscanf(tmp, "%x %hhd %x %d %hhu %hhu",
+			&TH_L2H_ini, &TH_EDCCA_HL_diff, &IGI_Base, &ForceEDCCA, &AdapEn_RSSI, &IGI_LowerBound);
+
+		if (num != 6)
+			return count;
+
+		dm_adaptivity_set_parm(padapter, (s8)TH_L2H_ini, TH_EDCCA_HL_diff, (s8)IGI_Base, (bool)ForceEDCCA, AdapEn_RSSI, IGI_LowerBound);
+	}
+	
+	return count;
+}
+#endif /* CONFIG_DM_ADAPTIVITY */
 
 #endif
 

@@ -26,41 +26,44 @@
 
 
 #ifdef CONFIG_IPS
+void _ips_enter(_adapter * padapter)
+{
+	struct pwrctrl_priv *pwrpriv = &padapter->pwrctrlpriv;
+
+	pwrpriv->bips_processing = _TRUE;
+
+	// syn ips_mode with request
+	pwrpriv->ips_mode = pwrpriv->ips_mode_req;
+
+	pwrpriv->ips_enter_cnts++;
+	DBG_871X("==>ips_enter cnts:%d\n",pwrpriv->ips_enter_cnts);
+
+	if(rf_off == pwrpriv->change_rfpwrstate)
+	{
+		if(pwrpriv->ips_mode == IPS_LEVEL_2)
+			pwrpriv->bkeepfwalive = _TRUE;
+
+		rtw_ips_pwr_down(padapter);
+		pwrpriv->rf_pwrstate = rf_off;
+	}
+	pwrpriv->bips_processing = _FALSE;
+
+}
+
 void ips_enter(_adapter * padapter)
 {
 	struct pwrctrl_priv *pwrpriv = &padapter->pwrctrlpriv;
 
 	_enter_pwrlock(&pwrpriv->lock);
-
-	pwrpriv->bips_processing = _TRUE;	
-
-	// syn ips_mode with request
-	pwrpriv->ips_mode = pwrpriv->ips_mode_req;
-	
-	pwrpriv->ips_enter_cnts++;	
-	DBG_871X("==>ips_enter cnts:%d\n",pwrpriv->ips_enter_cnts);
-	
-	if(rf_off == pwrpriv->change_rfpwrstate )
-	{
-		if(pwrpriv->ips_mode == IPS_LEVEL_2)
-			pwrpriv->bkeepfwalive = _TRUE;
-		
-		rtw_ips_pwr_down(padapter);
-		pwrpriv->rf_pwrstate = rf_off;
-	}	
-	pwrpriv->bips_processing = _FALSE;	
+	_ips_enter(padapter);
 	_exit_pwrlock(&pwrpriv->lock);
-	
 }
 
-int ips_leave(_adapter * padapter)
+int _ips_leave(_adapter * padapter)
 {
 	struct pwrctrl_priv *pwrpriv = &padapter->pwrctrlpriv;
-	struct security_priv* psecuritypriv=&(padapter->securitypriv);
-	struct mlme_priv		*pmlmepriv = &(padapter->mlmepriv);
 	int result = _SUCCESS;
-	sint keyid;
-	_enter_pwrlock(&pwrpriv->lock);
+
 	if((pwrpriv->rf_pwrstate == rf_off) &&(!pwrpriv->bips_processing))
 	{
 		pwrpriv->bips_processing = _TRUE;
@@ -72,33 +75,27 @@ int ips_leave(_adapter * padapter)
 			pwrpriv->rf_pwrstate = rf_on;
 		}
 
-		if((_WEP40_ == psecuritypriv->dot11PrivacyAlgrthm) ||(_WEP104_ == psecuritypriv->dot11PrivacyAlgrthm))
-		{
-			DBG_871X("==>%s,channel(%d),processing(%x)\n",__FUNCTION__,padapter->mlmeextpriv.cur_channel,pwrpriv->bips_processing);
-			set_channel_bwmode(padapter, padapter->mlmeextpriv.cur_channel, HAL_PRIME_CHNL_OFFSET_DONT_CARE, HT_CHANNEL_WIDTH_20);			
-			for(keyid=0;keyid<4;keyid++){
-				if(pmlmepriv->key_mask & BIT(keyid)){
-					if(keyid == psecuritypriv->dot11PrivacyKeyIndex)
-						result=rtw_set_key(padapter,psecuritypriv, keyid, 1);
-					else
-						result=rtw_set_key(padapter,psecuritypriv, keyid, 0);
-				}
-			}
-		}
-		
 		DBG_871X("==> ips_leave.....LED(0x%08x)...\n",rtw_read32(padapter,0x4c));
 		pwrpriv->bips_processing = _FALSE;
 
 		pwrpriv->bkeepfwalive = _FALSE;
-
-
 	}
-	_exit_pwrlock(&pwrpriv->lock);
+
 	return result;
 }
 
+int ips_leave(_adapter * padapter)
+{
+	struct pwrctrl_priv *pwrpriv = &padapter->pwrctrlpriv;
+	int ret;
 
-#endif
+	_enter_pwrlock(&pwrpriv->lock);
+	ret = _ips_leave(padapter);
+	_exit_pwrlock(&pwrpriv->lock);
+
+	return ret;
+}
+#endif /* CONFIG_IPS */
 
 #ifdef CONFIG_AUTOSUSPEND
 extern void autosuspend_enter(_adapter* padapter);	
@@ -368,7 +365,9 @@ u8 PS_RDY_CHECK(_adapter * padapter)
 		return _FALSE;
 	}
 
-	if (	(check_fwstate(pmlmepriv, _FW_LINKED) == _FALSE) ||
+	if ((check_fwstate(pmlmepriv, _FW_LINKED) == _FALSE) ||
+		(check_fwstate(pmlmepriv, _FW_UNDER_SURVEY) == _TRUE) ||
+		(check_fwstate(pmlmepriv, WIFI_UNDER_WPS) == _TRUE) ||
 		(check_fwstate(pmlmepriv, WIFI_AP_STATE) == _TRUE) ||
 		(check_fwstate(pmlmepriv, WIFI_ADHOC_MASTER_STATE) == _TRUE) ||
 		(check_fwstate(pmlmepriv, WIFI_ADHOC_STATE) == _TRUE) )
@@ -382,6 +381,7 @@ u8 PS_RDY_CHECK(_adapter * padapter)
 		DBG_871X("Group handshake still in progress !!!\n");
 		return _FALSE;
 	}
+
 #ifdef CONFIG_IOCTL_CFG80211
 	if (!rtw_cfg80211_pwr_mgmt(padapter))
 		return _FALSE;

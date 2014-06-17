@@ -147,7 +147,8 @@ static int bcmsdh_sdmmc_probe(struct sdio_func *func,
 		ret = -ENODEV;
 	}
 #ifdef POWER_OFF_IN_SUSPEND
-	dhd_conf_register_wifi_suspend(func);
+	if (ret == 0)
+		dhd_conf_register_wifi_suspend(func);
 #endif
 
 	return ret;
@@ -208,7 +209,7 @@ static int bcmsdh_sdmmc_suspend(struct device *pdev)
 	if (func->num != 2)
 		return 0;
 
-	sd_trace(("%s Enter\n", __FUNCTION__));
+	printk("%s Enter\n", __FUNCTION__);
 	if (dhd_os_check_wakelock(bcmsdh_get_drvdata()))
 		return -EBUSY;
 
@@ -243,7 +244,7 @@ static int bcmsdh_sdmmc_resume(struct device *pdev)
 #if defined(OOB_INTR_ONLY) || defined(POWER_OFF_IN_SUSPEND)
 	struct sdio_func *func = dev_to_sdio_func(pdev);
 #endif
-	sd_trace(("%s Enter\n", __FUNCTION__));
+	printk("%s Enter\n", __FUNCTION__);
 	dhd_mmc_suspend = FALSE;
 	
 #ifdef POWER_OFF_IN_SUSPEND

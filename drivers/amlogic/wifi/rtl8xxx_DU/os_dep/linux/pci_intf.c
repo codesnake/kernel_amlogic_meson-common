@@ -1144,18 +1144,12 @@ static struct dvobj_priv *pci_dvobj_init(struct pci_dev *pdev)
 
 _func_enter_;
 
-	if ((dvobj = (struct dvobj_priv*)rtw_zmalloc(sizeof(*dvobj))) == NULL) {
+	if ((dvobj = devobj_init()) == NULL) {
 		goto exit;
 	}
 	dvobj->ppcidev = pdev;
 	pcipriv = &(dvobj->pcipriv);
 	pci_set_drvdata(pdev, dvobj);
-
-	_rtw_mutex_init(&dvobj->hw_init_mutex);
-	_rtw_mutex_init(&dvobj->h2c_fwcmd_mutex);
-	_rtw_mutex_init(&dvobj->setch_mutex);
-	_rtw_mutex_init(&dvobj->setbw_mutex);
-
 
 	if ( (err = pci_enable_device(pdev)) != 0) {
 		DBG_871X(KERN_ERR "%s : Cannot enable new PCI device\n", pci_name(pdev));
@@ -1320,11 +1314,7 @@ disable_picdev:
 free_dvobj:
 	if (status != _SUCCESS && dvobj) {
 		pci_set_drvdata(pdev, NULL);
-		_rtw_mutex_free(&dvobj->hw_init_mutex);
-		_rtw_mutex_free(&dvobj->h2c_fwcmd_mutex);
-		_rtw_mutex_free(&dvobj->setch_mutex);
-		_rtw_mutex_free(&dvobj->setbw_mutex);
-		rtw_mfree((u8*)dvobj, sizeof(*dvobj));
+		devobj_deinit(dvobj);
 		dvobj = NULL;
 	}
 exit:
@@ -1349,12 +1339,7 @@ _func_enter_;
 			dvobj->pci_mem_start = 0;
 		}
 
-		_rtw_mutex_free(&dvobj->hw_init_mutex);
-		_rtw_mutex_free(&dvobj->h2c_fwcmd_mutex);
-		_rtw_mutex_free(&dvobj->setch_mutex);
-		_rtw_mutex_free(&dvobj->setbw_mutex);
-
-		rtw_mfree((u8*)dvobj, sizeof(*dvobj));
+		devobj_deinit(dvobj);
 	}
 
 	pci_release_regions(pdev);
@@ -1478,6 +1463,9 @@ static void pci_intf_start(_adapter *padapter)
 	RT_TRACE(_module_hci_intfs_c_,_drv_err_,("+pci_intf_start\n"));
 	DBG_871X("+pci_intf_start\n");
 
+#ifdef CONFIG_PCILED_BLINK
+	rtw_led_control(padapter, LED_CTL_NO_LINK);
+#endif
 	//Enable hw interrupt
 	rtw_hal_enable_interrupt(padapter);
 
@@ -1650,23 +1638,14 @@ _adapter *rtw_pci_if1_init(struct dvobj_priv * dvobj, struct pci_dev *pdev,
 	padapter->interface_type = RTW_PCIE;
 	decide_chip_type_by_pci_device_id(padapter, pdev);
 
-	if (rtw_handle_dualmac(padapter, 1) != _SUCCESS)
-		goto free_adapter;
-
 	if((pnetdev = rtw_init_netdev(padapter)) == NULL) {
-		goto handle_dualmac;
+		goto free_adapter;
 	}
 	if (dvobj->bdma64)
 		pnetdev->features |= NETIF_F_HIGHDMA;
 	pnetdev->irq = pdev->irq;
 	SET_NETDEV_DEV(pnetdev, dvobj_to_dev(dvobj));
 	padapter = rtw_netdev_priv(pnetdev);
-
-#ifdef CONFIG_IOCTL_CFG80211
-	if(rtw_wdev_alloc(padapter, dvobj_to_dev(dvobj)) != 0) {
-		goto handle_dualmac;
-	}
-#endif
 
 	//step 2. hook HalFunc, allocate HalData
 	if (padapter->chip_type == RTL8188C_8192C) {
@@ -1679,7 +1658,7 @@ _adapter *rtw_pci_if1_init(struct dvobj_priv * dvobj, struct pci_dev *pdev,
 		#endif
 	} else {
 		DBG_871X("Detect NULL_CHIP_TYPE\n");
-		goto free_wdev;
+		goto free_hal_data;
 	}
 
 	//step 3.	initialize the dvobj_priv
@@ -1702,10 +1681,19 @@ _adapter *rtw_pci_if1_init(struct dvobj_priv * dvobj, struct pci_dev *pdev,
 	//step 4. read efuse/eeprom data and get mac_addr
 	rtw_hal_read_chip_info(padapter);
 
+	if (rtw_handle_dualmac(padapter, 1) != _SUCCESS)
+		goto free_hal_data;
+
+#ifdef CONFIG_IOCTL_CFG80211
+	if(rtw_wdev_alloc(padapter, dvobj_to_dev(dvobj)) != 0) {
+		goto handle_dualmac;
+	}
+#endif
+
 	//step 5.
 	if (rtw_init_drv_sw(padapter) == _FAIL) {
 		RT_TRACE(_module_hci_intfs_c_,_drv_err_,("Initialize driver software resource Failed!\n"));
-		goto free_hal_data;
+		goto free_wdev;
 	}
 
 	status = rtw_hal_inirp_init(padapter);
@@ -1738,9 +1726,6 @@ inirp_deinit:
 free_drv_sw:
 	if (status != _SUCCESS)
 		rtw_free_drv_sw(padapter);
-free_hal_data:
-	if (status != _SUCCESS && padapter->HalData)
-		rtw_mfree(padapter->HalData, sizeof(*(padapter->HalData)));
 free_wdev:
 	if (status != _SUCCESS) {
 		#ifdef CONFIG_IOCTL_CFG80211
@@ -1751,6 +1736,9 @@ free_wdev:
 handle_dualmac:
 	if (status != _SUCCESS)
 		rtw_handle_dualmac(padapter, 0);
+free_hal_data:
+	if (status != _SUCCESS && padapter->HalData)
+		rtw_mfree(padapter->HalData, sizeof(*(padapter->HalData)));
 free_adapter:
 	if (status != _SUCCESS) {
 		if (pnetdev)
@@ -1780,13 +1768,6 @@ static void rtw_pci_if1_deinit(_adapter *if1)
 	#endif
 #endif
 
-	if (if1->DriverState != DRIVER_DISAPPEAR) {
-		if(pnetdev) {
-			unregister_netdev(pnetdev); //will call netdev_close()
-			rtw_proc_remove_one(pnetdev);
-		}
-	}
-
 	rtw_cancel_all_timer(if1);
 #ifdef CONFIG_WOWLAN
 	if1->pwrctrlpriv.wowlan_mode=_FALSE;
@@ -1799,11 +1780,8 @@ static void rtw_pci_if1_deinit(_adapter *if1)
 	rtw_handle_dualmac(if1, 0);
 
 #ifdef CONFIG_IOCTL_CFG80211
-	if(if1->rtw_wdev)
-	{
-		rtw_wdev_unregister(if1->rtw_wdev);
+	if (if1->rtw_wdev)
 		rtw_wdev_free(if1->rtw_wdev);
-	}
 #endif //CONFIG_IOCTL_CFG80211
 
 	rtw_hal_inirp_deinit(if1);
@@ -1845,7 +1823,7 @@ static int rtw_drv_init(struct pci_dev *pdev, const struct pci_device_id *did)
 
 	/* Initialize if1 */
 	if ((if1 = rtw_pci_if1_init(dvobj, pdev, did)) == NULL) {
-		DBG_871X("rtw_usb_if1_init Failed!\n");
+		DBG_871X("rtw_pci_if1_init Failed!\n");
 		goto free_dvobj;
 	}
 
@@ -1923,9 +1901,13 @@ _func_exit_;
 
 	DBG_871X("+rtw_dev_remove\n");
 
+	pdvobjpriv->processing_dev_remove = _TRUE;
+
 	if (unlikely(!padapter)) {
 		return;
 	}
+
+	rtw_unregister_netdevs(pdvobjpriv);
 
 	#if 0
 #ifdef RTK_DMP_PLATFORM
@@ -1999,12 +1981,14 @@ static void __exit rtw_drv_halt(void)
 	RT_TRACE(_module_hci_intfs_c_,_drv_err_,("+rtw_drv_halt\n"));
 	DBG_871X("+rtw_drv_halt\n");
 
-	rtw_suspend_lock_uninit();
 	pci_drvpriv.drv_registered = _FALSE;
 
 	pci_unregister_driver(&pci_drvpriv.rtw_pci_drv);
 
+	rtw_suspend_lock_uninit();
 	DBG_871X("-rtw_drv_halt\n");
+
+	rtw_mstat_dump();
 }
 
 

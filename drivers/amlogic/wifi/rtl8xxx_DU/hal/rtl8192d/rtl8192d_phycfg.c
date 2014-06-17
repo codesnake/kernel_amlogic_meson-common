@@ -2912,7 +2912,7 @@ PHY_SwitchWirelessBand(
 		//avoid using cck rate in 5G band
 		// Set RRSR rate table.
 		update_tx_basic_rate(Adapter, WIRELESS_11A_5N);
-	
+
 		PHY_SetBBReg1Byte(Adapter, rFPGA0_RFMOD, bCCKEn|bOFDMEn, 0x2);
 	}
 

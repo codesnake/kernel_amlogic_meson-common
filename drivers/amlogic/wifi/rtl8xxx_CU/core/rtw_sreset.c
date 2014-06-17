@@ -322,7 +322,8 @@ void sreset_reset(_adapter *padapter)
 
 	psrtpriv->Wifi_Error_Status = WIFI_STATUS_SUCCESS;
 
-	_enter_critical_mutex(&psrtpriv->silentreset_mutex, &irqL);
+	_enter_pwrlock(&pwrpriv->lock);
+
 	psrtpriv->silent_reset_inprogress = _TRUE;
 	pwrpriv->change_rfpwrstate = rf_off;
 
@@ -332,8 +333,8 @@ void sreset_reset(_adapter *padapter)
 	#endif
 
 	#ifdef CONFIG_IPS
-	ips_enter(padapter);
-	ips_leave(padapter);
+	_ips_enter(padapter);
+	_ips_leave(padapter);
 	#endif
 
 	sreset_start_adapter(padapter);
@@ -342,7 +343,8 @@ void sreset_reset(_adapter *padapter)
 	#endif
 
 	psrtpriv->silent_reset_inprogress = _FALSE;
-	_exit_critical_mutex(&psrtpriv->silentreset_mutex, &irqL);
+
+	_exit_pwrlock(&pwrpriv->lock);
 
 	DBG_871X("%s done in %d ms\n", __FUNCTION__, rtw_get_passing_time_ms(start));
 #endif
