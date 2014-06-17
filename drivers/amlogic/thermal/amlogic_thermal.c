@@ -44,6 +44,28 @@
 #include <linux/cpucore_cooling.h>
 #include <linux/gpucore_cooling.h>
 
+#ifdef CONFIG_AML_VIRTUAL_THERMAL
+#define DBG_VIRTUAL         0
+static int trim_flag = 0;
+static int virtual_thermal_en = 0;
+
+struct aml_virtual_thermal {
+    unsigned int freq;
+    unsigned int temp_time[4];
+};
+
+struct aml_virtual_thermal_device {
+    int count;
+    struct aml_virtual_thermal *thermal;
+};
+
+static struct aml_virtual_thermal_device cpu_virtual_thermal = {};
+static struct aml_virtual_thermal_device gpu_virtual_thermal = {};
+static unsigned int report_interval[4] = {};
+static struct delayed_work freq_collect_work;
+static int freq_sample_period = 30;
+#endif  /* CONFIG_AML_VIRTUAL_THERMAL */
+
 struct freq_trip_table {
 	unsigned int freq_state;
 };
@@ -73,6 +95,7 @@ struct amlogic_thermal_platform_data {
 	struct thermal_cooling_device *cpu_cool_dev;
 	struct thermal_cooling_device *gpu_cool_dev;
 	struct thermal_cooling_device *cpucore_cool_dev;
+	struct thermal_cooling_device *gpucore_cool_dev;
 	enum thermal_device_mode mode;
 	struct mutex lock;
 };
@@ -114,16 +137,32 @@ static int amlogic_set_mode(struct thermal_zone_device *thermal,
 			enum thermal_device_mode mode)
 {
 	struct  amlogic_thermal_platform_data *pdata= thermal->devdata;
+	struct cpucore_cooling_device *cpucore_device =NULL;
+	struct gpucore_cooling_device *gpucore_device = NULL;
 	
 	if(!pdata)
 		return -EINVAL;
 	
 	//mutex_lock(&pdata->therm_dev->lock);
 	
-	if (mode == THERMAL_DEVICE_ENABLED)
+	if (mode == THERMAL_DEVICE_ENABLED){
 		pdata->therm_dev->polling_delay = pdata->idle_interval;
-	else
+		if(pdata->cpucore_cool_dev){
+			cpucore_device=pdata->cpucore_cool_dev->devdata;
+			cpucore_device->stop_flag=0;
+		}
+		if(pdata->gpucore_cool_dev){
+			gpucore_device=pdata->gpucore_cool_dev->devdata;
+			gpucore_device->stop_flag=0;
+		}
+	}
+	else{
 		pdata->therm_dev->polling_delay = 0;
+		if(pdata->cpucore_cool_dev)
+			pdata->cpucore_cool_dev->ops->set_cur_state(pdata->cpucore_cool_dev,(0|CPU_STOP));
+		if(pdata->gpucore_cool_dev)
+			pdata->gpucore_cool_dev->ops->set_cur_state(pdata->gpucore_cool_dev,(0|GPU_STOP));
+	}
 
 	//mutex_unlock(&pdata->therm_dev->lock);
 
@@ -248,6 +287,7 @@ static int amlogic_bind(struct thermal_zone_device *thermal,
 				goto out;
 			}
 		}
+		pdata->gpu_cool_dev=cdev;
 		pr_info("%s bind %s okay !\n",thermal->type,cdev->type);
 	}
 
@@ -303,6 +343,7 @@ static int amlogic_bind(struct thermal_zone_device *thermal,
 				goto out;
 			}
 		}
+		pdata->gpucore_cool_dev=cdev;
 		pr_info("%s bind %s okay !\n",thermal->type,cdev->type);
 	}
 	return ret;
@@ -331,6 +372,278 @@ static int amlogic_unbind(struct thermal_zone_device *thermal,
 	}
 	return -EINVAL;
 }
+#ifdef CONFIG_AML_VIRTUAL_THERMAL
+#define ABS(a) ((a) > 0 ? (a) : -(a))
+
+static unsigned int (*gpu_freq_callback)(void) = NULL;
+int register_gpu_freq_info(unsigned int (*fun)(void))
+{
+    if (fun) {
+        gpu_freq_callback = fun;
+    } 
+    return 0;
+}
+EXPORT_SYMBOL(register_gpu_freq_info);
+
+static atomic_t last_gpu_avg_freq;
+static atomic_t last_cpu_avg_freq;
+static atomic_t freq_update_flag; 
+
+static void collect_freq_work(struct work_struct *work)
+{
+    static unsigned int total_cpu_freq = 0; 
+    static unsigned int total_gpu_freq = 0; 
+    static unsigned int count = 0; 
+    struct cpufreq_policy *policy = cpufreq_cpu_get(0);
+
+    if (policy) {
+        total_cpu_freq += policy->cur;
+        count++;
+    } else {
+        total_cpu_freq += 0;    
+    }
+
+    if (gpu_freq_callback) {
+        total_gpu_freq += gpu_freq_callback();
+    } else {
+        total_gpu_freq += 0; 
+    }
+    if (count >= freq_sample_period * 10) {
+        atomic_set(&last_cpu_avg_freq, total_cpu_freq / count);
+        atomic_set(&last_gpu_avg_freq, total_gpu_freq / count);
+        total_cpu_freq = 0;
+        total_gpu_freq = 0;
+        count = 0;
+        atomic_set(&freq_update_flag, 1);
+    }
+    schedule_delayed_work(&freq_collect_work, msecs_to_jiffies(100));
+}
+
+static int aml_virtaul_thermal_probe(struct platform_device *pdev)
+{
+    int ret, len, cells; 
+    struct property *prop;
+    void *buf;
+
+    if (!of_property_read_bool(pdev->dev.of_node, "use_virtual_thermal")) {
+        printk("%s, virtual thermal is not enabled\n", __func__);
+        virtual_thermal_en = 0;
+        return 0;
+    } else {
+        printk("%s, virtual thermal enabled\n", __func__);
+    }
+
+    ret = of_property_read_u32(pdev->dev.of_node,
+                               "freq_sample_period",
+                               &freq_sample_period);
+    if (ret) {
+        printk("%s, get freq_sample_period failed, us 30 as default\n", __func__);
+        freq_sample_period = 30;
+    } else {
+        printk("%s, get freq_sample_period with value:%d\n", __func__, freq_sample_period);    
+    }
+    ret = of_property_read_u32_array(pdev->dev.of_node, 
+                                     "report_time", 
+                                     report_interval, sizeof(report_interval) / sizeof(u32));
+    if (ret) {
+        printk("%s, get report_time failed\n", __func__);    
+        goto error;
+    } else {
+        printk("[virtual_thermal] report interval:%4d, %4d, %4d, %4d\n",
+               report_interval[0], report_interval[1], report_interval[2], report_interval[3]);    
+    }
+    /*
+     * read cpu_virtal
+     */
+    prop = of_find_property(pdev->dev.of_node, "cpu_virtual", &len);
+    if (!prop) {
+        printk("%s, cpu virtual not found\n", __func__);
+        goto error;
+    }
+    cells = len / sizeof(struct aml_virtual_thermal);
+    buf = kzalloc(len, GFP_KERNEL);
+    if (!buf) {
+        printk("%s, no memory\n", __func__);
+        return -ENOMEM;
+    }
+    ret = of_property_read_u32_array(pdev->dev.of_node, 
+                                     "cpu_virtual", 
+                                     buf, len/sizeof(u32)); 
+    if (ret) {
+        printk("%s, read cpu_virtual failed\n", __func__);
+        kfree(buf);
+        goto error;
+    }
+    cpu_virtual_thermal.count   = cells;
+    cpu_virtual_thermal.thermal = buf;
+
+    /*
+     * read gpu_virtal
+     */
+    prop = of_find_property(pdev->dev.of_node, "gpu_virtual", &len);
+    if (!prop) {
+        printk("%s, gpu virtual not found\n", __func__);
+        goto error;
+    }
+    cells = len / sizeof(struct aml_virtual_thermal);
+    buf = kzalloc(len, GFP_KERNEL);
+    if (!buf) {
+        printk("%s, no memory\n", __func__);
+        return -ENOMEM;
+    }
+    ret = of_property_read_u32_array(pdev->dev.of_node, 
+                                     "gpu_virtual", 
+                                     buf, len/sizeof(u32)); 
+    if (ret) {
+        printk("%s, read gpu_virtual failed\n", __func__);
+        kfree(buf);
+        goto error;
+    }
+    gpu_virtual_thermal.count   = cells;
+    gpu_virtual_thermal.thermal = buf;
+
+#if DBG_VIRTUAL
+    printk("cpu_virtal cells:%d, table:\n", cpu_virtual_thermal.count);
+    for (len = 0; len < cpu_virtual_thermal.count; len++) {
+        printk("%2d, %8d, %4d, %4d, %4d, %4d\n",
+               len, 
+               cpu_virtual_thermal.thermal[len].freq,
+               cpu_virtual_thermal.thermal[len].temp_time[0],
+               cpu_virtual_thermal.thermal[len].temp_time[1],
+               cpu_virtual_thermal.thermal[len].temp_time[2],
+               cpu_virtual_thermal.thermal[len].temp_time[3]);
+    }
+    printk("gpu_virtal cells:%d, table:\n", gpu_virtual_thermal.count);
+    for (len = 0; len < gpu_virtual_thermal.count; len++) {
+        printk("%2d, %8d, %4d, %4d, %4d, %4d\n",
+               len, 
+               gpu_virtual_thermal.thermal[len].freq,
+               gpu_virtual_thermal.thermal[len].temp_time[0],
+               gpu_virtual_thermal.thermal[len].temp_time[1],
+               gpu_virtual_thermal.thermal[len].temp_time[2],
+               gpu_virtual_thermal.thermal[len].temp_time[3]);
+    }
+#endif
+
+    virtual_thermal_en = 1;    
+    return 0;
+
+error: 
+    virtual_thermal_en = 0;
+    return -1;
+}
+
+static void aml_virtual_thermal_remove(void)
+{
+    kfree(cpu_virtual_thermal.thermal);    
+    kfree(gpu_virtual_thermal.thermal);    
+    virtual_thermal_en = 0;
+}
+
+static int check_freq_level(struct aml_virtual_thermal_device *dev, unsigned int freq)
+{
+    int i = 0;
+
+    if (freq >= dev->thermal[dev->count-1].freq) {
+        return dev->count - 1;
+    }
+    for (i = 0; i < dev->count - 1; i++) {
+        if (freq > dev->thermal[i].freq && freq <= dev->thermal[i + 1].freq) {
+            return i + 1;
+        }
+    }
+    return 0; 
+}
+
+static int check_freq_level_cnt(unsigned int cnt) 
+{
+    int i;
+
+    if (cnt >= report_interval[3]) {
+        return  3; 
+    } 
+    for (i = 0; i < 3; i++) {
+        if (cnt >= report_interval[i] && cnt < report_interval[i + 1]) {
+            return i;
+        }
+    }
+    return 0;
+}
+
+static unsigned long aml_cal_virtual_temp(void)
+{
+    static unsigned int cpu_freq_level_cnt  = 0, gpu_freq_level_cnt  = 0;
+    static unsigned int last_cpu_freq_level = 0, last_gpu_freq_level = 0;
+    static unsigned int cpu_temp = 40, gpu_temp = 40;                   // default set to 40 when at homescreen
+    unsigned int curr_cpu_avg_freq,   curr_gpu_avg_freq;
+    int curr_cpu_freq_level, curr_gpu_freq_level;
+    int cnt_level, level_diff; 
+    int temp_update = 0, final_temp;
+    
+    /*
+     * CPU temp 
+     */
+    if (atomic_read(&freq_update_flag)) {
+        curr_cpu_avg_freq = atomic_read(&last_cpu_avg_freq);
+        curr_cpu_freq_level = check_freq_level(&cpu_virtual_thermal, curr_cpu_avg_freq); 
+        level_diff = curr_cpu_freq_level - last_cpu_freq_level;
+        if (ABS(level_diff) <= 1) {  // freq change is not large 
+            cpu_freq_level_cnt++;
+            cnt_level = check_freq_level_cnt(cpu_freq_level_cnt);
+            cpu_temp  = cpu_virtual_thermal.thermal[curr_cpu_freq_level].temp_time[cnt_level];
+        #if DBG_VIRTUAL
+            printk("%s, cur_freq:%7d, freq_level:%d, cnt_level:%d, cnt:%d, cpu_temp:%d\n",
+                   __func__, curr_cpu_avg_freq, curr_cpu_freq_level, cnt_level, cpu_freq_level_cnt, cpu_temp);
+        #endif
+        } else {                                                // level not match
+            cpu_temp = cpu_virtual_thermal.thermal[curr_cpu_freq_level].temp_time[0]; 
+        #if DBG_VIRTUAL
+            printk("%s, cur_freq:%7d, cur_level:%d, last_level:%d, last_cnt_level:%d, cpu_temp:%d\n",
+                   __func__, curr_cpu_avg_freq, curr_cpu_freq_level, last_cpu_freq_level, cpu_freq_level_cnt, cpu_temp);
+        #endif
+            cpu_freq_level_cnt = 0;
+        }
+        last_cpu_freq_level = curr_cpu_freq_level;
+
+        curr_gpu_avg_freq = atomic_read(&last_gpu_avg_freq);
+        curr_gpu_freq_level = check_freq_level(&gpu_virtual_thermal, curr_gpu_avg_freq); 
+        level_diff = curr_gpu_freq_level - last_gpu_freq_level;
+        if (ABS(level_diff) <= 1) {  // freq change is not large 
+            gpu_freq_level_cnt++;
+            cnt_level = check_freq_level_cnt(gpu_freq_level_cnt);
+            gpu_temp  = gpu_virtual_thermal.thermal[curr_gpu_freq_level].temp_time[cnt_level];
+        #if DBG_VIRTUAL
+            printk("%s, cur_freq:%7d, freq_level:%d, cnt_level:%d, cnt:%d, gpu_temp:%d\n",
+                   __func__, curr_gpu_avg_freq, curr_gpu_freq_level, cnt_level, gpu_freq_level_cnt, gpu_temp);
+        #endif
+        } else {                                                // level not match
+            gpu_temp = gpu_virtual_thermal.thermal[curr_gpu_freq_level].temp_time[0]; 
+            gpu_freq_level_cnt = 0;
+        #if DBG_VIRTUAL
+            printk("%s, cur_freq:%7d, cur_level:%d, last_level:%d, gpu_temp:%d\n",
+                   __func__, curr_gpu_avg_freq, curr_gpu_freq_level, last_gpu_freq_level, gpu_temp);
+        #endif
+        }
+        last_gpu_freq_level = curr_gpu_freq_level;
+
+        atomic_set(&freq_update_flag, 0);
+        temp_update = 1; 
+    }
+
+    if (cpu_temp <= 0 && gpu_temp <= 0) {
+        printk("%s, Bug here, cpu & gpu temp can't be 0, cpu_temp:%d, gpu_temp:%d\n", __func__, cpu_temp, gpu_temp);
+        final_temp = 40;    
+    }
+    final_temp = (cpu_temp >= gpu_temp ? cpu_temp : gpu_temp);
+    if (temp_update) {
+    #if DBG_VIRTUAL
+        printk("final temp:%d\n", final_temp);    
+    #endif
+    }
+    return final_temp;
+}
+#endif
+
 /* Get temperature callback functions for thermal zone */
 int aa=50;
 int trend=1;
@@ -351,8 +664,18 @@ static int amlogic_get_temp(struct thermal_zone_device *thermal,
 	printk("========  temp=%d\n",aa);
 	*temp=aa;
 #else
+#ifdef CONFIG_AML_VIRTUAL_THERMAL
+    if (trim_flag) { 
+	    *temp = (unsigned long)get_cpu_temp();
+    } else if (virtual_thermal_en) {
+	    *temp = aml_cal_virtual_temp(); 
+    } else {
+        *temp = 45;                     // fix cpu temperature to 45 if not trimed && disable virtual thermal    
+    }
+#else
 	*temp = (unsigned long)get_cpu_temp();
-	printk(KERN_DEBUG "========  temp=%ld\n",*temp);
+	pr_debug( "========  temp=%ld\n",*temp);
+#endif
 #endif
 	return 0;
 }
@@ -384,7 +707,7 @@ static int amlogic_register_thermal(struct amlogic_thermal_platform_data *pdata)
 {
 	int ret=0;
 	struct cpumask mask_val;
-
+	memset(&mask_val,0,sizeof(struct cpumask));
 	cpumask_set_cpu(0, &mask_val);
 	pdata->cpu_cool_dev= cpufreq_cooling_register(&mask_val);
 	if (IS_ERR(pdata->cpu_cool_dev)) {
@@ -607,11 +930,35 @@ static int amlogic_thermal_probe(struct platform_device *pdev)
 	int ret;
 	struct amlogic_thermal_platform_data *pdata=NULL;
 	//pdata = amlogic_get_driver_data(pdev);
-	ret=get_cpu_temp();
-	if(NOT_WRITE_EFUSE==ret){
-		printk("cpu sensor not ready!!!!!!\n");
+	ret=read_efuse_flag();
+	printk("thermal efuse version 0x%x\n",ret);
+	if(ret<0){
+		printk("read efuse error or adc error ret=%d\n",ret);
 		return -1;
 	}
+#ifdef CONFIG_AML_VIRTUAL_THERMAL
+	if(NOT_WRITE_EFUSE==ret  || EFUSE_MIGHT_WRONG){
+		printk("%s, this chip is not trimmed, use virtual thermal\n", __func__);
+		trim_flag = 0;
+	} else {
+		printk("%s, this chip is trimmed, use thermal\n", __func__);
+        trim_flag = 1;    
+    }
+    aml_virtaul_thermal_probe(pdev);
+    INIT_DELAYED_WORK(&freq_collect_work, collect_freq_work); 
+    schedule_delayed_work(&freq_collect_work, msecs_to_jiffies(100)); 
+    atomic_set(&freq_update_flag, 0);
+#else
+	if(NOT_WRITE_EFUSE==ret){
+		printk("%s, this chip is not trimmed\n", __func__);
+		return -1;
+	}
+	if(EFUSE_MIGHT_WRONG==ret){
+		printk("%s, this chip is not trimmed, stop thermal\n", __func__);
+		return -1;
+	}
+#endif
+	
 	dev_info(&pdev->dev, "amlogic thermal probe start\n");
 	pdata = amlogic_thermal_initialize(pdev);
 	if (!pdata) {
@@ -636,6 +983,10 @@ err:
 static int amlogic_thermal_remove(struct platform_device *pdev)
 {
 	struct amlogic_thermal_platform_data *pdata = platform_get_drvdata(pdev);
+
+#ifdef CONFIG_AML_VIRTUAL_THERMAL
+    aml_virtual_thermal_remove();
+#endif
 
 	amlogic_unregister_thermal(pdata);
 
