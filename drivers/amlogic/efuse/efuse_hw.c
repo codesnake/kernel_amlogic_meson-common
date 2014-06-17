@@ -83,7 +83,7 @@ void __efuse_debug_init(void)
 static void __efuse_write_byte( unsigned long addr, unsigned long data )
 {
 	unsigned long auto_wr_is_enabled = 0;
-#ifdef CONFIG_ARCH_MESON8
+#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8
 	unsigned int byte_sel;
 #endif
 
@@ -99,7 +99,7 @@ static void __efuse_write_byte( unsigned long addr, unsigned long data )
 		CNTL1_AUTO_WR_ENABLE_BIT, CNTL1_AUTO_WR_ENABLE_SIZE );
 	}
 
-#ifdef CONFIG_ARCH_MESON8
+#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8
 	byte_sel = addr % 4;
 	addr = addr / 4;
 
@@ -165,7 +165,7 @@ static void __efuse_read_dword( unsigned long addr, unsigned long *data )
 	//set efuse PD=0
 	aml_set_reg32_bits( P_EFUSE_CNTL1, 0, 27, 1);
 
-#ifdef CONFIG_ARCH_MESON8
+#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8
 	addr = addr / 4;	//each address have 4 bytes in m8
 #endif
 
@@ -337,6 +337,8 @@ static char *soc_chip[]={
 	{"efuse soc chip m6tv"},
 	{"efuse soc chip m6tvlite"},
 	{"efuse soc chip m8"},
+	{"efuse soc chip m6tvd"},
+	{"efuse soc chip m8baby"},
 	{"efuse soc chip unknow"},
 };
 #endif
@@ -365,6 +367,7 @@ struct efuse_chip_identify_t{
 	efuse_socchip_type_e type;
 };
 static const struct efuse_chip_identify_t efuse_chip_hw_info[]={
+	{.chiphw_mver=27, .chiphw_subver=0, .chiphw_thirdver=0, .type=EFUSE_SOC_CHIP_M8BABY},      //M8BABY 
 	{.chiphw_mver=26, .chiphw_subver=0, .chiphw_thirdver=0, .type=EFUSE_SOC_CHIP_M6TVD},      //M6TVD 
 	{.chiphw_mver=25, .chiphw_subver=0, .chiphw_thirdver=0, .type=EFUSE_SOC_CHIP_M8},      //M8 
 	{.chiphw_mver=24, .chiphw_subver=0, .chiphw_thirdver=0, .type=EFUSE_SOC_CHIP_M6TVLITE},  //M6TVC,M6TVLITE(M6C)
@@ -436,6 +439,7 @@ static int efuse_checkversion(char *buf)
 					}
 					break;
 				case EFUSE_SOC_CHIP_M8:
+				case EFUSE_SOC_CHIP_M8BABY:
 					if(ver != M8_EFUSE_VERSION_SERIALNUM_V1){
 						ver = -1;
 					}
@@ -493,6 +497,7 @@ static int efuse_set_versioninfo(efuseinfo_item_t *info)
 			ret = 0;
 			break;
 		case EFUSE_SOC_CHIP_M8:
+		case EFUSE_SOC_CHIP_M8BABY:
 			info->offset = M8_EFUSE_VERSION_OFFSET; //509
 			info->data_len = M8_EFUSE_VERSION_DATA_LEN;
 			info->enc_len = M8_EFUSE_VERSION_ENC_LEN;
@@ -615,6 +620,7 @@ static int efuse_getinfo_byPOS(unsigned pos, efuseinfo_item_t *info)
 			versionPOS = V2_EFUSE_VERSION_OFFSET; //3;
 			break;
 		case EFUSE_SOC_CHIP_M8:
+		case EFUSE_SOC_CHIP_M8BABY:
 			versionPOS = M8_EFUSE_VERSION_OFFSET; //509
 			break;
 		case EFUSE_SOC_CHIP_M6TVD:
@@ -1010,9 +1016,13 @@ int efuse_write_item(char *buf, size_t count, loff_t *ppos)
 }
 
 /* function: efuse_read_intlItem
- * intl_item: item name,name is [temperature]
+ * intl_item: item name,name is [temperature,cvbs_trimming,temper_cvbs]
+ *            [temperature: 2byte]
+ *            [cvbs_trimming: 2byte]
+ *            [temper_cvbs: 4byte]
  * buf:  output para
  * size: buf size
+ * return: <0 fail, >=0 ok
  * */
 int efuse_read_intlItem(char *intl_item,char *buf,int size)
 {
@@ -1031,11 +1041,43 @@ int efuse_read_intlItem(char *intl_item,char *buf,int size)
 			//pos = ; 
 			break;
 		case EFUSE_SOC_CHIP_M8:
-			if(strcmp(intl_item,"temperature") == 0){
+		case EFUSE_SOC_CHIP_M8BABY:
+			if(strcasecmp(intl_item,"temperature") == 0){
 				pos = 502;
 				len = 2;
 				if(size <= 0){
-					printk("input size:%d is error\n",size);
+					printk("%s input size:%d is error\n",intl_item,size);
+					return -1;
+				}
+				if(len > size){
+					len = size;
+				}
+				ret = __efuse_read( buf, len, &pos );
+				return ret;
+			}
+			if(strcasecmp(intl_item,"cvbs_trimming") == 0){
+				/* cvbs note:
+				 * cvbs has 2 bytes, position is 504 and 505, 504 is low byte,505 is high byte
+				 * p504[bit2~0] is cvbs trimming CDAC_GSW<2:0>
+				 * p505[bit7-6] : 10--wrote cvbs, 00-- not wrote cvbs
+				 * */
+				pos = 504;
+				len = 2;
+				if(size <= 0){
+					printk("%s input size:%d is error\n",intl_item,size);
+					return -1;
+				}
+				if(len > size){
+					len = size;
+				}
+				ret = __efuse_read( buf, len, &pos );
+				return ret;
+			}
+			if(strcasecmp(intl_item,"temper_cvbs") == 0){
+				pos = 502;
+				len = 4;
+				if(size <= 0){
+					printk("%s input size:%d is error\n",intl_item,size);
 					return -1;
 				}
 				if(len > size){
@@ -1079,6 +1121,7 @@ static uint32_t __v3_get_gap_start(uint32_t id)
 			offset = id*36 + 136; ///M6
 			break;
 		case EFUSE_SOC_CHIP_M8:
+		case EFUSE_SOC_CHIP_M8BABY:
 			offset = -1; // error position
 			break;
 		case EFUSE_SOC_CHIP_M6TVD:
@@ -1165,6 +1208,7 @@ int32_t __v3_read_hash(uint32_t id,char * buf)
 			__efuse_read(buf,34,&off);
 			break;
 		case EFUSE_SOC_CHIP_M8:
+		case EFUSE_SOC_CHIP_M8BABY:
 			break;
 		case EFUSE_SOC_CHIP_M6TVD:
 			break;
@@ -1256,6 +1300,7 @@ int32_t __v3_write_hash(uint32_t id,char * buf)
 			}
 			break;
 		case EFUSE_SOC_CHIP_M8:
+		case EFUSE_SOC_CHIP_M8BABY:
 			break;
 		case EFUSE_SOC_CHIP_M6TVD:
 			break;
