@@ -125,7 +125,7 @@ static int hdmitx_hdcp_task(void *data)
             hdmitx_device->audio_step = 1;
 #endif
         }
-        msleep(100);
+        msleep_interruptible(100);
     }
 
     return 0;
@@ -137,7 +137,7 @@ static int __init hdmitx_hdcp_init(void)
 
     switch_dev_register(&hdcp_dev);
 
-    hdmitx_device->task = kthread_run(hdmitx_hdcp_task, (void*)hdmitx_device, "kthread_hdcp");
+    hdmitx_device->task_hdcp = kthread_run(hdmitx_hdcp_task, (void*)hdmitx_device, "kthread_hdcp");
 
     return 0;
 }

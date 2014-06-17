@@ -1118,6 +1118,18 @@ static int edid_hash_calc(unsigned char *hash, const char *data, unsigned int le
     return 1;
 }
 
+static int hdmitx_edid_search_IEEEOUI(char *buf)
+{
+    int i;
+
+    for(i = 0; i < 125; i++) {
+        if((buf[i] == 0x03) && (buf[i+1] == 0x0c) && (buf[i+2] == 0x00)) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 int hdmitx_edid_parse(hdmitx_dev_t* hdmitx_device)
 {
     unsigned char CheckSum ;
@@ -1242,8 +1254,17 @@ int hdmitx_edid_parse(hdmitx_dev_t* hdmitx_device)
             }
         }
     }
-    
-    if((pRXCap->IEEEOUI != 0x0c03) || (pRXCap->IEEEOUI == 0x0)){
+
+    if(hdmitx_edid_search_IEEEOUI(&EDID_buf[128])) {
+        pRXCap->IEEEOUI = 0x0c03;
+        printk("hdmitx: edid: find IEEEOUT\n");
+    }
+    else {
+        pRXCap->IEEEOUI = 0x0;
+        printk("hdmitx: edid: not find IEEEOUT\n");
+    }
+
+    if((pRXCap->IEEEOUI != 0x0c03) || (pRXCap->IEEEOUI == 0x0)|| (pRXCap->VIC_count == 0)){
         hdmitx_edid_set_default_vic(hdmitx_device);
     }    
 

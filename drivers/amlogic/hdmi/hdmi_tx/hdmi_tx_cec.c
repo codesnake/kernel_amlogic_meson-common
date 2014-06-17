@@ -346,14 +346,18 @@ static int cec_task(void *data)
 
     hdmi_print(INF, CEC "CEC task process\n");
     if(hdmitx_device->cec_func_config & (1 << CEC_FUNC_MSAK)){
-        msleep(10000);
+        msleep_interruptible(10000);
 #ifdef CONFIG_ARCH_MESON6
         cec_gpi_init();
 #endif
         cec_node_init(hdmitx_device);
     }
     while (1) {
-        msleep(5);
+    	if (kthread_should_stop()){
+    		break;
+    	}
+    	wait_event_interruptible(hdmitx_device->cec_wait_rx,
+		cec_global_info.cec_rx_msg_buf.rx_read_pos != cec_global_info.cec_rx_msg_buf.rx_write_pos);
         cec_isr_post_process();
         //cec_usr_cmd_post_process();
     }
@@ -660,6 +664,7 @@ static irqreturn_t cec_isr_handler(int irq, void *dev_instance)
     }
 
     register_cec_rx_msg(rx_msg, rx_len);
+    wake_up(&hdmitx_device->cec_wait_rx);
 
     //cec_enable_irq();
 
@@ -1552,6 +1557,7 @@ static int __init cec_init(void)
     extern __u16 cec_key_map[128];
     extern hdmitx_dev_t * get_hdmitx_device(void);
     hdmitx_device = get_hdmitx_device();
+    init_waitqueue_head(&hdmitx_device->cec_wait_rx);
     cec_key_init();
     hdmi_print(INF, CEC "CEC init\n");
     cec_global_info.cec_flag.cec_key_flag = 0; 
@@ -1572,7 +1578,7 @@ static int __init cec_init(void)
     
     cec_global_info.hdmitx_device = hdmitx_device;
     
-    kthread_run(cec_task, (void*)hdmitx_device, "kthread_cec");
+    hdmitx_device->task_cec = kthread_run(cec_task, (void*)hdmitx_device, "kthread_cec");
 #ifdef CONFIG_ARCH_MESON6
     if(request_irq(INT_HDMI_CEC, &cec_isr_handler,
                 IRQF_SHARED, "amhdmitx-cec",
@@ -1633,6 +1639,7 @@ static void __exit cec_uninit(void)
 #ifdef CONFIG_ARCH_MESON8
         free_irq(INT_AO_CEC, (void *)hdmitx_device);
 #endif
+    	kthread_stop(hdmitx_device->task_cec);
         cec_global_info.cec_flag.cec_init_flag = 0;
     }
 
