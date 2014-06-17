@@ -72,8 +72,8 @@ static const struct of_device_id bt_sleep_match[]={
 #define bt_sleep_match NULL
 #endif
 
-/* 1 second timeout */
-#define TX_TIMER_INTERVAL	1
+/* 10 second timeout */
+#define TX_TIMER_INTERVAL	10
 
 static int ext_wake_active = 0;
 static spinlock_t ext_wake_lock;
