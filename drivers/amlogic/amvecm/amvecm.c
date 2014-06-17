@@ -88,6 +88,7 @@ static void cm2_frame_switch_patch(void)
     WRITE_CBUS_REG(VPP_CHROMA_ADDR_PORT, 0x20f);
     WRITE_CBUS_REG(VPP_CHROMA_DATA_PORT, cm2_patch_flag);
 }
+#if (MESON_CPU_TYPE==MESON_CPU_TYPE_MESON6TVD)
 static void ve_frame_size_patch(unsigned int width,unsigned int height)
 {
     unsigned int vpp_size = height|(width << 16);
@@ -96,6 +97,7 @@ static void ve_frame_size_patch(unsigned int width,unsigned int height)
 	ve_size = vpp_size;
     }
 }
+#endif
 static void cm2_frame_size_patch(unsigned int width,unsigned int height)
 {
     unsigned int vpp_size;
@@ -186,7 +188,9 @@ void amvecm_video_latch(void)
     vs = READ_CBUS_REG_BITS(VPP_POSTBLEND_VD1_V_START_END,16,12);
     ve = READ_CBUS_REG_BITS(VPP_POSTBLEND_VD1_V_START_END,0,12);
     cm2_frame_size_patch(he-hs+1,ve-vs+1);
+#if (MESON_CPU_TYPE==MESON_CPU_TYPE_MESON6TVD)
     ve_frame_size_patch(he-hs+1,ve-vs+1);
+#endif
     if (vecm_latch_flag & FLAG_VE_DNLP)
     {
         vecm_latch_flag &= ~FLAG_VE_DNLP;
