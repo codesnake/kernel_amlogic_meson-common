@@ -2,6 +2,7 @@
 #dwc_otg_dir-$(CONFIG_ARCH_MESON2) := 220/
 #dwc_otg_dir-$(CONFIG_ARCH_MESON3) := 220/
 dwc_otg_dir-$(CONFIG_ARCH_MESON6) := 310/
+dwc_otg_dir-$(CONFIG_ARCH_MESON6TV) := 310/
 dwc_otg_dir-$(CONFIG_ARCH_MESON6TVD) := 310/
 dwc_otg_dir-$(CONFIG_ARCH_MESON8) := 310/
 dwc_otg_dir-$(CONFIG_ARCH_MESON8B) := 310/

@@ -90,7 +90,7 @@ void dwc_otg_set_vbus_power(dwc_otg_core_if_t * _core_if, char is_power_on)
  * @param reg_base_addr Base address of DWC_otg core registers
  *
  */
-dwc_otg_core_if_t *dwc_otg_cil_init(const uint32_t * reg_base_addr)
+dwc_otg_core_if_t *dwc_otg_cil_init(const uint32_t * reg_base_addr, int host_only)
 {
 	dwc_otg_core_if_t *core_if = 0;
 	dwc_otg_dev_if_t *dev_if = 0;
@@ -140,6 +140,7 @@ dwc_otg_core_if_t *dwc_otg_cil_init(const uint32_t * reg_base_addr)
 
 	dev_if->speed = 0;	// unknown
 
+	core_if->host_only = host_only;
 	core_if->dev_if = dev_if;
 
 	/*
@@ -5490,26 +5491,28 @@ static int dwc_otg_setup_params(dwc_otg_core_if_t * core_if)
 	dwc_otg_set_param_ulpi_fs_ls(core_if, dwc_param_ulpi_fs_ls_default);
 	dwc_otg_set_param_en_multiple_tx_fifo(core_if,
 					      dwc_param_en_multiple_tx_fifo_default);
-	
+	DWC_PRINTF("curmode: %d, host_only: %d\n",gintsts.b.curmode,core_if->host_only);
 	if (gintsts.b.curmode) {
-		/* Force device mode to get power-on values of device FIFOs */
-		gusbcfg_data_t gusbcfg = {.d32 = 0 };
-		gusbcfg.d32 =  DWC_READ_REG32(&core_if->core_global_regs->gusbcfg);
-		gusbcfg.b.force_dev_mode = 1;
-		DWC_WRITE_REG32(&core_if->core_global_regs->gusbcfg, gusbcfg.d32);
-		dwc_mdelay(100);
-		for (i = 0; i < 15; i++) {
-		dwc_otg_set_param_dev_perio_tx_fifo_size(core_if,
-							 dwc_param_dev_perio_tx_fifo_size_default, i);
+		if(!core_if->host_only){
+			/* Force device mode to get power-on values of device FIFOs */
+			gusbcfg_data_t gusbcfg = {.d32 = 0 };
+			gusbcfg.d32 =  DWC_READ_REG32(&core_if->core_global_regs->gusbcfg);
+			gusbcfg.b.force_dev_mode = 1;
+			DWC_WRITE_REG32(&core_if->core_global_regs->gusbcfg, gusbcfg.d32);
+			dwc_mdelay(100);
+			for (i = 0; i < 15; i++) {
+			dwc_otg_set_param_dev_perio_tx_fifo_size(core_if,
+								 dwc_param_dev_perio_tx_fifo_size_default, i);
+			}
+			for (i = 0; i < 15; i++) {
+				dwc_otg_set_param_dev_tx_fifo_size(core_if,
+								   dwc_param_dev_tx_fifo_size_default, i);
+			}
+			gusbcfg.d32 =  DWC_READ_REG32(&core_if->core_global_regs->gusbcfg);
+			gusbcfg.b.force_dev_mode = 0;
+			DWC_WRITE_REG32(&core_if->core_global_regs->gusbcfg, gusbcfg.d32);
+			dwc_mdelay(100);
 		}
-		for (i = 0; i < 15; i++) {
-			dwc_otg_set_param_dev_tx_fifo_size(core_if,
-							   dwc_param_dev_tx_fifo_size_default, i);
-		}
-		gusbcfg.d32 =  DWC_READ_REG32(&core_if->core_global_regs->gusbcfg);
-		gusbcfg.b.force_dev_mode = 0;
-		DWC_WRITE_REG32(&core_if->core_global_regs->gusbcfg, gusbcfg.d32);
-		dwc_mdelay(100);
 	} else {
 		for (i = 0; i < 15; i++) {
 			dwc_otg_set_param_dev_perio_tx_fifo_size(core_if,
