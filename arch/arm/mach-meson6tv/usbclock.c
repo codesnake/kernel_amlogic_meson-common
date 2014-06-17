@@ -11,6 +11,7 @@
  * Platform machine definition.
  */
 #include <linux/kernel.h>
+#include <linux/module.h>
 #include <linux/init.h>
 #include <linux/mm.h>
 #include <linux/sched.h>
@@ -22,15 +23,14 @@
 #include <asm/mach-types.h>
 #include <asm/mach/arch.h>
 #include <asm/delay.h>
-#include <plat/platform.h>
 #include <plat/lm.h>
-#include <plat/regops.h>
-#include <mach/hardware.h>
 #include <mach/memory.h>
 #include <mach/clock.h>
 #include <mach/am_regs.h>
 #include <mach/usbclock.h>
-
+#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6
+#include <mach/mod_gate.h>
+#endif
 /*
  * M chip USB clock setting
  */
@@ -43,71 +43,126 @@
 static const char * clock_src_name[] = {
 	"XTAL input",
 	"XTAL input divided by 2",
+	"DDR PLL",
+	"MPLL OUT0"
+	"MPLL OUT1",
+	"MPLL OUT2",
 	"FCLK / 2",
-	"FCLK / 5"
+	"FCLK / 3"
 };
-
-int set_usb_phy_clk(struct lm_device * plmdev,int is_enable)
+static int init_count;
+int clk_enable_usb(struct clk *clk)
 {
 	int port_idx;
-	usb_peri_reg_t * peri;
+	char * clk_name;
+	usb_peri_reg_t * peri_a,* peri_b,* peri_c,*peri;
 	usb_config_data_t config;
 	usb_ctrl_data_t control;
 	int clk_sel,clk_div,clk_src;
 	int time_dly = 500; //usec
 
-	if(!plmdev)
+	if(!clk)
 		return -1;
 
-	port_idx = plmdev->param.usb.port_idx;
-	if(port_idx < 0 || port_idx > 3)
-		return -1;
-
-	peri = (usb_peri_reg_t *)plmdev->param.usb.phy_tune_reg;
-
-	printk(KERN_NOTICE"USB (%d) peri reg base: %x\n",port_idx,(uint32_t)peri);
-	if(is_enable){
-
-		clk_sel = plmdev->clock.sel;
-		clk_div = plmdev->clock.div;
-		clk_src = plmdev->clock.src;
-
-		config.d32 = peri->config;
-		config.b.clk_sel = clk_sel;
-		config.b.clk_div = clk_div;
-		config.b.clk_en = 1;
-		peri->config = config.d32;
-
-		printk(KERN_NOTICE"USB (%d) use clock source: %s\n",port_idx,clock_src_name[clk_sel]);
-
-		control.d32 = peri->ctrl;
-		control.b.fsel = 2;	/* PHY default is 24M (5), change to 12M (2) */
-		control.b.por = 1;
-		peri->ctrl = control.d32;
-		udelay(time_dly);
-		control.b.por = 0;
-		peri->ctrl = control.d32;
-		udelay(time_dly);
-
-		/* read back clock detected flag*/
-		control.d32 = peri->ctrl;
-		if(!control.b.clk_detected){
-			printk(KERN_ERR"USB (%d) PHY Clock not detected!\n",port_idx);
-			return -1;
-		}
-	}else{
-
-		config.d32 = peri->config;
-		config.b.clk_en = 0;
-		peri->config = config.d32;
-		control.d32 = peri->ctrl;
-		control.b.por = 1;
-		peri->ctrl = control.d32;
+	if(!init_count)
+	{
+		init_count++;
+		aml_set_reg32_bits(P_RESET1_REGISTER, 1, 2, 1);
+		//for(i = 0; i < 1000; i++)
+		//	udelay(time_dly);
 	}
-	dmb();
 
+	clk_name = (char*)clk->priv;
+#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6
+	switch_mod_gate_by_name(clk_name, 1);
+#endif
+	peri_a = (usb_peri_reg_t *)P_USB_ADDR0;
+	peri_b = (usb_peri_reg_t *)P_USB_ADDR8;
+	peri_c = (usb_peri_reg_t *)P_USB_ADDR16;
+
+	if(!strcmp(clk_name,"usb0")){
+		peri = peri_a;
+		port_idx = USB_PORT_IDX_A;
+	}else if(!strcmp(clk_name,"usb1")){
+		peri = peri_b;
+		port_idx = USB_PORT_IDX_B;
+	}else if(!strcmp(clk_name,"usb2")){
+		peri = peri_c;
+		port_idx = USB_PORT_IDX_C;
+	}else{
+		printk(KERN_ERR "bad usb clk name: %s\n",clk_name);
+		return -1;
+	}
+
+
+	clk_sel = USB_PHY_CLK_SEL_XTAL;
+	clk_div = 1;
+	clk_src = 24000000;
+
+	config.d32 = peri->config;
+	config.b.clk_sel = clk_sel;
+	config.b.clk_div = clk_div;
+	config.b.clk_en = 1;
+	peri->config = config.d32;
+
+
+	printk(KERN_NOTICE"USB (%d) use clock source: %s\n",port_idx,clock_src_name[clk_sel]);
+
+	control.d32 = peri->ctrl;
+	control.b.fsel = 2;	/* PHY default is 24M (5), change to 12M (2) */
+	control.b.por = 1;
+	peri->ctrl = control.d32;
+	udelay(time_dly);
+	control.b.por = 0;
+	peri->ctrl = control.d32;
+	udelay(time_dly);
+
+
+	/* read back clock detected flag*/
+	control.d32 = peri->ctrl;
+	if(!control.b.clk_detected){
+		printk(KERN_ERR"USB (%d) PHY Clock not detected!\n",0);
+	}
+
+
+	dmb();
 	return 0;
 }
+EXPORT_SYMBOL(clk_enable_usb);
 
-EXPORT_SYMBOL(set_usb_phy_clk);
+int clk_disable_usb(struct clk *clk)
+{
+	char * clk_name;
+	usb_peri_reg_t * peri_a,* peri_b,* peri_c,*peri;
+
+	if(!clk)
+		return -1;
+
+	clk_name = (char*)clk->priv;
+	peri_a = (usb_peri_reg_t *)P_USB_ADDR0;
+	peri_b = (usb_peri_reg_t *)P_USB_ADDR8;
+
+	if(!strcmp(clk_name,"usb0"))
+		peri = peri_a;
+	else if(!strcmp(clk_name,"usb1"))
+		peri = peri_b;
+	else if(!strcmp(clk_name,"usb2"))
+		peri = peri_c;
+	else{
+		printk(KERN_ERR "bad usb clk name: %s\n",clk_name);
+		return -1;
+	}
+#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6
+	switch_mod_gate_by_name(clk_name, 0);
+#endif
+	//if(init_count){
+	//	init_count--;
+		//uart.d32 = peri->dbg_uart;
+		//uart.b.set_iddq = 1;
+		//peri->dbg_uart = uart.d32;
+	//}
+	dmb();
+	return 0;
+}
+EXPORT_SYMBOL(clk_disable_usb);
 

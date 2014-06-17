@@ -41,6 +41,12 @@
 #include <plat/regops.h>
 #include <plat/cpufreq.h>
 #include <linux/printk.h>
+#ifdef CONFIG_AMLOGIC_USB
+#include <mach/usbclock.h>
+#endif
+#include <mach/am_regs.h>
+
+
 static DEFINE_SPINLOCK(mali_clk_lock);
 static DEFINE_SPINLOCK(clockfw_lock);
 static DEFINE_MUTEX(clock_ops_lock);
@@ -2740,48 +2746,48 @@ static struct class meson_freq_limit_class = {
 static int __init meson_clock_init(void)
 {
 	clkdev_add(&clk_lookup_xtal);
-    CLK_DEFINE(pll_ddr,xtal,3,NULL,clk_msr_get,NULL,NULL,NULL);
-    PLL_CLK_DEFINE(sys,(unsigned long)-1);
-    PLL_CLK_DEFINE(vid2,12);
-    PLL_CLK_DEFINE(fixed,-1);
-    PLL_CLK_DEFINE(hpll,-1);///@todo unknown now
+	CLK_DEFINE(pll_ddr,xtal,3,NULL,clk_msr_get,NULL,NULL,NULL);
+	PLL_CLK_DEFINE(sys,(unsigned long)-1);
+	PLL_CLK_DEFINE(vid2,12);
+	PLL_CLK_DEFINE(fixed,-1);
+	PLL_CLK_DEFINE(hpll,-1);///@todo unknown now
 	clk_pll_fixed.msr_mul = 125 *2;
 	clk_pll_fixed.msr_div = 3;
-    clk_pll_sys.get_rate = clk_get_rate_sys;
-    clk_pll_vid2.get_rate = clk_get_rate_vid2;
-    clk_pll_hpll.get_rate = clk_get_rate_hpll;
+	clk_pll_sys.get_rate = clk_get_rate_sys;
+	clk_pll_vid2.get_rate = clk_get_rate_vid2;
+	clk_pll_hpll.get_rate = clk_get_rate_hpll;
 
-    clk_pll_vid2.max = 1512000000;//1.5G
-    clk_pll_vid2.min = 187500000;//187M
-    clk_pll_hpll.max = 1512000000;//1.5G
-    clk_pll_hpll.min = 187500000;//187M
-    clk_pll_sys.max = 1512000000;//1.5G
-    clk_pll_sys.min = 187500000;//187M
-    clk_pll_ddr.max = 1512000000;//1.5G
-    clk_pll_ddr.min = 187500000;//187M
-    clk_pll_fixed.max = 2000000000; //2G
-    clk_pll_fixed.min = 250000000;//250M
+	clk_pll_vid2.max = 1512000000;//1.5G
+	clk_pll_vid2.min = 187500000;//187M
+	clk_pll_hpll.max = 1512000000;//1.5G
+	clk_pll_hpll.min = 187500000;//187M
+	clk_pll_sys.max = 1512000000;//1.5G
+	clk_pll_sys.min = 187500000;//187M
+	clk_pll_ddr.max = 1512000000;//1.5G
+	clk_pll_ddr.min = 187500000;//187M
+	clk_pll_fixed.max = 2000000000; //2G
+	clk_pll_fixed.min = 250000000;//250M
 
-    //create pll tree
-    PLL_RELATION_DEF(sys,xtal);
-    PLL_RELATION_DEF(ddr,xtal);
-    PLL_RELATION_DEF(vid2,xtal);
-    PLL_RELATION_DEF(fixed,xtal);
-    PLL_RELATION_DEF(hpll,xtal);
+	//create pll tree
+	PLL_RELATION_DEF(sys,xtal);
+	PLL_RELATION_DEF(ddr,xtal);
+	PLL_RELATION_DEF(vid2,xtal);
+	PLL_RELATION_DEF(fixed,xtal);
+	PLL_RELATION_DEF(hpll,xtal);
 
     // Add clk81
 #ifdef CONFIG_CLK81_DFS
-    CLK_DEFINE(clk81, pll_fixed, 7, clk_set_rate_clk81, clk_msr_get, NULL, NULL, NULL);
+	CLK_DEFINE(clk81, pll_fixed, 7, clk_set_rate_clk81, clk_msr_get, NULL, NULL, NULL);
 #else
-    CLK_DEFINE(clk81, pll_fixed, 7, NULL, clk_msr_get, NULL, NULL, NULL);
+	CLK_DEFINE(clk81, pll_fixed, 7, NULL, clk_msr_get, NULL, NULL, NULL);
 #endif
 
 	// Add clk81 as pll_fixed's child
-    CLK_PLL_CHILD_DEF(clk81, fixed);
+	CLK_PLL_CHILD_DEF(clk81, fixed);
 
-    clk_clk81.clk_gate_reg_adr = P_HHI_MPEG_CLK_CNTL;
-    clk_clk81.clk_gate_reg_mask = (1<<7);
-    clk_clk81.open_irq = 1;
+	clk_clk81.clk_gate_reg_adr = P_HHI_MPEG_CLK_CNTL;
+	clk_clk81.clk_gate_reg_mask = (1<<7);
+	clk_clk81.open_irq = 1;
 
 	// Add CPU clock
 	CLK_DEFINE(a9_clk, pll_sys, -1, clk_set_rate_a9, clk_get_rate_a9, NULL, NULL, NULL);
@@ -2819,19 +2825,26 @@ static int __init meson_clock_init(void)
 	//clk_mali.status = clk_status_mali;
 	CLK_PLL_CHILD_DEF(mali, fixed);
 	//clk_ops_register(&clk_mali, &mali_clk_ops);
-#if 0
-    // Add clk usb0
-    CLK_DEFINE(usb0,xtal,4,NULL,clk_msr_get,NULL,NULL,NULL);
-    meson_clk_register(&clk_usb0,&clk_xtal);
-    //clk_usb0.clk_gate_reg_adr = P_USB_ADDR0;
-    //clk_usb0.clk_gate_reg_mask = (1<<0);
 
-    // Add clk usb1
-    CLK_DEFINE(usb1,xtal,5,NULL,clk_msr_get,NULL,NULL,NULL);
-  	meson_clk_register(&clk_usb1,&clk_xtal);
-    //clk_usb1.clk_gate_reg_adr = P_USB_ADDR8;
-    //clk_usb1.clk_gate_reg_mask = (1<<0);
+#ifdef CONFIG_AMLOGIC_USB
+	// Add clk usb0
+	CLK_DEFINE(usb0,xtal,4,NULL,clk_msr_get,clk_enable_usb,clk_disable_usb,"usb0");
+	meson_clk_register(&clk_usb0,&clk_xtal);
+	//clk_usb0.clk_gate_reg_adr = P_USB_ADDR0;
+	//clk_usb0.clk_gate_reg_mask = (1<<0);
+
+	// Add clk usb1
+	CLK_DEFINE(usb1,xtal,5,NULL,clk_msr_get,clk_enable_usb,clk_disable_usb,"usb1");
+	meson_clk_register(&clk_usb1,&clk_xtal);
+	//clk_usb1.clk_gate_reg_adr = P_USB_ADDR8;
+	//clk_usb1.clk_gate_reg_mask = (1<<0);
+
+	CLK_DEFINE(usb2,xtal,31,NULL,clk_msr_get,clk_enable_usb,clk_disable_usb,"usb2");
+	meson_clk_register(&clk_usb2,&clk_xtal);
+	//clk_usb2.clk_gate_reg_adr = P_USB_ADDR16;
+	//clk_usb2.clk_gate_reg_mask = (1<<0);
 #endif
+
 	{
 		// Dump clocks
 		char *clks[] = {

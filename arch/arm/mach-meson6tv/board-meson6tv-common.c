@@ -1,7 +1,7 @@
 /*
  * arch/arm/mach-meson6tv/board-meson6tv-common.c
  *
- * Copyright (C) 2013 Amlogic, Inc.
+ * Copyright (C) 2014 Amlogic, Inc.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -26,9 +26,12 @@
 #include <linux/reboot.h>
 #include <linux/platform_device.h>
 #include <linux/of_platform.h>
+#include <linux/amlogic/of_lm.h>
 #include <asm/mach/arch.h>
 #include <asm/mach/map.h>
 #include <mach/io.h>
+#include <linux/io.h>
+#include <plat/lm.h>
 #ifdef CONFIG_SMP
 #include <mach/smp.h>
 #endif
@@ -76,12 +79,10 @@ static struct of_device_id mxs_of_platform_bus_ids[] = {
 	{},
 };
 
-#if 0
 static struct of_device_id mxs_of_lm_bus_ids[] = {
 	{.compatible = "logicmodule-bus",},
 	{},
 };
-#endif
 
 static void meson6tv_power_off(void)
 {
@@ -95,7 +96,9 @@ static void __init meson6tv_dt_init_machine(void)
 	parent = get_device(&platform_bus);
 
 	of_platform_populate(NULL, mxs_of_platform_bus_ids, NULL, parent);
-	//of_lm_populate(NULL, mxs_of_lm_bus_ids, NULL, NULL);
+#ifdef CONFIG_OF_LM
+	of_lm_populate(NULL,mxs_of_lm_bus_ids,NULL,NULL);
+#endif
 
 	//of_platform_populate(NULL, of_default_bus_match_table,
 	//aml_meson6_auxdata_lookup, NULL);
@@ -112,7 +115,7 @@ static const char __initdata *m6tv_common_boards_compat[] = {
 DT_MACHINE_START(AML8726_MX, "Amlogic Meson6TV platform")
 	.smp		= smp_ops(meson6tv_smp_ops),
 	.map_io		= meson6tv_map_io,	// dt - 1
-	.init_early	= meson6tv_init_early,	// dt -2
+	.init_early	= meson6tv_init_early,	// dt - 2
 	.init_irq	= meson6tv_init_irq,	// dt - 3
 	.init_time	= meson6tv_timer_init,	// dt - 4
 	.init_machine	= meson6tv_dt_init_machine,

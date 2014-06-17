@@ -32,5 +32,6 @@
 #include "c_stb_define.h"
 #include "cpu.h"
 #include "io.h"
+#include "canvas.h"
 
 #endif /* __MACH_MESON6TV_AM_REGS_H */

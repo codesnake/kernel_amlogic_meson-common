@@ -1,5 +1,5 @@
 /*
-* arch/arm/mach-meson6/include/mach/cpu.h
+* arch/arm/mach-meson6tv/include/mach/cpu.h
 *
 * Copyright (C) 2012-2013 Amlogic, Inc.
 *

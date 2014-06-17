@@ -18,6 +18,8 @@ obj-$(CONFIG_CACHE_L2X0)			+= cache.o
 # Power Management
 obj-$(CONFIG_SUSPEND)				+= pm.o
 
+obj-$(CONFIG_AMLOGIC_USB) += usbclock.o
+
 obj-$(CONFIG_HOTPLUG_CPU)			+= hotplug.o
 obj-$(CONFIG_SMP)				+= headsmp.o smp.o
 
