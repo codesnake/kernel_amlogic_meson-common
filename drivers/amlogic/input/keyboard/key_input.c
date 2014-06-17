@@ -66,6 +66,16 @@
 #include <plat/io.h>
 #endif
 
+#if (defined(CONFIG_MESON_TRUSTZONE) && defined(CONFIG_ARCH_MESON6))
+#include <mach/meson-secure.h>
+#define AML_RTC_READ(addr)  meson_secure_reg_read(addr)
+#define AML_RTC_WRITE(addr, data) meson_secure_reg_write(addr, data)
+#else
+#define AML_RTC_READ(addr) aml_read_reg32(addr)
+#define AML_RTC_WRITE(addr, data) aml_write_reg32(addr, data)
+#endif
+
+
 //#define AML_KEYINPUT_DBG
 #define AML_KEYINPUT_INTR     0
 #define AML_KEYINPUT_POLLING   2
@@ -219,12 +229,12 @@ extern int aml_rtc_alarm_status(void);
 #if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6
 static irqreturn_t am_key_interrupt(int irq, void *dev)
 {
-    int newval = (aml_read_reg32(P_AO_RTC_ADDR1)>>2)&1;
+    int newval = (AML_RTC_READ(P_AO_RTC_ADDR1)>>2)&1;
     if (KeyInput->status != newval) {
         KeyInput->status = newval;
         tasklet_schedule(&ki_tasklet);
     }
-    aml_write_reg32(P_AO_RTC_ADDR1, (aml_read_reg32(P_AO_RTC_ADDR1) | (0x0000f000)));
+    AML_RTC_WRITE(P_AO_RTC_ADDR1, (AML_RTC_READ(P_AO_RTC_ADDR1) | (0x0000f000)));
     return IRQ_HANDLED;
 }
 
@@ -239,7 +249,7 @@ static irqreturn_t am_key_interrupt(int irq, void *dev)
      */
 #ifdef CONFIG_AML_RTC
 #if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6
-	if(((aml_read_reg32(P_AO_RTC_ADDR1)>>2)&3) == 0)
+	if(((AML_RTC_READ(P_AO_RTC_ADDR1)>>2)&3) == 0)
 	{
 		alarm = 1;
 	}
@@ -253,20 +263,20 @@ static irqreturn_t am_key_interrupt(int irq, void *dev)
 
 #ifdef CONFIG_MESON_SUSPEND
 #if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6
-    KeyInput->status = (aml_read_reg32(P_AO_RTC_ADDR1)>>2)&1;
+    KeyInput->status = (AML_RTC_READ(P_AO_RTC_ADDR1)>>2)&1;
     if (READ_AOBUS_REG(AO_RTI_STATUS_REG2)== 0x1234abcd) {
         WRITE_AOBUS_REG(AO_RTI_STATUS_REG2,0);
         if (alarm == 0) {
-            if (((aml_read_reg32(P_AO_RTC_ADDR1)>>2)&1) == 1) {
+            if (((AML_RTC_READ(P_AO_RTC_ADDR1)>>2)&1) == 1) {
                 KeyInput->status = 0;
-                printk(KERN_INFO "Force key down: %x\n",aml_read_reg32(P_AO_RTC_ADDR1));
-                aml_write_reg32(P_AO_RTC_ADDR1, (aml_read_reg32(P_AO_RTC_ADDR1) | (0x0000c000)));
+                printk(KERN_INFO "Force key down: %x\n",AML_RTC_READ(P_AO_RTC_ADDR1));
+                AML_RTC_WRITE(P_AO_RTC_ADDR1, (AML_RTC_READ(P_AO_RTC_ADDR1) | (0x0000c000)));
                 keyinput_tasklet(0);
                 return IRQ_HANDLED;
             }
         }
     }
-    aml_write_reg32(P_AO_RTC_ADDR1, (aml_read_reg32(P_AO_RTC_ADDR1) | (0x0000c000)));
+    AML_RTC_WRITE(P_AO_RTC_ADDR1, (AML_RTC_READ(P_AO_RTC_ADDR1) | (0x0000c000)));
 #else
     KeyInput->status = (READ_AOBUS_REG(AO_RTC_ADDR1)>>2)&1;
     if (READ_AOBUS_REG(AO_RTI_STATUS_REG2)== 0x1234abcd) {
@@ -296,7 +306,7 @@ static irqreturn_t am_key_interrupt(int irq, void *dev)
         }
         else {
 #if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6
- 			KeyInput->status = (aml_read_reg32(P_AO_RTC_ADDR1)>>2)&1;
+ 			KeyInput->status = (AML_RTC_READ(P_AO_RTC_ADDR1)>>2)&1;
 #else        	
             KeyInput->status = (READ_AOBUS_REG(AO_RTC_ADDR1)>>2)&1;
 #endif            
@@ -304,7 +314,7 @@ static irqreturn_t am_key_interrupt(int irq, void *dev)
         }
     }
 #if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6
-	aml_write_reg32(P_AO_RTC_ADDR1, (aml_read_reg32(P_AO_RTC_ADDR1) | (0x0000c000)));
+	AML_RTC_WRITE(P_AO_RTC_ADDR1, (AML_RTC_READ(P_AO_RTC_ADDR1) | (0x0000c000)));
 #else    
     WRITE_AOBUS_REG(AO_RTC_ADDR1, (READ_AOBUS_REG(AO_RTC_ADDR1) | (0x0000c000)));
 #endif    
@@ -454,7 +464,7 @@ static int key_input_probe(struct platform_device *pdev)
             goto CATCH_ERR;
         }
 #if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6
-		aml_write_reg32(P_AO_RTC_ADDR0, (aml_read_reg32(P_AO_RTC_ADDR0) | (0x0000f000)));
+		AML_RTC_WRITE(P_AO_RTC_ADDR0, (AML_RTC_READ(P_AO_RTC_ADDR0) | (0x0000f000)));
 #else        
         WRITE_AOBUS_REG(AO_RTC_ADDR0, (READ_AOBUS_REG(AO_RTC_ADDR0) | (0x0000c000)));
 #endif        
@@ -552,7 +562,7 @@ static int key_input_resume(struct platform_device *dev)
         input_sync(KeyInput->input);
         input_report_key(KeyInput->input, KeyInput->pdata->key_code_list[0], 1);
         input_sync(KeyInput->input);
-		//aml_write_reg32(P_AO_RTC_ADDR0, (aml_read_reg32(P_AO_RTC_ADDR0) | (0x0000f000)));
+		//AML_RTC_WRITE(P_AO_RTC_ADDR0, (AML_RTC_READ(P_AO_RTC_ADDR0) | (0x0000f000)));
 		#ifdef CONFIG_SCREEN_ON_EARLY
 		power_key_pressed = 1;
 		#endif		

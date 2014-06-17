@@ -52,6 +52,11 @@
 #define IR_CONTROL_RESET            (1<<0)
 #define KEY_RELEASE_DELAY    200
 
+#ifdef CONFIG_HAS_EARLYSUSPEND
+#include <linux/earlysuspend.h>
+static struct early_suspend early_suspend;
+#endif
+
 type_printk input_dbg;
 static DEFINE_MUTEX(remote_enable_mutex);
 static DEFINE_MUTEX(remote_file_mutex);
@@ -157,6 +162,7 @@ static int remote_mouse_event(struct input_dev *dev, unsigned int scancode, unsi
 
 void remote_send_key(struct input_dev *dev, unsigned int scancode, unsigned int type,int event)
 {
+	printk("remote_send_key \n");
 	if(scancode == FN_KEY_SCANCODE && type == 1)
     {
     	// switch from key to pointer
@@ -207,6 +213,11 @@ void remote_send_key(struct input_dev *dev, unsigned int scancode, unsigned int 
 			case 2:
 				input_dbg("repeat ircode = 0x%02x, scancode = 0x%04x, maptable = %d \n", scancode, key_map[gp_remote->map_num][scancode],gp_remote->map_num);
 				break;
+		}
+		printk("%s sleep:%d\n", __func__, gp_remote->sleep);
+		if(gp_remote->sleep && scancode == 0x1a && key_map[gp_remote->map_num][scancode] == 0x0074){
+			printk(" set AO_RTI_STATUS_REG2 0x4853ffff \n");
+			WRITE_AOBUS_REG(AO_RTI_STATUS_REG2, 0x4853ffff); // tell uboot don't suspend
 		}
 	}
 }
@@ -527,6 +538,15 @@ static int register_remote_dev(struct remote *remote)
 	return ret;
 }
 
+#ifdef CONFIG_HAS_EARLYSUSPEND
+static int remote_early_suspend(struct early_suspend *handler)
+{
+	 printk("remote_early_suspend, set sleep 1 \n");
+	 gp_remote->sleep = 1;
+	 return 0;
+}
+#endif
+
 static const struct of_device_id remote_dt_match[]={
 	{	.compatible 	= "amlogic,aml_remote",
 	},
@@ -577,6 +597,7 @@ static int remote_probe(struct platform_device *pdev)
 	remote->last_jiffies = 0xffffffff;
 	remote->last_pulse_width = 0;
 	remote->step = REMOTE_STATUS_WAIT;
+	remote->sleep = 0;
 	//init logic0 logic1  time window
 	for(i = 0;i < 18;i++)
 		remote->time_window[i] = 0x1;
@@ -594,6 +615,15 @@ static int remote_probe(struct platform_device *pdev)
 	tasklet_enable(&tasklet);
 	tasklet.data = (unsigned long)remote;
 	setup_timer(&remote->timer, remote_release_timer_sr, 0);
+
+
+	#ifdef CONFIG_HAS_EARLYSUSPEND
+    early_suspend.level = EARLY_SUSPEND_LEVEL_STOP_DRAWING + 1;
+    early_suspend.suspend = remote_early_suspend;
+    early_suspend.resume = NULL;
+    early_suspend.param = gp_remote;
+    register_early_suspend(&early_suspend);
+    #endif
 
 	ret = device_create_file(&pdev->dev, &dev_attr_enable);
 	if (ret < 0) {
@@ -684,8 +714,8 @@ static int remote_remove(struct platform_device *pdev)
 
 static int remote_resume(struct platform_device * pdev)
 {
-	printk("To do remote resume\n");
-	printk("make sure read frame enable ir interrupt\n");
+	printk("remote_resume To do remote resume\n");
+	printk("remote_resume make sure read frame enable ir interrupt\n");
 	am_remote_read_reg(DURATION_REG1_AND_STATUS);	
 	am_remote_read_reg(FRAME_BODY);	
 	if (READ_AOBUS_REG(AO_RTI_STATUS_REG2) == 0x1234abcd) {
@@ -697,11 +727,18 @@ static int remote_resume(struct platform_device * pdev)
 		//aml_write_reg32(P_AO_RTC_ADDR0, (aml_read_reg32(P_AO_RTC_ADDR0) | (0x0000f000)));
 		WRITE_AOBUS_REG(AO_RTI_STATUS_REG2, 0);
 	}
-	return 0;
-}static int remote_suspend(struct platform_device * pdev)
-{
+	gp_remote->sleep = 0;
 	return 0;
 }
+
+static int remote_suspend(struct platform_device * pdev)
+{
+	printk("remote_suspend, set sleep 1 \n");
+	gp_remote->sleep = 1;
+	return 0;
+}
+
+
 static struct platform_driver remote_driver = {
 	.probe = remote_probe,
 	.remove = remote_remove,

@@ -442,6 +442,7 @@ struct remote {
 	// debug swtich
 	unsigned int debug_enable;
 	//sw
+	unsigned int sleep;
 	unsigned int delay;
 	unsigned int step;//sw status
 	unsigned int send_data;

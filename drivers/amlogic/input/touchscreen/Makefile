@@ -15,4 +15,5 @@ obj-$(CONFIG_NOVATEK_CAPACITIVE_TOUCHSCREEN)  += novatek.o
 obj-y += gt9xx/
 obj-y += ct36x_ts/
 obj-y += ft5x02/
+obj-y += gslx680/
 

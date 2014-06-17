@@ -193,7 +193,7 @@ enum {
 #define disable_detect_sw()	set_bits(SAR_ADC_DETECT_IDLE_SW, 0, 26, 1)
 
 // REG10
-#if MESON_CPU_TYPE == MESON_CPU_TYPE_MESON8
+#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8
 #define enable_bandgap()    set_bits(SAR_ADC_DELTA_10, 1, 10, 1)
 #define disable_bandgap()   set_bits(SAR_ADC_DELTA_10, 0, 10, 1)
 #define set_trimming(x)     set_bits(SAR_ADC_DELTA_10, x, 11, 4)

@@ -198,11 +198,14 @@ static int goodix_init_panel(struct goodix_ts_data *ts)
 	}
 
 	while (offset < file_size) {
-    touch_read_fw(offset, READ_COUNT, &tmp[0]);
+	memset(tmp, 0, READ_COUNT);
+    touch_read_fw(offset, min_t(int,file_size-offset,READ_COUNT), &tmp[0]);
     i_ret = sscanf(&tmp[0],"0x%x,",(int *)(config_info + count));
     if (i_ret == 1) {
 			count++;
+			offset += READ_COUNT;
 		}
+	else
     offset++;
 	}
 
@@ -932,7 +935,7 @@ static int gt81xx_late_upgrade(void *p)
 	}
 	touch_close_fw();
 	gt81xx_upgrade_touch();
-	printk("%s :first load firmware\n", g_pdata->owner);
+	printk("%s: load firmware\n", g_pdata->owner);
 	if(ts->use_irq)
 		enable_irq(i2c_connect_client->irq);
 	return 0;	
@@ -1213,9 +1216,9 @@ err_i2c_failed:
 	kfree(ts);
 err_goodix_is_not_exist:
 	free_touch_gpio(g_pdata);
+	ts_com->owner = NULL;
 //err_alloc_data_failed:
 err_check_functionality_failed:
-	ts_com->owner = NULL;
 	return ret;
 }
 
@@ -1239,7 +1242,6 @@ static int goodix_ts_remove(struct i2c_client *client)
 #ifdef CONFIG_TOUCHSCREEN_GOODIX_IAP
 	remove_proc_entry("goodix-update", NULL);
 #endif
-	destroy_remove(client->dev, g_pdata);
 	goodix_debug_sysfs_deinit();
 
 	if (ts && ts->use_irq)
@@ -1257,6 +1259,9 @@ static int goodix_ts_remove(struct i2c_client *client)
 	i2c_set_clientdata(client, NULL);
 	input_unregister_device(ts->input_dev);
 	kfree(ts);
+	destroy_remove(client->dev, g_pdata);
+	free_touch_gpio(g_pdata);
+	ts_com->owner = NULL;
 	return 0;
 }
 

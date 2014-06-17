@@ -59,6 +59,18 @@
             address = <0x3c>;
             i2c_bus = "i2c_bus_b";
         };
+
+//$$ DEVICE="cm3217"
+//$$ L2 PROP_STR = "status"
+//$$ L2 PROP_U32 = "address"
+//$$ L2 PROP_STR = "i2c_bus"
+        cm3217{
+            dev_name = "cm3217";
+            status = "okay";
+            address = <0x10>;
+            i2c_bus = "i2c_bus_b";
+        };
+
 };
 
 #endif

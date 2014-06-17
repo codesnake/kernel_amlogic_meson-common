@@ -55,18 +55,25 @@
 /******************************************************************************
  * Accelerometer WHO_AM_I return value
  *****************************************************************************/
-#define KIONIX_ACCEL_WHO_AM_I_KXTE9 0x00
-#define KIONIX_ACCEL_WHO_AM_I_KXTF9 0x01
-#define KIONIX_ACCEL_WHO_AM_I_KXTI9 0x04
-#define KIONIX_ACCEL_WHO_AM_I_KXTIK 0x05
-#define KIONIX_ACCEL_WHO_AM_I_KXTJ9 0x07
+#define KIONIX_ACCEL_WHO_AM_I_KXTE9 		0x00
+#define KIONIX_ACCEL_WHO_AM_I_KXTF9 		0x01
+#define KIONIX_ACCEL_WHO_AM_I_KXTI9_1001 	0x04
+#define KIONIX_ACCEL_WHO_AM_I_KXTIK_1004 	0x05
+#define KIONIX_ACCEL_WHO_AM_I_KXTJ9_1005 	0x07
+#define KIONIX_ACCEL_WHO_AM_I_KXTJ9_1007 	0x08
+#define KIONIX_ACCEL_WHO_AM_I_KXCJ9_1008 	0x0A
+#define KIONIX_ACCEL_WHO_AM_I_KXTJ2_1009 	0x09
+#define KIONIX_ACCEL_WHO_AM_I_KXCJK_1013 	0x11
 
 /******************************************************************************
  * Accelerometer Grouping
  *****************************************************************************/
 #define KIONIX_ACCEL_GRP1	1	/* KXTE9 */
-#define KIONIX_ACCEL_GRP2	2	/* KXTF9/I9/J9 */
-#define KIONIX_ACCEL_GRP3	3	/* KXTIK */
+#define KIONIX_ACCEL_GRP2	2	/* KXTF9/I9-1001/J9-1005 */
+#define KIONIX_ACCEL_GRP3	3	/* KXTIK-1004 */
+#define KIONIX_ACCEL_GRP4	4	/* KXTJ9-1007/KXCJ9-1008 */
+#define KIONIX_ACCEL_GRP5	5	/* KXTJ2-1009 */
+#define KIONIX_ACCEL_GRP6	6	/* KXCJK-1013 */
 
 /******************************************************************************
  * Registers for Accelerometer Group 1 & 2 & 3
@@ -114,13 +121,52 @@
 #define ACCEL_GRP2_IEA			(1 << 4)
 #define ACCEL_GRP2_IEN			(1 << 5)
 /* DATA_CTRL_REG */
-#define ACCEL_GRP2_ODR12_5		0
-#define ACCEL_GRP2_ODR25		1
-#define ACCEL_GRP2_ODR50		2
-#define ACCEL_GRP2_ODR100		3
-#define ACCEL_GRP2_ODR200		4
-#define ACCEL_GRP2_ODR400		5
-#define ACCEL_GRP2_ODR800		6
+#define ACCEL_GRP2_ODR12_5		0x00
+#define ACCEL_GRP2_ODR25		0x01
+#define ACCEL_GRP2_ODR50		0x02
+#define ACCEL_GRP2_ODR100		0x03
+#define ACCEL_GRP2_ODR200		0x04
+#define ACCEL_GRP2_ODR400		0x05
+#define ACCEL_GRP2_ODR800		0x06
+/*****************************************************************************/
+
+/*****************************************************************************/
+/* Registers for Accelerometer Group 4 & 5 & 6 */
+/*****************************************************************************/
+/* Output Registers */
+#define ACCEL_GRP4_XOUT_L		0x06
+/* Control Registers */
+#define ACCEL_GRP4_INT_REL		0x1A
+#define ACCEL_GRP4_CTRL_REG1	0x1B
+#define ACCEL_GRP4_INT_CTRL1	0x1E
+#define ACCEL_GRP4_DATA_CTRL	0x21
+/* CTRL_REG1 */
+#define ACCEL_GRP4_PC1_OFF		0x7F
+#define ACCEL_GRP4_PC1_ON		(1 << 7)
+#define ACCEL_GRP4_DRDYE		(1 << 5)
+#define ACCEL_GRP4_G_8G			(2 << 3)
+#define ACCEL_GRP4_G_4G			(1 << 3)
+#define ACCEL_GRP4_G_2G			(0 << 3)
+#define ACCEL_GRP4_G_MASK		(3 << 3)
+#define ACCEL_GRP4_RES_8BIT		(0 << 6)
+#define ACCEL_GRP4_RES_12BIT	(1 << 6)
+#define ACCEL_GRP4_RES_MASK		(1 << 6)
+/* INT_CTRL1 */
+#define ACCEL_GRP4_IEA			(1 << 4)
+#define ACCEL_GRP4_IEN			(1 << 5)
+/* DATA_CTRL_REG */
+#define ACCEL_GRP4_ODR0_781		0x08
+#define ACCEL_GRP4_ODR1_563		0x09
+#define ACCEL_GRP4_ODR3_125		0x0A
+#define ACCEL_GRP4_ODR6_25		0x0B
+#define ACCEL_GRP4_ODR12_5		0x00
+#define ACCEL_GRP4_ODR25		0x01
+#define ACCEL_GRP4_ODR50		0x02
+#define ACCEL_GRP4_ODR100		0x03
+#define ACCEL_GRP4_ODR200		0x04
+#define ACCEL_GRP4_ODR400		0x05
+#define ACCEL_GRP4_ODR800		0x06
+#define ACCEL_GRP4_ODR1600		0x07
 /*****************************************************************************/
 
 /* Input Event Constants */
@@ -132,7 +178,7 @@
 #define KIONIX_I2C_RETRY_TIMEOUT	1	/* Timeout between retry (miliseconds) */
 
 /* Earlysuspend Contants */
-#define KIONIX_ACCEL_EARLYSUSPEND_TIMEOUT	5000	/* Timeout (miliseconds) */
+#define KIONIX_ACCEL_EARLYSUSPEND_TIMEOUT	500	/* Timeout (miliseconds) */
 
 /*
  * The following table lists the maximum appropriate poll interval for each
@@ -161,6 +207,24 @@ static const struct {
 	{ 0,	ACCEL_GRP2_ODR12_5},
 };
 
+static const struct {
+	unsigned int cutoff;
+	u8 mask;
+} kionix_accel_grp4_odr_table[] = {
+	{ 2,	ACCEL_GRP4_ODR1600 },
+	{ 3,	ACCEL_GRP4_ODR800 },
+	{ 5,	ACCEL_GRP4_ODR400 },
+	{ 10,	ACCEL_GRP4_ODR200 },
+	{ 20,	ACCEL_GRP4_ODR100 },
+	{ 40,	ACCEL_GRP4_ODR50  },
+	{ 80,	ACCEL_GRP4_ODR25  },
+	{ 160,	ACCEL_GRP4_ODR12_5},
+	{ 320,	ACCEL_GRP4_ODR6_25},
+	{ 640,	ACCEL_GRP4_ODR3_125},
+	{ 1280,	ACCEL_GRP4_ODR1_563},
+	{ 0,	ACCEL_GRP4_ODR0_781},
+};
+
 enum {
 	accel_grp1_ctrl_reg1 = 0,
 	accel_grp1_regs_count,
@@ -171,6 +235,13 @@ enum {
 	accel_grp2_data_ctrl,
 	accel_grp2_int_ctrl,
 	accel_grp2_regs_count,
+};
+
+enum {
+	accel_grp4_ctrl_reg1 = 0,
+	accel_grp4_data_ctrl,
+	accel_grp4_int_ctrl,
+	accel_grp4_regs_count,
 };
 
 struct kionix_accel_driver {
@@ -392,9 +463,9 @@ static void kionix_accel_grp1_report_accel_data(struct kionix_accel_driver *acce
 				y = ((s16) le16_to_cpu(((s16)(accel_data[acceld->axis_map_y] >> 2)) - 32)) << 6;
 				z = ((s16) le16_to_cpu(((s16)(accel_data[acceld->axis_map_z] >> 2)) - 32)) << 6;
 
-                acceld->accel_data[x] = x;
-                acceld->accel_data[y] = y;
-                acceld->accel_data[z] = z;
+                acceld->accel_data[0] = x;
+                acceld->accel_data[1] = y;
+                acceld->accel_data[2] = z;
                 
                 #if 0
 				acceld->accel_data[acceld->axis_map_x] = (acceld->negate_x ? -x : x) + acceld->accel_cali[acceld->axis_map_x];
@@ -402,7 +473,7 @@ static void kionix_accel_grp1_report_accel_data(struct kionix_accel_driver *acce
 				acceld->accel_data[acceld->axis_map_z] = (acceld->negate_z ? -z : z) + acceld->accel_cali[acceld->axis_map_z];
                 #endif
 				if(atomic_read(&acceld->accel_input_event) > 0) {
-                    aml_sensor_report_acc(acceld->client, acceld->input_dev, x, y, z);
+					aml_sensor_report_acc(acceld->client, acceld->input_dev, x, y, z);
                     #if 0
 					input_report_abs(acceld->input_dev, ABS_X, acceld->accel_data[acceld->axis_map_x]);
 					input_report_abs(acceld->input_dev, ABS_Y, acceld->accel_data[acceld->axis_map_y]);
@@ -663,6 +734,264 @@ static int kionix_accel_grp2_update_odr(struct kionix_accel_driver *acceld, unsi
 	return 0;
 }
 
+static int kionix_accel_grp4_power_on_init(struct kionix_accel_driver *acceld)
+{
+	int err;
+
+	/* ensure that PC1 is cleared before updating control registers */
+	err = i2c_smbus_write_byte_data(acceld->client,
+					ACCEL_GRP4_CTRL_REG1, 0);
+	if (err < 0)
+		return err;
+
+	err = i2c_smbus_write_byte_data(acceld->client,
+					ACCEL_GRP4_DATA_CTRL, acceld->accel_registers[accel_grp4_data_ctrl]);
+	if (err < 0)
+		return err;
+
+	/* only write INT_CTRL_REG1 if in irq mode */
+	if (acceld->client->irq) {
+		err = i2c_smbus_write_byte_data(acceld->client,
+						ACCEL_GRP4_INT_CTRL1, acceld->accel_registers[accel_grp4_int_ctrl]);
+		if (err < 0)
+			return err;
+	}
+
+	if(atomic_read(&acceld->accel_enabled) > 0) {
+		err = i2c_smbus_write_byte_data(acceld->client,
+						ACCEL_GRP4_CTRL_REG1, acceld->accel_registers[accel_grp4_ctrl_reg1] | ACCEL_GRP4_PC1_ON);
+		if (err < 0)
+			return err;
+	}
+	else {
+		err = i2c_smbus_write_byte_data(acceld->client,
+						ACCEL_GRP4_CTRL_REG1, acceld->accel_registers[accel_grp4_ctrl_reg1]);
+		if (err < 0)
+			return err;
+	}
+
+	return 0;
+}
+
+static int kionix_accel_grp4_operate(struct kionix_accel_driver *acceld)
+{
+	int err;
+
+	err = i2c_smbus_write_byte_data(acceld->client, ACCEL_GRP4_CTRL_REG1, \
+			acceld->accel_registers[accel_grp4_ctrl_reg1] | ACCEL_GRP4_PC1_ON);
+	if (err < 0)
+		return err;
+
+	if(acceld->accel_drdy == 0)
+		queue_delayed_work(acceld->accel_workqueue, &acceld->accel_work, 0);
+
+	return 0;
+}
+
+static int kionix_accel_grp4_standby(struct kionix_accel_driver *acceld)
+{
+	int err;
+
+	if(acceld->accel_drdy == 0)
+		cancel_delayed_work_sync(&acceld->accel_work);
+
+	err = i2c_smbus_write_byte_data(acceld->client, ACCEL_GRP4_CTRL_REG1, 0);
+	if (err < 0)
+		return err;
+
+	return 0;
+}
+
+static void kionix_accel_grp4_report_accel_data(struct kionix_accel_driver *acceld)
+{
+	struct { union {
+		s16 accel_data_s16[3];
+		s8	accel_data_s8[6];
+	}; } accel_data;
+	s16 x, y, z;
+	int err;
+	struct input_dev *input_dev = acceld->input_dev;
+	int loop;
+
+	/* Only read the output registers if enabled */
+	if(atomic_read(&acceld->accel_enabled) > 0) {
+		if(atomic_read(&acceld->accel_enable_resume) > 0)
+		{
+			loop = KIONIX_I2C_RETRY_COUNT;
+			while(loop) {
+				mutex_lock(&input_dev->mutex);
+				err = kionix_i2c_read(acceld->client, ACCEL_GRP4_XOUT_L, (u8 *)accel_data.accel_data_s16, 6);
+				mutex_unlock(&input_dev->mutex);
+				if(err < 0){
+					loop--;
+					mdelay(KIONIX_I2C_RETRY_TIMEOUT);
+				}
+				else
+					loop = 0;
+			}
+			if (err < 0) {
+				KMSGERR(&acceld->client->dev, "%s: read data output error = %d\n", __func__, err);
+			}
+			else {
+				write_lock(&acceld->rwlock_accel_data);
+
+				x = ((s16) le16_to_cpu(accel_data.accel_data_s16[acceld->axis_map_x])) >> acceld->shift;
+				y = ((s16) le16_to_cpu(accel_data.accel_data_s16[acceld->axis_map_y])) >> acceld->shift;
+				z = ((s16) le16_to_cpu(accel_data.accel_data_s16[acceld->axis_map_z])) >> acceld->shift;
+
+				#if 1
+				acceld->accel_data[0] = x;
+                acceld->accel_data[1] = y;
+                acceld->accel_data[2] = z;
+				#else
+				acceld->accel_data[acceld->axis_map_x] = (acceld->negate_x ? -x : x) + acceld->accel_cali[acceld->axis_map_x];
+				acceld->accel_data[acceld->axis_map_y] = (acceld->negate_y ? -y : y) + acceld->accel_cali[acceld->axis_map_y];
+				acceld->accel_data[acceld->axis_map_z] = (acceld->negate_z ? -z : z) + acceld->accel_cali[acceld->axis_map_z];
+				#endif
+				if(atomic_read(&acceld->accel_input_event) > 0) {
+					#if 1
+					aml_sensor_report_acc(acceld->client, acceld->input_dev, x, y, z);
+					#else
+					input_report_abs(acceld->input_dev, ABS_X, acceld->accel_data[acceld->axis_map_x]);
+					input_report_abs(acceld->input_dev, ABS_Y, acceld->accel_data[acceld->axis_map_y]);
+					input_report_abs(acceld->input_dev, ABS_Z, acceld->accel_data[acceld->axis_map_z]);
+					input_sync(acceld->input_dev);
+					#endif
+				}
+
+				write_unlock(&acceld->rwlock_accel_data);
+			}
+		}
+		else
+		{
+			atomic_inc(&acceld->accel_enable_resume);
+		}
+	}
+
+	/* Clear the interrupt if using drdy */
+	if(acceld->accel_drdy == 1) {
+		loop = KIONIX_I2C_RETRY_COUNT;
+		while(loop) {
+			err = i2c_smbus_read_byte_data(acceld->client, ACCEL_GRP4_INT_REL);
+			if(err < 0){
+				loop--;
+				mdelay(KIONIX_I2C_RETRY_TIMEOUT);
+			}
+			else
+				loop = 0;
+		}
+		if (err < 0)
+			KMSGERR(&acceld->client->dev, "%s: clear interrupt error = %d\n", __func__, err);
+	}
+}
+
+static void kionix_accel_grp4_update_g_range(struct kionix_accel_driver *acceld)
+{
+	acceld->accel_registers[accel_grp4_ctrl_reg1] &= ~ACCEL_GRP4_G_MASK;
+
+	switch (acceld->accel_pdata.accel_g_range) {
+		case KIONIX_ACCEL_G_8G:
+		case KIONIX_ACCEL_G_6G:
+			acceld->shift = 2;
+			acceld->accel_registers[accel_grp4_ctrl_reg1] |= ACCEL_GRP4_G_8G;
+			break;
+		case KIONIX_ACCEL_G_4G:
+			acceld->shift = 3;
+			acceld->accel_registers[accel_grp4_ctrl_reg1] |= ACCEL_GRP4_G_4G;
+			break;
+		case KIONIX_ACCEL_G_2G:
+		default:
+			acceld->shift = 4;
+			acceld->accel_registers[accel_grp4_ctrl_reg1] |= ACCEL_GRP4_G_2G;
+			break;
+	}
+
+	return;
+}
+
+static int kionix_accel_grp4_update_odr(struct kionix_accel_driver *acceld, unsigned int poll_interval)
+{
+	int err;
+	int i;
+	u8 odr;
+
+	/* Use the lowest ODR that can support the requested poll interval */
+	for (i = 0; i < ARRAY_SIZE(kionix_accel_grp4_odr_table); i++) {
+		odr = kionix_accel_grp4_odr_table[i].mask;
+		if (poll_interval < kionix_accel_grp4_odr_table[i].cutoff)
+			break;
+	}
+
+	/* Do not need to update DATA_CTRL_REG register if the ODR is not changed */
+	if(acceld->accel_registers[accel_grp4_data_ctrl] == odr)
+		return 0;
+	else
+		acceld->accel_registers[accel_grp4_data_ctrl] = odr;
+
+	/* Do not need to update DATA_CTRL_REG register if the sensor is not currently turn on */
+	if(atomic_read(&acceld->accel_enabled) > 0) {
+		err = i2c_smbus_write_byte_data(acceld->client, ACCEL_GRP4_CTRL_REG1, 0);
+		if (err < 0)
+			return err;
+
+		err = i2c_smbus_write_byte_data(acceld->client, ACCEL_GRP4_DATA_CTRL, acceld->accel_registers[accel_grp4_data_ctrl]);
+		if (err < 0)
+			return err;
+
+		err = i2c_smbus_write_byte_data(acceld->client, ACCEL_GRP4_CTRL_REG1, acceld->accel_registers[accel_grp4_ctrl_reg1] | ACCEL_GRP4_PC1_ON);
+		if (err < 0)
+			return err;
+		//#############
+		err = i2c_smbus_read_byte_data(acceld->client, ACCEL_GRP4_DATA_CTRL);
+		if (err < 0)
+			return err;
+		switch(err) {
+			case ACCEL_GRP4_ODR0_781:
+				dev_info(&acceld->client->dev, "ODR = 0.781 Hz\n");
+				break;
+			case ACCEL_GRP4_ODR1_563:
+				dev_info(&acceld->client->dev, "ODR = 1.563 Hz\n");
+				break;
+			case ACCEL_GRP4_ODR3_125:
+				dev_info(&acceld->client->dev, "ODR = 3.125 Hz\n");
+				break;
+			case ACCEL_GRP4_ODR6_25:
+				dev_info(&acceld->client->dev, "ODR = 6.25 Hz\n");
+				break;
+			case ACCEL_GRP4_ODR12_5:
+				dev_info(&acceld->client->dev, "ODR = 12.5 Hz\n");
+				break;
+			case ACCEL_GRP4_ODR25:
+				dev_info(&acceld->client->dev, "ODR = 25 Hz\n");
+				break;
+			case ACCEL_GRP4_ODR50:
+				dev_info(&acceld->client->dev, "ODR = 50 Hz\n");
+				break;
+			case ACCEL_GRP4_ODR100:
+				dev_info(&acceld->client->dev, "ODR = 100 Hz\n");
+				break;
+			case ACCEL_GRP4_ODR200:
+				dev_info(&acceld->client->dev, "ODR = 200 Hz\n");
+				break;
+			case ACCEL_GRP4_ODR400:
+				dev_info(&acceld->client->dev, "ODR = 400 Hz\n");
+				break;
+			case ACCEL_GRP4_ODR800:
+				dev_info(&acceld->client->dev, "ODR = 800 Hz\n");
+				break;
+			case ACCEL_GRP4_ODR1600:
+				dev_info(&acceld->client->dev, "ODR = 1600 Hz\n");
+				break;
+			default:
+				dev_info(&acceld->client->dev, "Unknown ODR\n");
+				break;
+		}
+		//#############
+	}
+
+	return 0;
+}
+
 static int kionix_accel_power_on(struct kionix_accel_driver *acceld)
 {
 	if (acceld->accel_pdata.power_on)
@@ -699,19 +1028,29 @@ static void kionix_accel_work(struct work_struct *work)
 static void kionix_accel_update_direction(struct kionix_accel_driver *acceld)
 {
 	unsigned int direction = acceld->accel_pdata.accel_direction;
+	unsigned int accel_group = acceld->accel_group;
 
 	write_lock(&acceld->rwlock_accel_data);
 	acceld->axis_map_x = ((direction-1)%2);
 	acceld->axis_map_y =  (direction%2);
 	acceld->axis_map_z =  2;
 	acceld->negate_z = ((direction-1)/4);
-	if(acceld->accel_group == KIONIX_ACCEL_GRP3) {
-		acceld->negate_x = (((direction+2)/2)%2);
-		acceld->negate_y = (((direction+5)/4)%2);
-	}
-	else {
-		acceld->negate_x =  ((direction/2)%2);
-		acceld->negate_y = (((direction+1)/4)%2);
+	switch(accel_group) {
+		case KIONIX_ACCEL_GRP3:
+		case KIONIX_ACCEL_GRP6:
+			acceld->negate_x = (((direction+2)/2)%2);
+			acceld->negate_y = (((direction+5)/4)%2);
+			break;
+		case KIONIX_ACCEL_GRP5:
+			acceld->axis_map_x =  (direction%2);
+			acceld->axis_map_y = ((direction-1)%2);
+			acceld->negate_x =  (((direction+1)/2)%2);
+			acceld->negate_y =  (((direction/2)+((direction-1)/4))%2);
+			break;
+		default:
+			acceld->negate_x =  ((direction/2)%2);
+			acceld->negate_y = (((direction+1)/4)%2);
+			break;
 	}
 	write_unlock(&acceld->rwlock_accel_data);
 	return;
@@ -1177,14 +1516,26 @@ static int kionix_verify(struct kionix_accel_driver *acceld)
 		case KIONIX_ACCEL_WHO_AM_I_KXTF9:
 			KMSGINF(&acceld->client->dev, "this accelerometer is a KXTF9.\n");
 			break;
-		case KIONIX_ACCEL_WHO_AM_I_KXTI9:
-			KMSGINF(&acceld->client->dev, "this accelerometer is a KXTI9.\n");
+		case KIONIX_ACCEL_WHO_AM_I_KXTI9_1001:
+			KMSGINF(&acceld->client->dev, "this accelerometer is a KXTI9-1001.\n");
 			break;
-		case KIONIX_ACCEL_WHO_AM_I_KXTIK:
-			KMSGINF(&acceld->client->dev, "this accelerometer is a KXTIK.\n");
+		case KIONIX_ACCEL_WHO_AM_I_KXTIK_1004:
+			KMSGINF(&acceld->client->dev, "this accelerometer is a KXTIK-1004.\n");
 			break;
-		case KIONIX_ACCEL_WHO_AM_I_KXTJ9:
-			KMSGINF(&acceld->client->dev, "this accelerometer is a KXTJ9.\n");
+		case KIONIX_ACCEL_WHO_AM_I_KXTJ9_1005:
+			KMSGINF(&acceld->client->dev, "this accelerometer is a KXTJ9-1005.\n");
+			break;
+		case KIONIX_ACCEL_WHO_AM_I_KXTJ9_1007:
+			KMSGINF(&acceld->client->dev, "this accelerometer is a KXTJ9-1007.\n");
+			break;
+		case KIONIX_ACCEL_WHO_AM_I_KXCJ9_1008:
+			KMSGINF(&acceld->client->dev, "this accelerometer is a KXCJ9-1008.\n");
+			break;
+		case KIONIX_ACCEL_WHO_AM_I_KXTJ2_1009:
+			KMSGINF(&acceld->client->dev, "this accelerometer is a KXTJ2-1009.\n");
+			break;
+		case KIONIX_ACCEL_WHO_AM_I_KXCJK_1013:
+			KMSGINF(&acceld->client->dev, "this accelerometer is a KXCJK-1013.\n");
 			break;
 		default:
 			break;
@@ -1325,16 +1676,16 @@ static int kionix_accel_probe(struct i2c_client *client,
 			}
 			acceld->accel_drdy = 0;
 			acceld->kionix_accel_report_accel_data	= kionix_accel_grp1_report_accel_data;
-			acceld->kionix_accel_update_odr		= kionix_accel_grp1_update_odr;
+			acceld->kionix_accel_update_odr			= kionix_accel_grp1_update_odr;
 			acceld->kionix_accel_power_on_init		= kionix_accel_grp1_power_on_init;
 			acceld->kionix_accel_operate			= kionix_accel_grp1_operate;
 			acceld->kionix_accel_standby			= kionix_accel_grp1_standby;
 			break;
 		case KIONIX_ACCEL_WHO_AM_I_KXTF9:
-		case KIONIX_ACCEL_WHO_AM_I_KXTI9:
-		case KIONIX_ACCEL_WHO_AM_I_KXTIK:
-		case KIONIX_ACCEL_WHO_AM_I_KXTJ9:
-			if(err == KIONIX_ACCEL_WHO_AM_I_KXTIK)
+		case KIONIX_ACCEL_WHO_AM_I_KXTI9_1001:
+		case KIONIX_ACCEL_WHO_AM_I_KXTIK_1004:
+		case KIONIX_ACCEL_WHO_AM_I_KXTJ9_1005:
+			if(err == KIONIX_ACCEL_WHO_AM_I_KXTIK_1004)
 				acceld->accel_group = KIONIX_ACCEL_GRP3;
 			else
 				acceld->accel_group = KIONIX_ACCEL_GRP2;
@@ -1363,10 +1714,50 @@ static int kionix_accel_probe(struct i2c_client *client,
 				acceld->accel_drdy = 0;
 			kionix_accel_grp2_update_g_range(acceld);
 			acceld->kionix_accel_report_accel_data	= kionix_accel_grp2_report_accel_data;
-			acceld->kionix_accel_update_odr		= kionix_accel_grp2_update_odr;
+			acceld->kionix_accel_update_odr			= kionix_accel_grp2_update_odr;
 			acceld->kionix_accel_power_on_init		= kionix_accel_grp2_power_on_init;
 			acceld->kionix_accel_operate			= kionix_accel_grp2_operate;
 			acceld->kionix_accel_standby			= kionix_accel_grp2_standby;
+			break;
+		case KIONIX_ACCEL_WHO_AM_I_KXTJ9_1007:
+		case KIONIX_ACCEL_WHO_AM_I_KXCJ9_1008:
+		case KIONIX_ACCEL_WHO_AM_I_KXTJ2_1009:
+		case KIONIX_ACCEL_WHO_AM_I_KXCJK_1013:
+			if(err == KIONIX_ACCEL_WHO_AM_I_KXTJ2_1009)
+				acceld->accel_group = KIONIX_ACCEL_GRP5;
+			else if(err == KIONIX_ACCEL_WHO_AM_I_KXCJK_1013)
+				acceld->accel_group = KIONIX_ACCEL_GRP6;
+			else
+				acceld->accel_group = KIONIX_ACCEL_GRP4;
+			acceld->accel_registers = kzalloc(sizeof(u8)*accel_grp4_regs_count, GFP_KERNEL);
+			if (acceld->accel_registers == NULL) {
+				KMSGERR(&client->dev, \
+					"failed to allocate memory for accel_registers. Abort.\n");
+				goto err_accel_pdata_exit;
+			}
+			switch(acceld->accel_pdata.accel_res) {
+				case KIONIX_ACCEL_RES_6BIT:
+				case KIONIX_ACCEL_RES_8BIT:
+					acceld->accel_registers[accel_grp4_ctrl_reg1] |= ACCEL_GRP4_RES_8BIT;
+					break;
+				case KIONIX_ACCEL_RES_12BIT:
+				default:
+					acceld->accel_registers[accel_grp4_ctrl_reg1] |= ACCEL_GRP4_RES_12BIT;
+					break;
+			}
+			if(acceld->accel_pdata.accel_irq_use_drdy && client->irq) {
+				acceld->accel_registers[accel_grp4_int_ctrl] |= ACCEL_GRP4_IEN | ACCEL_GRP4_IEA;
+				acceld->accel_registers[accel_grp4_ctrl_reg1] |= ACCEL_GRP4_DRDYE;
+				acceld->accel_drdy = 1;
+			}
+			else
+				acceld->accel_drdy = 0;
+			kionix_accel_grp4_update_g_range(acceld);
+			acceld->kionix_accel_report_accel_data	= kionix_accel_grp4_report_accel_data;
+			acceld->kionix_accel_update_odr			= kionix_accel_grp4_update_odr;
+			acceld->kionix_accel_power_on_init		= kionix_accel_grp4_power_on_init;
+			acceld->kionix_accel_operate			= kionix_accel_grp4_operate;
+			acceld->kionix_accel_standby			= kionix_accel_grp4_standby;
 			break;
 		default:
 			KMSGERR(&acceld->client->dev, \
@@ -1400,7 +1791,7 @@ static int kionix_accel_probe(struct i2c_client *client,
 	if (acceld->accel_drdy) {
 		err = request_threaded_irq(client->irq, NULL, kionix_accel_isr, \
 					   IRQF_TRIGGER_RISING | IRQF_ONESHOT, \
-					   "kionix-irq", acceld);
+					   KIONIX_ACCEL_IRQ, acceld);
 		if (err) {
 			KMSGERR(&acceld->client->dev, "%s: request_threaded_irq returned err = %d\n", __func__, err);
 			KMSGERR(&acceld->client->dev, "%s: running in software polling mode instead\n", __func__);
@@ -1517,4 +1908,4 @@ module_exit(kionix_accel_exit);
 MODULE_DESCRIPTION("Kionix accelerometer driver");
 MODULE_AUTHOR("Kuching Tan <kuchingtan@kionix.com>");
 MODULE_LICENSE("GPL");
-MODULE_VERSION("3.1.0");
+MODULE_VERSION("3.3.0");

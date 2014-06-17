@@ -106,6 +106,13 @@ config GRAVITY_MXC622X
 	  If you say yes here you get support for Memsic's 2-Axis
 	  acceleration sensors MXC622X.
 
+config GYROSCOPE_L3GD20
+	tristate "L3GD20 3-Axis gyroscope sensor driver"
+	depends on I2C=y
+	help
+	  If you say yes here you get support for STMicroelectronics 3-Axis
+	  gyroscope sensor L3GD20.
+	  
 config LIGHT_CM36283
 	tristate "CM36283 light sensor driver"
 	depends on I2C
@@ -117,6 +124,13 @@ config LIGHT_CM3232
 	depends on I2C
 	help
 	  Say yes here to support Capella's CM3232 light sensor and proximity sensor     
+
+config LIGHT_CM3217
+	tristate "CM3217 light sensor driver"
+	depends on I2C
+	help
+	  Say yes here to support Capella's CM3217 light sensor and proximity sensor     
+
 
 config LIGHT_LTR501
  		tristate "LTR501 light sensor support"

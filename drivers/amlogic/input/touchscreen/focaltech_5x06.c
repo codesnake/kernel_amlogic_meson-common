@@ -693,8 +693,9 @@ E_UPGRADE_ERR_TYPE fts_ctpm_fw_upgrade(void)
 	    packet_buf[4] = (FTS_BYTE)(len>>8);
 	    packet_buf[5] = (FTS_BYTE)len;
 	    i = 0;
-			while(i < FTS_PACKET_LENGTH) {
-		    touch_read_fw(offset, READ_COUNT, &tmp[0]);
+			while(i < FTS_PACKET_LENGTH && offset < file_size) {
+			memset(tmp, 0, READ_COUNT);
+		    touch_read_fw(offset, min_t(int,file_size-offset,READ_COUNT), &tmp[0]);
 		    i_ret = sscanf(&tmp[0],"0x%c%c",&check_dot[0],&check_dot[1]);
 		    if (i_ret == 2) {
 			    if (check_dot[1] == ',')
@@ -702,8 +703,10 @@ E_UPGRADE_ERR_TYPE fts_ctpm_fw_upgrade(void)
 			    else
 						sscanf(&tmp[0],"0x%x,",(uint *)&packet_buf[6+i]);
 			    i ++;
+				offset += READ_COUNT;
 				}
-		    offset++;
+			else
+		    offset ++;
 		    if (offset >= file_size) {
 					last = i-8;
 					break;
@@ -1202,7 +1205,7 @@ static int ft5x0x_late_upgrade(void *data)
 	touch_close_fw();
 	fts_ctpm_fw_upgrade_with_i_file();
 	enable_irq(ts_com->irq);
-	printk("%s :first load firmware\n", ts_com->owner);
+	printk("%s: load firmware\n", ts_com->owner);
 	//do_exit(0);
 	return 0;
 }
@@ -1402,6 +1405,8 @@ static int __exit ft5x0x_ts_remove(struct i2c_client *client)
 	cancel_work_sync(&ft5x0x_ts->pen_event_work);
 	destroy_workqueue(ft5x0x_ts->ts_workqueue);
 	i2c_set_clientdata(client, NULL);
+	free_touch_gpio(g_pdata);
+	ts_com->owner = NULL;
 	return 0;
 }
 

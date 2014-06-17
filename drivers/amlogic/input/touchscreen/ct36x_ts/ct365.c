@@ -462,7 +462,7 @@ void ct36x_upgrade_touch(void)
 	u32 offset = 0,count = 0;
 	int file_size;
 	u8 tmp[READ_COUNT];
-	int i_ret;
+	int i_ret, i;
 
 	file_size = touch_open_fw(ts_com->fw_file);
 	printk("%s: file_size = %d\n", __func__, file_size);
@@ -479,23 +479,25 @@ void ct36x_upgrade_touch(void)
 	}
 
 	while (offset < file_size) {
-    touch_read_fw(offset, READ_COUNT, &tmp[0]);
+	memset(tmp, 0, READ_COUNT);
+    touch_read_fw(offset, min_t(int,file_size-offset,READ_COUNT), &tmp[0]);
     i_ret = sscanf(&tmp[0],"0x%x,",(int *)(binary_data + count));
     if (i_ret == 1) {
 			count++;
+			offset += READ_COUNT;
 		}
+	else
     offset++;
 	}
-
-//	int i=0;
-//	for (i=0; i<10; i++ ) {
-//		printk("%x ", binary_data[i]);
-//	}
-//	printk("\n");
-//	for (i=count-1; i>count-10; i-- ) {
-//		printk("%x ", binary_data[i]);
-//	}
-//	printk("\n");
+	printk("touch dump fw data:");
+	for (i=0; i<20; i++ ) {
+		printk("%x ", binary_data[i]);
+	}
+	printk("\ntouch dump fw data:");
+	for (i=count-20; i<count; i++) {
+		printk("%x ", binary_data[i]);
+	}
+	printk("\n");
 	touch_close_fw();
 	/* Hardware reset */
 	#ifdef CONFIG_OF
@@ -550,7 +552,7 @@ int ct36x_late_upgrade(void *p)
 	}
 	touch_close_fw();
 	ct36x_upgrade_touch();
-	printk("%s :first load firmware\n", ts_com->owner);
+	printk("%s: load firmware\n", ts_com->owner);
 #if defined(CONFIG_TOUCHSCREEN_CT36X_CHIP_CT365)
 	ct36x_check_trim(ct36x_ts.client);
 #endif

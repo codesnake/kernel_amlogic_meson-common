@@ -1215,11 +1215,14 @@ static int goodix_get_config(void)
 	}
 
 	while (offset < file_size) {
-    touch_read_fw(offset, READ_COUNT, &tmp[0]);
+	memset(tmp, 0, READ_COUNT);
+    touch_read_fw(offset, min_t(int,file_size-offset,READ_COUNT), &tmp[0]);
     i_ret = sscanf(&tmp[0],"0x%x,",(int *)(config_info + count));
     if (i_ret == 1) {
 			count++;
+			offset += READ_COUNT; 
 		}
+	else
     offset++;
 	}
 
@@ -1271,7 +1274,7 @@ static s32 gtp_init_panel(struct goodix_ts_data *ts)
                           CFG_GROUP_LEN(cfg_info_group5),
                           CFG_GROUP_LEN(cfg_info_group6)};
 
-#ifdef CONFIG_OF
+#ifdef LATE_UPGRADE
     cfg_info_group1 = config_info;
     cfg_info_group1_len = goodix_get_config();
     if(cfg_info_group1_len < 0)
@@ -1283,11 +1286,16 @@ static s32 gtp_init_panel(struct goodix_ts_data *ts)
     cfg_info_len[0] = cfg_info_group1_len;
     send_cfg_buf[0] = cfg_info_group1;
 
-//printk("cfg_info_group1_len = %d\n", cfg_info_group1_len);
-//for( i=0; i<cfg_info_group1_len; i++) {
-//	printk("0x%x ", cfg_info_group1[i]);
-//}
-//printk("\n");
+	printk("cfg_info_group1_len = %d\n", cfg_info_group1_len);
+	printk("cfg_info_group1[%d] = %d\n", cfg_info_group1_len-1, cfg_info_group1[cfg_info_group1_len-1]);
+#if 0
+	for( i=0; i<cfg_info_group1_len; i++) {
+		printk("0x%x ", cfg_info_group1[i]);
+		if (!(i % 10))
+		printk("\n");
+	}
+	printk("\n");
+#endif
     GTP_DEBUG_FUNC();
     GTP_DEBUG("Config Groups\' Lengths: %d, %d, %d, %d, %d, %d", 
         cfg_info_len[0], cfg_info_len[1], cfg_info_len[2], cfg_info_len[3],
@@ -2231,7 +2239,7 @@ static int gt9xx_late_upgrade(void *data)
 	if (count < 10000) {
 		touch_close_fw();
 		gt9xx_upgrade_touch();
-		printk("%s :first load firmware\n", ts_com->owner);
+		printk("%s: load firmware\n", ts_com->owner);
 		if(ts->use_irq) 
 			gtp_irq_enable(ts);
 		ts->config_finish = 1;
@@ -2476,7 +2484,8 @@ static int goodix_ts_remove(struct i2c_client *client)
     i2c_set_clientdata(client, NULL);
     input_unregister_device(ts->input_dev);
     kfree(ts);
-		free_touch_gpio(ts_com);
+    free_touch_gpio(ts_com);
+    ts_com->owner = NULL;
     return 0;
 }
 

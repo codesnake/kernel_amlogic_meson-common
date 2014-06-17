@@ -646,7 +646,6 @@ int ct36x_ts_remove(struct i2c_client *client)
 	printk(">>>>> %s() called <<<<< \n", __FUNCTION__);
 
 	ts = (struct ct36x_ts_info *)i2c_get_clientdata(client);
-	destroy_remove(client->dev, ts_com);
 	/* Driver clean up */
 	disable_irq(ts->irq);
 	cancel_work_sync(&ts->event_work);
@@ -660,6 +659,8 @@ int ct36x_ts_remove(struct i2c_client *client)
 #endif
 	remove_proc_entry(DRIVER_NAME, NULL);
 
+	destroy_remove(client->dev, ts_com);
+	ts_com->owner = NULL;
 	return 0;
 }
 

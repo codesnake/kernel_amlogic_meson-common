@@ -450,7 +450,7 @@ int remote_hw_reprot_key(struct remote *remote_data)
 			}
 			return -1;
 		}
-		mod_timer(&remote_data->timer, jiffies + msecs_to_jiffies(remote_data->release_delay));
+		mod_timer(&remote_data->timer, jiffies + msecs_to_jiffies(remote_data->release_delay) + msecs_to_jiffies(110));
 	}
 	last_scan_code = remote_data->cur_lsbkeycode;
 	remote_data->cur_keycode = last_scan_code;
