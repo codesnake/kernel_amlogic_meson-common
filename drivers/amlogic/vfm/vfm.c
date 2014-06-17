@@ -48,7 +48,7 @@ typedef struct{
 vfm_map_t* vfm_map[VFM_MAP_COUNT];
 static int vfm_map_num = 0;
 
-int vfm_debug_flag = 1;
+int vfm_debug_flag = 0; //1;
 
 void vf_update_active_map(void)
 {
