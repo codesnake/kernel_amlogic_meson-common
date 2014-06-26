@@ -23,7 +23,8 @@
 #include <common/mali_kernel_common.h>
 #include <common/mali_osk_profiling.h>
 #include <common/mali_pmu.h>
-
+#include <linux/gpu_cooling.h>
+#include <linux/gpucore_cooling.h>
 #include "meson_main.h"
 
 /**
@@ -62,6 +63,30 @@ u32 get_mali_tbl_size(void)
 	return sizeof(mali_dvfs_clk) / sizeof(u32);
 }
 
+int get_mali_freq_level(int freq)
+{
+	int i = 0, level = -1;
+	if(freq < 0)
+		return level;
+	int mali_freq_num = sizeof(mali_dvfs_clk_sample) / sizeof(mali_dvfs_clk_sample[0]) - 1;
+	if(freq <= mali_dvfs_clk_sample[0])
+		level = mali_freq_num-1;
+	if(freq >= mali_dvfs_clk_sample[mali_freq_num - 1])
+		level = 0;
+	for(i=0; i<mali_freq_num - 1 ;i++) {
+		if(freq >= mali_dvfs_clk_sample[i] && freq<=mali_dvfs_clk_sample[i+1]) {
+			level = i;
+			level = mali_freq_num-level-1;
+		}
+	}
+	return level;
+}
+
+unsigned int get_mali_max_level(void)
+{
+	int mali_freq_num = sizeof(mali_dvfs_clk_sample) / sizeof(mali_dvfs_clk_sample[0]);
+	return mali_freq_num - 1;
+}
 #define MALI_PP_NUMBER 2
 
 static struct resource mali_gpu_resources[] =
@@ -90,6 +115,41 @@ int mali_meson_init_start(struct platform_device* ptr_plt_dev)
 int mali_meson_init_finish(struct platform_device* ptr_plt_dev)
 {
 	mali_core_scaling_init(MALI_PP_NUMBER, mali_default_clock_idx);
+#ifdef CONFIG_GPU_THERMAL
+	int err;
+	struct gpufreq_cooling_device *gcdev = NULL;
+	gcdev = gpufreq_cooling_alloc();
+	if(IS_ERR(gcdev))
+		printk("malloc gpu cooling buffer error!!\n");
+	else if(!gcdev)
+		printk("system does not enable thermal driver\n");
+	else {
+		gcdev->get_gpu_freq_level = get_mali_freq_level;
+		gcdev->get_gpu_max_level = get_mali_max_level;
+		gcdev->set_gpu_freq_idx = set_max_mali_freq;
+		gcdev->get_gpu_current_max_level = get_max_mali_freq;
+		err = gpufreq_cooling_register(gcdev);
+		if(err < 0)
+			printk("register GPU  cooling error\n");
+		printk("gpu cooling register okay with err=%d\n",err);
+	}
+#if 0
+	struct gpucore_cooling_device *gccdev=NULL;
+	gccdev=gpucore_cooling_alloc();
+	if(IS_ERR(gccdev))
+		printk("malloc gpu core cooling buffer error!!\n");
+	else if(!gccdev)
+		printk("system does not enable thermal driver\n");
+	else {
+		gccdev->max_gpu_core_num=MALI_PP_NUMBER;
+		gccdev->set_max_pp_num=set_max_pp_num;
+		err=gpucore_cooling_register(gccdev);
+		if(err < 0)
+			printk("register GPU  cooling error\n");
+		printk("gpu core cooling register okay with err=%d\n",err);
+	}
+#endif
+#endif
 	return 0;
 }
 
@@ -98,18 +158,17 @@ int mali_meson_uninit(struct platform_device* ptr_plt_dev)
 	return 0;
 }
 
-int mali_light_suspend(struct device *device)
+static int mali_cri_light_suspend(size_t param)
 {
-	int ret = 0;
+	int ret;
+	struct device *device;
 	struct mali_pmu_core *pmu;
 
+	ret = 0;
+	mali_pm_statue = 0;
+	device = (struct device *)param;
 	pmu = mali_pmu_get_global_pmu_core();
-#ifdef CONFIG_MALI400_PROFILING
-	_mali_osk_profiling_add_event(MALI_PROFILING_EVENT_TYPE_SINGLE |
-					MALI_PROFILING_EVENT_CHANNEL_GPU |
-					MALI_PROFILING_EVENT_REASON_SINGLE_GPU_FREQ_VOLT_CHANGE,
-					0, 0,	0,	0,	0);
-#endif
+
 	if (NULL != device->driver &&
 	    NULL != device->driver->pm &&
 	    NULL != device->driver->pm->runtime_suspend)
@@ -117,27 +176,21 @@ int mali_light_suspend(struct device *device)
 		/* Need to notify Mali driver about this event */
 		ret = device->driver->pm->runtime_suspend(device);
 	}
-
-	/* clock scaling. Kasin..*/
 	mali_pmu_power_down_all(pmu);
-	//disable_clock();
 	return ret;
 }
 
-int mali_light_resume(struct device *device)
+static int mali_cri_light_resume(size_t param)
 {
-	int ret = 0;
+	int ret;
+	struct device *device;
 	struct mali_pmu_core *pmu;
 
+	ret = 0;
+	device = (struct device *)param;
 	pmu = mali_pmu_get_global_pmu_core();
-	mali_pmu_power_up_all(pmu);
-#ifdef CONFIG_MALI400_PROFILING
-	_mali_osk_profiling_add_event(MALI_PROFILING_EVENT_TYPE_SINGLE |
-					MALI_PROFILING_EVENT_CHANNEL_GPU |
-					MALI_PROFILING_EVENT_REASON_SINGLE_GPU_FREQ_VOLT_CHANGE,
-					get_current_frequency(), 0,	0,	0,	0);
-#endif
 
+	mali_pmu_power_up_all(pmu);
 	if (NULL != device->driver &&
 	    NULL != device->driver->pm &&
 	    NULL != device->driver->pm->runtime_resume)
@@ -145,17 +198,20 @@ int mali_light_resume(struct device *device)
 		/* Need to notify Mali driver about this event */
 		ret = device->driver->pm->runtime_resume(device);
 	}
+	mali_pm_statue = 1;
 	return ret;
 }
 
-int mali_deep_suspend(struct device *device)
+static int mali_cri_deep_suspend(size_t param)
 {
-	int ret = 0;
+	int ret;
+	struct device *device;
 	struct mali_pmu_core *pmu;
 
+	ret = 0;
+	device = (struct device *)param;
 	pmu = mali_pmu_get_global_pmu_core();
-	enable_clock();
-	flush_scaling_job();
+
 	if (NULL != device->driver &&
 	    NULL != device->driver->pm &&
 	    NULL != device->driver->pm->suspend)
@@ -163,20 +219,20 @@ int mali_deep_suspend(struct device *device)
 		/* Need to notify Mali driver about this event */
 		ret = device->driver->pm->suspend(device);
 	}
-
-	/* clock scaling off. Kasin... */
 	mali_pmu_power_down_all(pmu);
-	disable_clock();
 	return ret;
 }
 
-int mali_deep_resume(struct device *device)
+static int mali_cri_deep_resume(size_t param)
 {
-	int ret = 0;
+	int ret;
+	struct device *device;
 	struct mali_pmu_core *pmu;
 
+	ret = 0;
+	device = (struct device *)param;
 	pmu = mali_pmu_get_global_pmu_core();
-	enable_clock();
+
 	mali_pmu_power_up_all(pmu);
 	if (NULL != device->driver &&
 	    NULL != device->driver->pm &&
@@ -186,5 +242,59 @@ int mali_deep_resume(struct device *device)
 		ret = device->driver->pm->resume(device);
 	}
 	return ret;
+
+}
+
+int mali_light_suspend(struct device *device)
+{
+	int ret = 0;
+#ifdef CONFIG_MALI400_PROFILING
+	_mali_osk_profiling_add_event(MALI_PROFILING_EVENT_TYPE_SINGLE |
+					MALI_PROFILING_EVENT_CHANNEL_GPU |
+					MALI_PROFILING_EVENT_REASON_SINGLE_GPU_FREQ_VOLT_CHANGE,
+					0, 0,	0,	0,	0);
+#endif
+
+	/* clock scaling. Kasin..*/
+	ret = mali_clock_critical(mali_cri_light_suspend, (size_t)device);
+	disable_clock();
+	return ret;
+}
+
+int mali_light_resume(struct device *device)
+{
+	int ret = 0;
+	enable_clock();
+	ret = mali_clock_critical(mali_cri_light_resume, (size_t)device);
+#ifdef CONFIG_MALI400_PROFILING
+	_mali_osk_profiling_add_event(MALI_PROFILING_EVENT_TYPE_SINGLE |
+					MALI_PROFILING_EVENT_CHANNEL_GPU |
+					MALI_PROFILING_EVENT_REASON_SINGLE_GPU_FREQ_VOLT_CHANGE,
+					get_current_frequency(), 0,	0,	0,	0);
+#endif
+	return ret;
+}
+
+int mali_deep_suspend(struct device *device)
+{
+	int ret = 0;
+	enable_clock();
+	flush_scaling_job();
+
+	/* clock scaling off. Kasin... */
+	ret = mali_clock_critical(mali_cri_deep_suspend, (size_t)device);
+	disable_clock();
+	return ret;
+}
+
+int mali_deep_resume(struct device *device)
+{
+	int ret = 0;
+
+	/* clock scaling up. Kasin.. */
+	enable_clock();
+	ret = mali_clock_critical(mali_cri_deep_resume, (size_t)device);
+	return ret;
+
 }
 
