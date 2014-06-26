@@ -102,6 +102,7 @@
 #define AMSTREAM_IOC_SET_VIDEO_AXIS   _IOW(AMSTREAM_IOC_MAGIC, 0x4c, unsigned long)
 #define AMSTREAM_IOC_GET_VIDEO_CROP   _IOR(AMSTREAM_IOC_MAGIC, 0x4d, unsigned long)
 #define AMSTREAM_IOC_SET_VIDEO_CROP   _IOW(AMSTREAM_IOC_MAGIC, 0x4e, unsigned long)
+#define AMSTREAM_IOC_PCRID        _IOW(AMSTREAM_IOC_MAGIC, 0x4f, int)
 
 // VPP.VE IOCTL command list
 #define AMSTREAM_IOC_VE_BEXT   _IOW(AMSTREAM_IOC_MAGIC, 0x20, struct ve_bext_s  )
@@ -205,6 +206,23 @@ struct buf_status {
         unsigned int write_pointer;
 };
 
+/*struct vdec_status.status*/
+#define STAT_TIMER_INIT     0x01
+#define STAT_MC_LOAD        0x02
+#define STAT_ISR_REG        0x04
+#define STAT_VF_HOOK        0x08
+#define STAT_TIMER_ARM      0x10
+#define STAT_VDEC_RUN       0x20
+//-/*struct vdec_status.status on error*/
+
+#define PARSER_FATAL_ERROR              (0x10<<16)
+#define DECODER_ERROR_VLC_DECODE_TBL    (0x20<<16)
+#define PARSER_ERROR_WRONG_HEAD_VER     (0x40<<16)
+#define PARSER_ERROR_WRONG_PACKAGE_SIZE (0x80<<16)
+#define DECODER_FATAL_ERROR_SIZE_OVERFLOW     (0x100<<16)
+#define DECODER_FATAL_ERROR_UNKNOW             (0x200<<16)
+#define DECODER_ERROR_MASK	(0xffff<<16)
+
 
 struct vdec_status {
         unsigned int width;
@@ -290,6 +308,7 @@ struct tsdemux_ops {
     int (*set_vid)(int vpid);
     int (*set_aid)(int apid);
     int (*set_sid)(int spid);
+	int (*set_pcrid)(int pcrpid);
     int (*set_skipbyte)(int skipbyte);
     int (*set_demux)(int dev);
 };
