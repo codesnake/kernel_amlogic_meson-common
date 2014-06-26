@@ -116,6 +116,8 @@ static char DEFMAC[] = "\x00\x01\x23\xcd\xee\xaf";
 void start_test(struct net_device *dev);
 static void write_mac_addr(struct net_device *dev, char *macaddr);
 static int ethernet_reset(struct net_device *dev);
+static void am_net_dump_macreg(void);
+static void read_macreg(void);
 
 /* --------------------------------------------------------------------------*/
 /**
@@ -974,14 +976,17 @@ static void aml_adjust_link(struct net_device *dev)
 			new_state = 1;
 			if (!(phydev->duplex)) {
 				ctrl &= ~((1 << 11)|(7<< 17)|(3<<5));
-				ctrl |= (4 << 17);
+				if(new_maclogic != 0)
+					ctrl |= (4 << 17);
 				ctrl |= (3 << 5);
 				g_rxnum = 128;
 				g_txnum = 128;
 			}
 			else {
 				ctrl &= ~((7 << 17)|(3 << 5));
-				ctrl |= (1 << 11)|(2 << 17);
+				ctrl |= (1 << 11);
+				if(new_maclogic != 0)
+					ctrl |= (2 << 17);
 				g_rxnum = 128;
 				g_txnum = 128;
 			}
@@ -991,19 +996,21 @@ static void aml_adjust_link(struct net_device *dev)
 
 		if (phydev->speed != priv->speed) {
 			new_state = 1;
-			if(new_maclogic ==0)
+			if(new_maclogic != 0)
 				PERIPHS_CLEAR_BITS(P_PREG_ETHERNET_ADDR0, 1);
 			switch (phydev->speed) {
 				case 1000:
+					ctrl &= ~((1 << 14)|(1 << 15));//1000m 
+					ctrl |= (1 << 13);//1000m 
 					break;
 				case 100:
-					ctrl |= (1 << 14);
-					if(new_maclogic ==0)
+					ctrl |= (1 << 14)|(1 << 15);
+					if(new_maclogic !=0)
 						PERIPHS_SET_BITS(P_PREG_ETHERNET_ADDR0, (1 << 1));
 					break;
 				case 10:
 					ctrl &= ~((1 << 14)|(3 << 5));//10m half backoff = 00
-					if(new_maclogic ==0)
+					if(new_maclogic !=0)
 						PERIPHS_CLEAR_BITS(P_PREG_ETHERNET_ADDR0, (1 << 1));
 					if(phydev->phy_id == INTERNALPHY_ID){
 						val =0x4100b040;
@@ -1015,7 +1022,7 @@ static void aml_adjust_link(struct net_device *dev)
 								" or 100!\n", dev->name, phydev->speed);
 					break;
 			}
-			if(new_maclogic ==0)
+			if(new_maclogic !=0)
 				PERIPHS_SET_BITS(P_PREG_ETHERNET_ADDR0, 1);
 			priv->speed = phydev->speed;
 		}
@@ -1034,8 +1041,11 @@ static void aml_adjust_link(struct net_device *dev)
 
 	}
 
-	if (new_state)
+	if (new_state){
+		if(priv->phy_interface == PHY_INTERFACE_MODE_RGMII)
+			read_macreg();
 		phy_print_status(phydev);
+	}
 
 	spin_unlock_irqrestore(&priv->lock, flags);
 
@@ -1058,6 +1068,7 @@ static int aml_phy_init(struct net_device *dev)
         priv->oldlink = 0;
         priv->speed = 0;
         priv->oldduplex = -1;
+		printk("phy_interface = %d\n",phy_interface);
 		if(phy_interface == 1)
 			priv->phy_interface = PHY_INTERFACE_MODE_RMII;
 		else
@@ -1102,6 +1113,23 @@ static int aml_phy_init(struct net_device *dev)
 
         return 0;
 }
+static void read_macreg(void)
+{
+	int reg = 0;
+	int val = 0;
+	struct am_net_private *np = netdev_priv(my_ndev);
+
+	if ((np == NULL) || (np->dev == NULL))
+		return;
+
+	for (reg = ETH_MAC_0_Configuration; reg <= ETH_MAC_54_SGMII_RGMII_Status; reg += 0x4) {
+		val = readl((void*)(np->base_addr + reg));
+	}
+
+	for (reg = ETH_DMA_0_Bus_Mode; reg <= ETH_DMA_21_Curr_Host_Re_Buffer_Addr; reg += 0x4) {
+		val = readl((void*)(np->base_addr + reg));
+	}
+}
 
 /* --------------------------------------------------------------------------*/
 /**
@@ -1136,14 +1164,13 @@ static int ethernet_reset(struct net_device *dev)
 
 	aml_mac_init(dev);
 
-	//np->first_tx = 1;
+	np->first_tx = 1;
 	tmp = readl((void*)(np->base_addr + ETH_DMA_6_Operation_Mode));//tx enable
 	tmp |= (7 << 14) | (1 << 13);
 	writel(tmp, (void*)(np->base_addr + ETH_DMA_6_Operation_Mode));
 	tmp = readl((void*)(np->base_addr + ETH_MAC_6_Flow_Control));
 	tmp |= (1 << 1) | (1 << 0);
 	writel(tmp, (void*)(np->base_addr + ETH_MAC_6_Flow_Control));
-
 out_err:
 	return res;
 }
@@ -1267,7 +1294,10 @@ static int start_tx(struct sk_buff *skb, struct net_device *dev)
 	struct _tx_desc *tx;
 	unsigned long flags;
 	dev->trans_start = jiffies;
-
+	if (np->first_tx) {
+		if(np->phy_interface == PHY_INTERFACE_MODE_RGMII)
+			read_macreg();
+	}
 	if (!running) {
 		return -1;
 	}
@@ -1850,7 +1880,7 @@ static int probe_init(struct net_device *ndev)
 	if (g_debug > 0) {
 		printk("ethernet base addr is %x\n", (unsigned int)ndev->base_addr);
 	}
-	if(get_cpuid() == 0x1B)
+	if(phy_interface == 1)
 	 	new_maclogic=1;
 	res = setup_net_device(ndev);
 	if (res != 0) {
@@ -2688,24 +2718,26 @@ static int am_net_cali(int argc, char **argv,int gate)
 {
 	int cali_rise = 0;
 	int cali_sel = 0;
-	int cali_start;
-	int cali_time;
+	int cali_start = 0;
+	int cali_time = 0;
 	int ii=0;
 	cali_start = gate;
-	unsigned int val;
+	unsigned int value;
 	if ((argc < 4) || (argv == NULL) || (argv[0] == NULL)
 			|| (argv[1] == NULL) || (argv[2] == NULL)|| (argv[3] == NULL)) {
 		printk("Invalid syntax\n");
 		return -1;
 	}
-	cali_rise = simple_strtol(argv[1], NULL, 16);
-	cali_sel = simple_strtol(argv[2], NULL, 16);
-	cali_time = simple_strtol(argv[3], NULL, 16);
-	aml_write_reg32((aml_read_reg32(P_PREG_ETH_REG0)|(cali_start << 25)|(cali_rise << 26)|(cali_sel << 27)),P_PREG_ETH_REG0);
+	cali_rise = simple_strtol(argv[1], NULL, 0);
+	cali_sel = simple_strtol(argv[2], NULL, 0);
+	cali_time = simple_strtol(argv[3], NULL, 0);
+	writel((readl(P_PREG_ETH_REG0)&(~(0x1f << 25))),P_PREG_ETH_REG0);
+	writel((readl(P_PREG_ETH_REG0)|(cali_start << 25)|(cali_rise << 26)|(cali_sel << 27)),P_PREG_ETH_REG0);
+	printk("rise :%d   sel: %d  time: %d   start:%d  cbus2050 = %x\n",cali_rise,cali_sel,cali_time,cali_start,readl(P_PREG_ETH_REG0));
 	for(ii=0;ii < cali_time;ii++){
-		if(aml_read_reg32(P_PREG_ETH_REG1)>>15 & 0x1){
-			printk("cali back: %d\n", aml_read_reg32(P_PREG_ETH_REG1));
-			break;
+		value = readl(P_PREG_ETH_REG1);
+		if((value>>15) & 0x1){
+ 			printk("value == %x,  cali_len == %d, cali_idx == %d,  cali_sel =%d,  cali_rise = %d\n",value,(value>>5)&0x1f,(value&0x1f),(value>>11)&0x7,(value>>14)&0x1);
 		}
 	}
 
@@ -2716,12 +2748,12 @@ static ssize_t eth_cali_store(struct class *class, struct class_attribute *attr,
 {
 	int argc;
 	char *buff, *p, *para;
-	char *argv[4];
+	char *argv[5];
 	char cmd;
 
 	buff = kstrdup(buf, GFP_KERNEL);
 	p = buff;
-	for (argc = 0; argc < 5; argc++) {
+	for (argc = 0; argc < 6; argc++) {
 		para = strsep(&p, " ");
 		if (para == NULL)
 			break;
@@ -2887,6 +2919,7 @@ static int ethernet_probe(struct platform_device *pdev)
        early_suspend.resume = ethernet_late_resume;
        register_early_suspend(&early_suspend);
 #endif
+	SET_NETDEV_DEV(my_ndev, &pdev->dev);
 	res = probe_init(my_ndev);
 	if (res != 0)
 		free_netdev(my_ndev);
