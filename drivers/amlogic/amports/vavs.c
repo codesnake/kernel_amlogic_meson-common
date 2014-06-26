@@ -82,12 +82,12 @@
 
 #define INCPTR(p) ptr_atomic_wrap_inc(&p)
 
-#define STAT_TIMER_INIT     0x01
-#define STAT_MC_LOAD        0x02
-#define STAT_ISR_REG        0x04
-#define STAT_VF_HOOK        0x08
-#define STAT_TIMER_ARM      0x10
-#define STAT_VDEC_RUN       0x20
+#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON8
+#define INT_AMVENCODER INT_DOS_MAILBOX_1
+#else
+//#define AMVENC_DEV_VERSION "AML-MT"
+#define INT_AMVENCODER INT_MAILBOX_1A
+#endif
 
 static int debug_flag = 0;
 
@@ -786,7 +786,7 @@ static s32 vavs_init(void)
         vavs_prot_init();
 
 #ifdef HANDLE_AVS_IRQ
-        if (request_irq(INT_MAILBOX_1A, vavs_isr,
+        if (request_irq(INT_AMVENCODER, vavs_isr,
                         IRQF_SHARED, "vavs-irq", (void *)vavs_dec_id))
         {
                 amvdec_disable();
@@ -862,7 +862,7 @@ static int amvdec_avs_remove(struct platform_device *pdev)
 
         if (stat & STAT_ISR_REG)
         {
-                free_irq(INT_MAILBOX_1A, (void *)vavs_dec_id);
+                free_irq(INT_AMVENCODER, (void *)vavs_dec_id);
                 stat &= ~STAT_ISR_REG;
         }
 

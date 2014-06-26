@@ -102,12 +102,7 @@ static DEFINE_MUTEX(vh264_mutex);
 #define PUT_INTERVAL        (HZ/100)
 #define NO_DISP_WD_COUNT    (3 * HZ / PUT_INTERVAL)
 
-#define STAT_TIMER_INIT     0x01
-#define STAT_MC_LOAD        0x02
-#define STAT_ISR_REG        0x04
-#define STAT_VF_HOOK        0x08
-#define STAT_TIMER_ARM      0x10
-#define STAT_VDEC_RUN       0x20
+
 
 #define DEC_CONTROL_FLAG_FORCE_2997_1080P_INTERLACE 0x0001
 #define DEC_CONTROL_FLAG_FORCE_2500_576P_INTERLACE  0x0002
@@ -190,6 +185,7 @@ static u32 last_interlaced;
 #endif
 static u8 neg_poc_counter;
 static unsigned char h264_first_pts_ready;
+static unsigned char h264_first_valid_pts_ready;
 static u32 h264pts1, h264pts2;
 static u32 h264_pts_count, duration_from_pts_done,duration_on_correcting;
 static u32 vh264_error_count;
@@ -479,6 +475,7 @@ static void vh264_set_params(void)
     unsigned int crop_infor, crop_bottom;
 
     h264_first_pts_ready = 0;
+    h264_first_valid_pts_ready=0;
     buffer_for_recycle_rd = 0;
     buffer_for_recycle_wr = 0;
 
@@ -1017,8 +1014,13 @@ static void vh264_isr(void)
             }
 
             if (timing_info_present_flag && frame_dur && use_idr_framerate) {
-                pts_valid = pts_valid && idr_flag;  // if fixed frame rate, then use duration
+            	  if(h264_first_valid_pts_ready == 0 && pts_valid)
+            	  	h264_first_valid_pts_ready=1;
+		  else
+            	  	pts_valid = pts_valid && idr_flag;  // if fixed frame rate, then use duration
+		 
             }
+	     
             if ((dec_control & DEC_CONTROL_FLAG_FORCE_2997_1080P_INTERLACE) &&
                 (frame_width == 1920) &&
                 (frame_height >= 1080) &&
@@ -1147,7 +1149,7 @@ static void vh264_isr(void)
         WRITE_VREG(AV_SCRATCH_0, 0);
     } else if ((cpu_cmd & 0xff) == 6) {
         vh264_running = 0;
-        fatal_error_flag = 0x10;
+        fatal_error_flag = DECODER_FATAL_ERROR_UNKNOW;
         // this is fatal error, need restart
         printk("fatal error happend\n");
         if (!fatal_error_reset) {
@@ -1157,12 +1159,12 @@ static void vh264_isr(void)
         vh264_running = 0;
         frame_width = (READ_VREG(AV_SCRATCH_1) + 1) * 16;
         printk("Over decoder supported size, width = %d\n", frame_width);
-        fatal_error_flag = 0x10;
+        fatal_error_flag = DECODER_FATAL_ERROR_SIZE_OVERFLOW;
     } else if ((cpu_cmd & 0xff) == 8) {
         vh264_running = 0;
         frame_height = (READ_VREG(AV_SCRATCH_1) + 1) * 16;
         printk("Over decoder supported size, height = %d\n", frame_height);
-        fatal_error_flag = 0x10;
+        fatal_error_flag = DECODER_FATAL_ERROR_SIZE_OVERFLOW;
     }
 
 #ifdef HANDLE_H264_IRQ
@@ -1231,8 +1233,8 @@ static void vh264_put_timer_func(unsigned long arg)
             } else {
                 wait_buffer_counter = 0;
             }
-        } else if (wait_i_pass_frames > 100) {
-            printk("i passed frames > 10\n");
+        } else if (wait_i_pass_frames > 1000) {
+            printk("i passed frames > 1000\n");
             amvdec_stop();
 #ifdef CONFIG_POST_PROCESS_MANAGER
             vh264_ppmgr_reset();
@@ -1462,6 +1464,7 @@ static void vh264_local_init(void)
 #endif
     neg_poc_counter = 0;
     h264_first_pts_ready = 0;
+    h264_first_valid_pts_ready=0;
     h264pts1 = 0;
     h264pts2 = 0;
     h264_pts_count = 0;

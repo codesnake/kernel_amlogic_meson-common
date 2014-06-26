@@ -54,14 +54,9 @@
 #define MODULE_NAME "amvdec_h264_4k2k"
 
 #define PUT_INTERVAL        (HZ/100)
-#define ERROR_RESET_COUNT   100
+#define ERROR_RESET_COUNT   500
 
-#define STAT_TIMER_INIT     0x01
-#define STAT_MC_LOAD        0x02
-#define STAT_ISR_REG        0x04
-#define STAT_VF_HOOK        0x08
-#define STAT_TIMER_ARM      0x10
-#define STAT_VDEC_RUN       0x20
+
 
 extern void amvenc_dos_top_reg_fix(void);
 
@@ -352,17 +347,14 @@ int init_canvas(int start_addr, long dpb_size, int dpb_number, int mb_width, int
     u32 disp_addr = 0xffffffff;
     bool use_alloc = false;
     int alloc_count = 0;
+    canvas_t cur_canvas;
 
     dpb_addr = start_addr + dpb_size;
 
     mb_total = mb_width * mb_height;
 
-    if (is_vpp_postblend()) {
-        canvas_t cur_canvas;
-
-        canvas_read((READ_VCBUS_REG(VD1_IF0_CANVAS0) & 0xff), &cur_canvas);
-        disp_addr = (cur_canvas.addr + 7) >> 3;
-    }
+    canvas_read((READ_VCBUS_REG(VD1_IF0_CANVAS0) & 0xff), &cur_canvas);
+    disp_addr = (cur_canvas.addr + 7) >> 3;
 
     mutex_lock(&vh264_4k2k_mutex);
     
@@ -810,13 +802,15 @@ static void vh264_4k2k_put_timer_func(unsigned long arg)
         (READ_VREG(VDEC2_MS_ID) & 0x100)) {                   // with both decoder have started decoding
         if (++error_watchdog_count == ERROR_RESET_COUNT) {    // and it lasts for a while
             printk("H264 4k2k decoder fatal error watchdog.\n");
-            fatal_error = 0x10;
+            fatal_error = DECODER_FATAL_ERROR_UNKNOW;
         }
+    } else {
+      error_watchdog_count = 0;
     }
 
     if (READ_VREG(FATAL_ERROR) != 0) {
         printk("H264 4k2k decoder ucode fatal error.\n");
-        fatal_error = 0x10;
+        fatal_error = DECODER_FATAL_ERROR_UNKNOW;
         WRITE_VREG(FATAL_ERROR, 0);
     }
 
@@ -848,7 +842,7 @@ int vh264_4k2k_dec_status(struct vdec_status *vstatus)
         vstatus->fps = -1;
     }
     vstatus->error_count = 0;
-    vstatus->status = stat | (fatal_error << 16);
+    vstatus->status = stat | fatal_error;
     return 0;
 }
 
@@ -1249,6 +1243,7 @@ static int vh264_4k2k_stop(void)
 {
     int i;
     u32 disp_addr = 0xffffffff;
+    canvas_t cur_canvas;
 
     if (stat & STAT_VDEC_RUN) {
         amvdec_stop();
@@ -1284,12 +1279,8 @@ static int vh264_4k2k_stop(void)
     amvdec_disable();
     amvdec2_disable();
 
-    if (is_vpp_postblend()) {
-        canvas_t cur_canvas;
-
-        canvas_read((READ_VCBUS_REG(VD1_IF0_CANVAS0) & 0xff), &cur_canvas);
-        disp_addr = cur_canvas.addr;
-    }
+    canvas_read((READ_VCBUS_REG(VD1_IF0_CANVAS0) & 0xff), &cur_canvas);
+    disp_addr = cur_canvas.addr;
 
     for (i=0; i<ARRAY_SIZE(buffer_spec); i++) {
         if (buffer_spec[i].alloc_pages) {

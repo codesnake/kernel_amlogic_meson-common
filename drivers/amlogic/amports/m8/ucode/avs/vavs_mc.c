@@ -19,10 +19,10 @@
  *
  */
 
-#ifndef VH265MVC_MC_H
-#define VH265MVC_MC_H
+#include <linux/types.h>
 
-extern const u32 vh265_mc[0x1000];
-extern const u32 vh265_mc_send_param_with_reg_mc[0x1000];
+#define MicroCode vavs_mc
+#include "avs_linux.h"
 
-#endif
+#define MicroCode vavs_mc_debug
+#include "avs_linux_debug.h"
