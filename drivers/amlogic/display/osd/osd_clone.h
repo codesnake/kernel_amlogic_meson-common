@@ -25,25 +25,29 @@
 #define _OSD_CLONE_H_
 
 #ifdef CONFIG_AM_GE2D
-#define OSD_EXT_GE2D_CLONE_SUPPORT 1
+#define OSD_GE2D_CLONE_SUPPORT 1
 #endif
 
-#ifdef OSD_EXT_GE2D_CLONE_SUPPORT
-extern void osd_ext_clone_set_angle(int angle);
-extern void osd_ext_clone_update_pan(int pan);
-extern int osd_ext_clone_task_start(void);
-extern void osd_ext_clone_task_stop(void);
+#ifdef OSD_GE2D_CLONE_SUPPORT
+extern void osd_clone_set_virtual_yres(u32 osd1_yres, u32 osd2_yres);
+extern void osd_clone_get_virtual_yres(u32 *osd2_yres);
+extern void osd_clone_set_angle(int angle);
+extern void osd_clone_update_pan(int buffer_number);
+extern int osd_clone_task_start(void);
+extern void osd_clone_task_stop(void);
 #else
-static inline void osd_ext_clone_set_angle(int angle) {}
-static inline void osd_ext_clone_update_pan(int pan) {}
-static inline int osd_ext_clone_task_start(void)
+static inline void osd_clone_set_virtual_yres(u32 osd1_yres, u32 osd2_yres) {}
+static inline void osd_clone_get_virtual_yres(u32 *osd2_yres) {}
+static inline void osd_clone_set_angle(int angle) {}
+static inline void osd_clone_update_pan(int buffer_number) {}
+static inline int osd_clone_task_start(void)
 {
-	printk("++ osd_ext_clone depends on GE2D module!\n");
+	printk("++ osd_clone depends on GE2D module!\n");
 	return 0;
 }
-static inline void osd_ext_clone_task_stop(void)
+static inline void osd_clone_task_stop(void)
 {
-	printk("-- osd_ext_clone depends on GE2D module!\n");
+	printk("-- osd_clone depends on GE2D module!\n");
 	return;
 }
 #endif
