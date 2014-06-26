@@ -50,14 +50,14 @@ obj-$(CONFIG_I2C) += i2c/
 #obj-y += extern_io/
 
 obj-$(CONFIG_EFUSE)+=efuse/
-obj-y += input/
+obj-$(CONFIG_AM_INPUT)		+= input/
 
 obj-$(CONFIG_AMLOGIC_SPI_NOR) += spi_nor/
 
 #obj-$(CONFIG_CARDREADER) += cardreader/
 obj-$(CONFIG_MMC_AML) +=mmc/
 
-obj-y += vfm/
+obj-$(CONFIG_AML_VFM) += vfm/
 
 obj-$(CONFIG_AML_AUDIO_DSP) += audiodsp/
 

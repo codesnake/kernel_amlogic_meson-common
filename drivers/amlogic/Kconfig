@@ -64,6 +64,7 @@ source "drivers/amlogic/audiodsp/Kconfig"
 #  Video
 #
 comment "Video devices"
+source "drivers/amlogic/vfm/Kconfig"
 source "drivers/amlogic/amports/Kconfig"
 source "drivers/amlogic/canvas/Kconfig"
 source "drivers/amlogic/display/Kconfig"
