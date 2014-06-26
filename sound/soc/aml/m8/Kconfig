@@ -15,10 +15,6 @@ config SND_AML_M8_PCM
 	tristate "M8 evaluation board with PCM2BT"
 	depends on SND_AML_M8_SOC
 	select SND_SOC_PCM2BT if SND_AML_M8_PCM
-
-config SND_AML_M8_FAULTY_GPIOZ
-	bool "If board has a faulty GPIOZ port which causes no HDMI audio"
-	default n
 	
 config SND_AML_M_DUMMY_CODEC
     tristate "AML M series board with DUMMY_CODEC"

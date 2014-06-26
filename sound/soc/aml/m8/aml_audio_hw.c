@@ -197,10 +197,13 @@ void audio_set_aiubuf(u32 addr, u32 size, unsigned int channel)
 {
     WRITE_MPEG_REG(AIU_MEM_I2S_START_PTR, addr & 0xffffffc0);
     WRITE_MPEG_REG(AIU_MEM_I2S_RD_PTR, addr & 0xffffffc0);
-    if(channel == 8)
-		WRITE_MPEG_REG(AIU_MEM_I2S_END_PTR, (addr & 0xffffffc0) + (size & 0xffffffc0) - 256); 
-	else
-    WRITE_MPEG_REG(AIU_MEM_I2S_END_PTR, (addr & 0xffffffc0) + (size & 0xffffffc0) - 64);   //this is for 16bit 2 channel
+    if(channel == 8){
+        WRITE_MPEG_REG_BITS(AIU_CLK_CTRL_MORE, 1, 6, 1);
+        WRITE_MPEG_REG(AIU_MEM_I2S_END_PTR, (addr & 0xffffffc0) + (size & 0xffffffc0) - 256); 
+    }else{
+        WRITE_MPEG_REG_BITS(AIU_CLK_CTRL_MORE, 0, 6, 1);
+        WRITE_MPEG_REG(AIU_MEM_I2S_END_PTR, (addr & 0xffffffc0) + (size & 0xffffffc0) - 64);   //this is for 16bit 2 channel
+    }
 
     WRITE_MPEG_REG(AIU_I2S_MISC,		0x0004);	// Hold I2S
 	WRITE_MPEG_REG(AIU_I2S_MUTE_SWAP,	0x0000);	// No mute, no swap
@@ -755,10 +758,10 @@ void audio_set_clk(unsigned freq, unsigned fs_config)
 	WRITE_MPEG_REG_BITS(AIU_CODEC_DAC_LRCLK_CTRL, 64-1, 0, 12);//set codec dac ratio---lrclk
 
 	// Select Multi-Phase PLL2 as clock source
-	WRITE_MPEG_REG_BITS( HHI_AUD_CLK_CNTL, 3, 9, 3);
+	WRITE_MPEG_REG_BITS( HHI_AUD_CLK_CNTL, I2S_PLL_SRC, 9, 3);
 
 	// Configure Multi-Phase PLL2
-	WRITE_MPEG_REG(HHI_MPLL_CNTL9, audio_clock_config[index][0]);
+	WRITE_MPEG_REG(MPLL_I2S_CNTL, audio_clock_config[index][0]);
 	// Set the XD value
 	WRITE_MPEG_REG_BITS(HHI_AUD_CLK_CNTL, audio_clock_config[index][1], 0, 8);
 	// delay 5uS
@@ -775,7 +778,7 @@ void audio_set_clk(unsigned freq, unsigned fs_config)
     WRITE_MPEG_REG_BITS(HHI_AUD_CLK_CNTL2, 0, 8, 1);
 
     // Select clk source, 0=ddr_pll; 1=Multi-Phase PLL0; 2=Multi-Phase PLL1; 3=Multi-Phase PLL2.
-    WRITE_MPEG_REG_BITS(HHI_AUD_CLK_CNTL2, 3, 9, 2);
+    WRITE_MPEG_REG_BITS(HHI_AUD_CLK_CNTL2, I2S_PLL_SRC, 9, 2);
 
     // Set pll over mclk ratio
     //we want 256fs ADC MLCK,so for over clock mode,divide more 2 than I2S  DAC CLOCK
@@ -876,10 +879,10 @@ void audio_set_i2s_clk(unsigned freq, unsigned fs_config)
 	// Disable mclk
     WRITE_MPEG_REG_BITS(HHI_AUD_CLK_CNTL, 0, 8, 1);
 	// Select clk source, 0=ddr_pll; 1=Multi-Phase PLL0; 2=Multi-Phase PLL1; 3=Multi-Phase PLL2.
-	WRITE_MPEG_REG_BITS( HHI_AUD_CLK_CNTL, 3, 9, 2);
+	WRITE_MPEG_REG_BITS( HHI_AUD_CLK_CNTL, I2S_PLL_SRC, 9, 2);
 
 	// Configure Multi-Phase PLL2
-	WRITE_MPEG_REG(HHI_MPLL_CNTL9, audio_clock_config[index][0]);
+	WRITE_MPEG_REG(MPLL_I2S_CNTL, audio_clock_config[index][0]);
 	// Set the XD value
 	WRITE_MPEG_REG_BITS(HHI_AUD_CLK_CNTL, audio_clock_config[index][1], 0, 8);
 
@@ -899,7 +902,7 @@ void audio_set_i2s_clk(unsigned freq, unsigned fs_config)
 	WRITE_MPEG_REG_BITS(HHI_AUD_CLK_CNTL, 0, 8, 1);
 
     // Select clk source, 0=ddr_pll; 1=Multi-Phase PLL0; 2=Multi-Phase PLL1; 3=Multi-Phase PLL2.
-	WRITE_MPEG_REG_BITS(HHI_AUD_CLK_CNTL, 3, 9, 2);
+	WRITE_MPEG_REG_BITS(HHI_AUD_CLK_CNTL, I2S_PLL_SRC, 9, 2);
 
     // Set pll over mclk ratio
     //we want 256fs ADC MLCK,so for over clock mode,divide more 2 than I2S  DAC CLOCK
@@ -997,10 +1000,10 @@ void audio_set_958_clk(unsigned freq, unsigned fs_config)
 	//IEC958_USE_CNTL
 	WRITE_MPEG_REG_BITS( HHI_AUD_CLK_CNTL2, 1, 27, 1);
 	// Select clk source, 0=ddr_pll; 1=Multi-Phase PLL0; 2=Multi-Phase PLL1; 3=Multi-Phase PLL2.
-	WRITE_MPEG_REG_BITS( HHI_AUD_CLK_CNTL2, 2, 25, 2);
+	WRITE_MPEG_REG_BITS( HHI_AUD_CLK_CNTL2, I958_PLL_SRC, 25, 2);
 
 	// Configure Multi-Phase PLL1
-	WRITE_MPEG_REG(HHI_MPLL_CNTL8, audio_clock_config[index][0]);
+	WRITE_MPEG_REG(MPLL_958_CNTL, audio_clock_config[index][0]);
 	// Set the XD value
 #if IEC958_OVERCLOCK	==1
 	WRITE_MPEG_REG_BITS(HHI_AUD_CLK_CNTL2, (audio_clock_config[index][1]+1)/2 -1, 16, 8);
@@ -1265,14 +1268,14 @@ unsigned int audio_hdmi_init_ready()
 unsigned audio_spdifout_pg_enable(unsigned char enable)
 {
 	if(enable){
-			WRITE_MPEG_REG_BITS( HHI_MPLL_CNTL8, 1,14, 1);					
+			WRITE_MPEG_REG_BITS( MPLL_958_CNTL, 1,14, 1);					
 			AUDIO_CLK_GATE_ON(AIU_IEC958);
 			AUDIO_CLK_GATE_ON(AIU_ICE958_AMCLK);
 	}
 	else{
 			AUDIO_CLK_GATE_OFF(AIU_IEC958);
 			AUDIO_CLK_GATE_OFF(AIU_ICE958_AMCLK);	
-			WRITE_MPEG_REG_BITS( HHI_MPLL_CNTL8, 0,14, 1);								
+			WRITE_MPEG_REG_BITS( MPLL_958_CNTL, 0,14, 1);								
 	}
 	return 0;
 }
@@ -1291,11 +1294,13 @@ unsigned audio_aiu_pg_enable(unsigned char enable)
 		AUDIO_CLK_GATE_ON(AIU_AOCLK);   		
 		AUDIO_CLK_GATE_ON(AIU_I2S_OUT);
 		AUDIO_CLK_GATE_ON(AIU_ADC);		
-        AUDIO_CLK_GATE_ON(AUD_IN);
-        AUDIO_CLK_GATE_ON(AIU_IEC958);
-        AUDIO_CLK_GATE_ON(AIU_PCLK);
-        AUDIO_CLK_GATE_ON(AIU_ICE958_AMCLK);
-        AUDIO_CLK_GATE_ON(AIU_TOP_LEVEL);
+		AUDIO_CLK_GATE_ON(AUD_IN);
+		AUDIO_CLK_GATE_ON(AIU_IEC958);
+	#if MESON_CPU_TYPE != MESON_CPU_TYPE_MESON8B  	
+		AUDIO_CLK_GATE_ON(AIU_PCLK);
+	#endif
+		AUDIO_CLK_GATE_ON(AIU_ICE958_AMCLK);
+		AUDIO_CLK_GATE_ON(AIU_TOP_LEVEL);
 	}
 	else{
 		AUDIO_CLK_GATE_OFF(AIU_AMCLK_MEASURE);
@@ -1306,11 +1311,13 @@ unsigned audio_aiu_pg_enable(unsigned char enable)
 		AUDIO_CLK_GATE_OFF(AIU_AOCLK);   		
 		AUDIO_CLK_GATE_OFF(AIU_I2S_OUT);
 		AUDIO_CLK_GATE_OFF(AIU_ADC);			
-        AUDIO_CLK_GATE_OFF(AUD_IN);
-        AUDIO_CLK_GATE_OFF(AIU_IEC958);
-        AUDIO_CLK_GATE_OFF(AIU_PCLK);
-        AUDIO_CLK_GATE_OFF(AIU_ICE958_AMCLK);   
-        AUDIO_CLK_GATE_OFF(AIU_TOP_LEVEL);
+		AUDIO_CLK_GATE_OFF(AUD_IN);
+		AUDIO_CLK_GATE_OFF(AIU_IEC958);
+	#if MESON_CPU_TYPE != MESON_CPU_TYPE_MESON8B  
+		AUDIO_CLK_GATE_OFF(AIU_PCLK);  
+	#endif 
+		AUDIO_CLK_GATE_OFF(AIU_ICE958_AMCLK);   
+		AUDIO_CLK_GATE_OFF(AIU_TOP_LEVEL);
 	}
     return 0;
 }
