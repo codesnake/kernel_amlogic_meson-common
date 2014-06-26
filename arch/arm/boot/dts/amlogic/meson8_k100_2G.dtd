@@ -1136,7 +1136,7 @@ sdio{
 		clock_hz_pol=<207700000 0>;	/** clock_hz(unit in Hz, both support clk and frame_rate, >200 regard as clk, <200 regard as frame_rate), clk_pol(only valid for TTL) */
 		hsync_width_backporch=<5 120>;	/** hsync_width, hsync_backporch(include hsync_width) */
 		vsync_width_backporch=<1 22>;	/** vsync_width, vsync_backporch(include vsync_width) */
-		pol_hsync_vsync=<0 0>;	/** hsync_polarity, vsync_polarity : (0=negative, 1=positive) */
+		pol_hsync_vsync=<1 1>;	/** hsync_polarity, vsync_polarity : (0=negative, 1=positive) */
 	};
 
 //$$ MATCH "lcd_model_config_match" = <&lcd_B080XAN01>
@@ -1908,7 +1908,24 @@ sdio{
 			    110 0xffffffff 0xffffffff 0xffffffff 0xffffffff 0xffffffff 0xffffffff>;
 		cpu_cali_a=<0>;
 		idle_interval=<1000>;
-
+        use_virtual_thermal;
+        freq_sample_period=<30>;
+        report_time=<1 10 30 60>;         /* based on freq_sample_period */
+        cpu_virtual=<
+             500000  40  40  40  40
+             600000  45  55  60  65
+             800000  50  60  65  70
+            1000000  55  65  70  75
+            1200000  60  70  75  80
+            1400000  65  75  80  85
+        >;
+        gpu_virtual=<
+            183      40  40  40  40
+            251      40  45  50  55
+            319      50  60  65  70
+            426      55  65  70  75
+            511      60  70  75  80
+        >;
 	};
 	
 /// ***************************************************************************************

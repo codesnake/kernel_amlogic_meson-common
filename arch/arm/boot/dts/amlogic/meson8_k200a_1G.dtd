@@ -185,6 +185,19 @@ void root_func(){
 //		reserve-iomap = "true";
 		linux,contiguous-region = <&mem_4k2k_decoder>;
         };
+///	-	picture decoder
+//$$ MODULE="picture decoder"
+//$$ DEVICE="picdec"
+//$$ L2 PROP_STR = "status"
+//$$ L3 PROP_U32 2 ="reg"
+    picdec{
+		compatible = "amlogic,picdec";
+		dev_name = "picdec";								
+		status = "okay";
+        share-memory-name = "vdec0";
+        share-memory-offset = <0>;
+        share-memory-size = <0x04000000>; //64M
+	}; 
 
 /// ***************************************************************************************
 ///	-	DISP&MM-PostProcess
@@ -996,7 +1009,24 @@ sdio{
 			    110 0xffffffff 0xffffffff 0xffffffff 0xffffffff 0xffffffff 0xffffffff>;
 		cpu_cali_a=<0>;
 		idle_interval=<1000>;
-
+        use_virtual_thermal;
+        freq_sample_period=<30>;
+        report_time=<1 10 30 60>;         /* based on freq_sample_period */
+        cpu_virtual=<
+             500000  40  40  40  40
+             600000  45  55  60  65
+             800000  50  60  65  70
+            1000000  55  65  70  75
+            1200000  60  70  75  80
+            1400000  65  75  80  85
+        >;
+        gpu_virtual=<
+            183      40  40  40  40
+            251      40  45  50  55
+            319      50  60  65  70
+            426      55  65  70  75
+            511      60  70  75  80
+        >;
 	};
 	
 /// ***************************************************************************************
@@ -1121,6 +1151,7 @@ sdio{
             "LINPUT1","MICBIAS";
 
         mute_gpio = "GPIO_BSD_EN";
+        hp_disable;
         hp_paraments = <800 300 0 5 1>;
         pinctrl-names = "aml_snd_m8";
         pinctrl-0 = <&audio_pins>;
@@ -1195,12 +1226,14 @@ sdio{
 		compatible = "amlogic,unifykey";
 		status = "ok";
 
-		/*efuse-version = <0>;*/ /*m6 efuse version 2,m3 efuse version 1, not config efuse version in default*/
-		unifykey-num = <4>;
+		/*efuse-version = <20>;*/ /*m6 efuse version 2,m3 efuse version 1, not config efuse version in default*/
+		unifykey-num = <6>;
 		unifykey-index-0 = <&keysn_0>;
 		unifykey-index-1 = <&keysn_1>;
 		unifykey-index-2 = <&keysn_2>;
 		unifykey-index-3 = <&keysn_3>;
+		unifykey-index-4 = <&keysn_4>;
+		unifykey-index-5 = <&keysn_5>;
 
 
 //$$ MATCH "Unifykey_0_match" = <&keysn_0>
@@ -1223,7 +1256,7 @@ sdio{
 		keysn_1:key_1{
 			key-name = "mac";
 			key-device = "nandkey";
-			key-dataformat = "hexascii";
+			key-dataformat = "hexdata";
 			key-permit = "read","write","del";
 		};
 		
@@ -1249,6 +1282,30 @@ sdio{
 			key-device = "efusekey";
 			key-dataformat = "hexdata";
 			key-permit = "read","write";
+		};
+		
+//$$ MATCH "Unifykey_4_match" = <&keysn_4>
+//$$ L2 PROP_STR = "key-name"
+//$$ L2 PROP_STR = "key-device"
+//$$ L2 PROP_STR = "key-dataformat"
+//$$ L2 PROP_STR 3 = "key-permit"
+		keysn_4:key_4{
+			key-name = "mac_bt";
+			key-device = "nandkey";
+			key-dataformat = "hexdata";
+			key-permit = "read","write","del";
+		};
+		
+//$$ MATCH "Unifykey_5_match" = <&keysn_5>
+//$$ L2 PROP_STR = "key-name"
+//$$ L2 PROP_STR = "key-device"
+//$$ L2 PROP_STR = "key-dataformat"
+//$$ L2 PROP_STR 3 = "key-permit"
+		keysn_5:key_5{
+			key-name = "mac_wifi";
+			key-device = "nandkey";
+			key-dataformat = "hexdata";
+			key-permit = "read","write","del";
 		};
 	};
 	
