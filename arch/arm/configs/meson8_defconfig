@@ -1209,13 +1209,14 @@ CONFIG_AMAUDIO=y
 # CONFIG_AMAUDIO2 is not set
 
 #
-# Audio dsp process
+# Audio dsp process 
 #
 CONFIG_AML_AUDIO_DSP=y
 
 #
 # Video devices
 #
+CONFIG_AML_VFM=y
 CONFIG_AM_PTSSERVER=y
 CONFIG_VSYNC_RDMA=y
 CONFIG_AM_VIDEO=y
