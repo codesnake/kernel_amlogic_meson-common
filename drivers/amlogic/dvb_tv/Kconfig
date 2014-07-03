@@ -196,6 +196,8 @@ config AM_M6_DEMOD
 		Select to enable M6 demod driver.
 endif
 
+isource "drivers/amlogic/dvb_tv/atbm887x/Kconfig"
+
 config AM_SI2177
 	tristate "SI2177 tuner"
 	default n
