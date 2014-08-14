@@ -1071,9 +1071,7 @@ CONFIG_MMC_AML=y
 #
 # Meson NAND Device Support
 #
-CONFIG_AM_NAND=y
-# CONFIG_AML_NFTL is not set
-CONFIG_AML_NFTL_NEW=m
+# CONFIG_AM_NAND is not set
 CONFIG_AML_NEXT_NAND=y
 
 #
